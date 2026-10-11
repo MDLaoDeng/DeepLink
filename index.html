@@ -1,0 +1,1158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0e0b1a">
+<title>DeepLink</title>
+<link rel="icon" href="favicon.png">
+<meta name="color-scheme" content="dark light">
+<link id="appCss" rel="stylesheet" href="app.css">
+</head>
+<body data-theme="graphite" data-mode="dark">
+
+<div id="splash" class="splash" aria-hidden="true">
+  <div class="splash-mark">
+    <span class="w1">Deep</span>
+    <span class="w2">Link</span>
+    <span class="splash-line"></span>
+  </div>
+  <div class="splash-credit">耄耋老登/DS共同制作</div>
+</div>
+<script>
+/* 启动自愈：偶尔样式表没加载上、或主题变量没注入（症状：白底黑字、没有边框），
+   这里先重刷主题、再重拉样式表，还不行就自动刷新（有次数上限，避免死循环）；
+   不论如何都会把启动页撤掉（用内联样式，不依赖 CSS）。 */
+(function () {
+  try {
+    var KEY = "deeplink.bootTry";
+    var tries = function () { try { return +(sessionStorage.getItem(KEY) || 0); } catch (e) { return 0; } };
+    var setTries = function (n) { try { sessionStorage.setItem(KEY, n); } catch (e) {} };
+    var clearTries = function () { try { sessionStorage.removeItem(KEY); } catch (e) {} };
+    /* 只看「样式表本身有没有加载」：不拿背景色做判据（主题变量还没注入时会误判，导致白重载） */
+    var cssLoaded = function () {
+      try {
+        var sheets = document.styleSheets;
+        for (var i = 0; i < sheets.length; i++) {
+          var s = sheets[i];
+          if (String(s.href || "").indexOf("app.css") < 0) continue;
+          var n = 0;
+          try { n = s.cssRules ? s.cssRules.length : 0; } catch (e) { return true; }
+          return n > 0;
+        }
+        return false;
+      } catch (e) { return true; }
+    };
+    var varsOk = function () {
+      try { return !!(getComputedStyle(document.documentElement).getPropertyValue("--bg") || "").trim(); }
+      catch (e) { return true; }
+    };
+    var styled = cssLoaded;
+    var reload = function () { try { location.reload(); } catch (e) {} };
+    var reTheme = function () {
+      try {
+        if (window.UI && UI.applyTheme) UI.applyTheme(document.body.getAttribute("data-theme") || "graphite", document.body.getAttribute("data-mode") || "dark");
+      } catch (e) {}
+    };
+    var reCss = function (cb) {
+      var old = document.getElementById("appCss");
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      var l = document.createElement("link");
+      l.id = "appCss"; l.rel = "stylesheet"; l.href = "app.css";
+      l.onload = function () { setTimeout(cb, 250); };
+      l.onerror = function () { setTimeout(cb, 250); };
+      document.head.appendChild(l);
+    };
+    var recover = function () {
+      /* 主题变量没注入（主脚本还没跑到/出错了）→ 自己补一下，**不刷新** */
+      if (!varsOk()) reTheme();
+      if (cssLoaded()) { clearTries(); return; }
+      if (tries() >= 3) return;
+      setTries(tries() + 1);
+      var done = false;
+      var finish = function () {
+        if (done) return;
+        done = true;
+        if (cssLoaded()) clearTries(); else reload();
+      };
+      reCss(finish);
+      setTimeout(finish, 5000);
+    };
+    if (document.readyState === "complete") setTimeout(recover, 1200);
+    else window.addEventListener("load", function () { setTimeout(recover, 1500); });
+    /* 主脚本很久没就绪（15 秒，给首次大量数据迁移留余量）才刷新；启动页一律在 3.2 秒撤掉 */
+    setTimeout(function () { if (window.__deeplinkReady) clearTries(); else if (tries() < 2) { setTries(tries() + 1); reload(); } }, 15000);
+    var killSplash = function () {
+      var s = document.getElementById("splash");
+      if (!s) return;
+      s.style.transition = "none";
+      s.style.opacity = "0";
+      s.style.pointerEvents = "none";
+      s.style.display = "none";
+    };
+    /* 撤启动页同样要等「首屏渲染完成」(window.__deeplinkReady)，不能只按固定时间 ——
+       否则渲染没完就把启动页撤了，用户会「还没画完就进应用」。
+       本档是纯 DOM 兜底：app.js 正常时它不抢（见下面 .hide 判断），
+       app.js 挂了才由它强撤。动画自跑到 2.4s，最早 3.2s 起判；9s 兜底强撤。 */
+    var bootT0 = Date.now();
+    var tryKill = function (force) {
+      var s = document.getElementById("splash");
+      if (!s) return;
+      /* app.js 已在收尾（加了 .hide、正走 0.6s 淡出）→ 交给它，别抢那一下淡出 */
+      if (s.className.indexOf("hide") >= 0) return;
+      var elapsed = Date.now() - bootT0;
+      if (force || (window.__deeplinkReady && elapsed >= 3200)) { killSplash(); return; }
+      setTimeout(function () { tryKill(false); }, 150);
+    };
+    setTimeout(function () { tryKill(false); }, 3200);
+    setTimeout(function () { tryKill(true); }, 9000);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) setTimeout(function () { tryKill(false); }, 150); });
+    window.addEventListener("pageshow", function () { setTimeout(function () { tryKill(false); }, 150); });
+  } catch (e) { /* 自愈脚本自身出错也不能影响页面 */ }
+})();
+</script>
+
+<div id="app">
+  <aside id="sidebar" aria-hidden="true">
+    <div class="side-head">
+      <span class="brand">DeepLink</span>
+      <div class="side-actions">
+        <button id="newChatBtn" class="btn primary block" type="button"><span data-icon="plus"></span>新对话</button>
+        <button id="openSearchBtn" class="btn ghost icon-only" type="button" aria-label="搜索历史" title="搜索历史"><span data-icon="magnify"></span></button>
+      </div>
+    </div>
+    <div id="charBar" class="char-bar" hidden></div>
+    <div id="sessionList" class="session-list"></div>
+    <div class="side-foot">
+      <button id="openThemesBtn" class="btn ghost" type="button"><span data-icon="palette-outline"></span>主题</button>
+      <button id="openSettingsBtn" class="btn ghost" type="button"><span data-icon="cog-outline"></span>设置</button>
+    </div>
+  </aside>
+  <div id="scrim" class="scrim"></div>
+
+  <main id="main">
+    <header class="topbar">
+      <button id="menuBtn" class="icon-btn" type="button" aria-label="菜单"><span data-icon="menu"></span></button>
+      <div class="topbar-title" id="chatTitle">新对话</div>
+      <button class="pill model-pill" id="modelSwitchBtn" type="button" aria-label="切换主模型" title="切换主模型"><span id="modelBadge">deepseek-flash</span><span class="pill-caret" data-icon="chevron-down"></span></button>
+      <button id="sessionBtn" class="icon-btn" type="button" aria-label="对话设置"><span data-icon="message-text-outline"></span></button>
+      <button id="characterBtn" class="icon-btn" type="button" aria-label="角色扮演"><span data-icon="account-group"></span></button>
+      <button id="modeBtn" class="icon-btn" type="button" aria-label="切换日间/夜间"><span data-icon="white-balance-sunny"></span></button>
+    </header>
+
+    <section id="messages" class="messages"></section>
+
+    <div id="dropHint" class="drop-hint">松手即可添加文件</div>
+
+    <div id="selectBar" class="select-bar" hidden>
+      <span id="selectCount" class="select-count">已选 1 条</span>
+      <div class="select-actions">
+        <button id="selectCopy" class="icon-btn" type="button" aria-label="复制" title="复制"><span data-icon="content-copy"></span></button>
+        <button id="selectDelete" class="icon-btn danger" type="button" aria-label="删除" title="删除"><span data-icon="delete-outline"></span></button>
+        <button id="selectCancel" class="icon-btn" type="button" aria-label="取消" title="取消"><span data-icon="close"></span></button>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div id="attachmentBar" class="attachment-bar"></div>
+      <div class="composer-row">
+        <button id="attachBtn" class="icon-btn" type="button" aria-label="上传文件"><span data-icon="paperclip"></span></button>
+        <button id="cameraBtn" class="icon-btn" type="button" aria-label="拍照"><span data-icon="camera-outline"></span></button>
+        <button id="micBtn" class="icon-btn mic-btn" type="button" hidden aria-label="语音输入"><span data-icon="microphone"></span></button>
+        <input id="fileInput" type="file" multiple hidden>
+        <input id="audioInput" type="file" accept="audio/*" hidden>
+        <input id="avatarInput" type="file" accept="image/*" hidden>
+        <textarea id="input" rows="1" placeholder="给 DeepLink 发送消息…"></textarea>
+        <button id="stopBtn" class="icon-btn danger" type="button" hidden aria-label="停止"><span data-icon="stop"></span></button>
+        <button id="sendBtn" class="icon-btn send" type="button" aria-label="发送"><span data-icon="arrow-up"></span></button>
+      </div>
+      <div class="composer-tools">
+        <label class="chip"><input type="checkbox" id="searchToggle"><span data-icon="web"></span><span>联网搜索</span></label>
+        <label class="chip"><input type="checkbox" id="thinkToggle" checked><span data-icon="lightbulb-on-outline"></span><span>深度思考</span></label>
+        <label class="chip select-chip" id="effortWrap">
+          <select id="effortSelect">
+            <option value="low">思考·低</option>
+            <option value="high" selected>思考·高</option>
+            <option value="max">思考·拉满</option>
+          </select>
+        </label>
+        <label class="chip" id="imgChip" hidden><input type="checkbox" id="imgToggle"><span data-icon="image-outline"></span><span>画图</span></label>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="modelPanel" class="model-panel" hidden>
+  <div class="mp-title">切换主模型</div>
+  <div id="modelPanelList" class="mp-list"></div>
+</div>
+
+<div id="settingsModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>设置</h2>
+      <button class="icon-btn" data-close="settingsModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-section">
+        <h3 class="sec-head">主模型<button class="btn ghost mini" type="button" data-reset="main">重置本区</button></h3>
+        <p class="hint" id="providerNowLine">当前主模型：—</p>
+        <div id="msetMain" class="mset-list" data-mkind="main"></div>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button class="btn" data-add="main" type="button"><span data-icon="plus"></span>添加配置</button>
+        </div>
+        <p class="hint">最多 6 套配置，每套填一个平台的接口地址与密钥（DeepSeek 之外也可以，见「使用指南」）。<b>模型</b>一栏每行写一个模型名；聊天页右上角点模型名，就能在这些配置的模型之间切换主模型。</p>
+        <label class="check-field"><input type="checkbox" id="setMainCompat"><span>模型兼容（主模型自己就是多模态）</span></label>
+        <p class="hint"><b>不开（默认）</b>：主模型只当纯文字模型用，图片一律先由「视觉模型」转成文字描述再喂给它；听觉 / 朗读 / 画图也各走各的模型。<b>开启</b>：主模型能看图，图片直接交给它，视觉区那套配置不再参与（看图一律走主模型）。无论主模型是不是多模态，不开这个开关行为都一样——所以只有你确定主模型看得懂图时才勾。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>头像</h3>
+        <div class="field">
+          <span>我的头像（全局默认）</span>
+          <div class="avatar-field">
+            <div class="avatar-preview" id="setAvatarUserPreview"></div>
+            <div class="avatar-btns">
+              <button class="btn" id="setAvatarUserPick" type="button">选择图片</button>
+              <button class="btn ghost" id="setAvatarUserClear" type="button">清除</button>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <span>AI 头像（全局默认）</span>
+          <div class="avatar-field">
+            <div class="avatar-preview" id="setAvatarAiPreview"></div>
+            <div class="avatar-btns">
+              <button class="btn" id="setAvatarAiPick" type="button">选择图片</button>
+              <button class="btn ghost" id="setAvatarAiClear" type="button">清除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">生成参数<button class="btn ghost mini" type="button" data-reset="gen">重置本区</button></h3>
+        <label class="range-field">
+          <span>Temperature <b id="setTempVal">1.00</b></span>
+          <input type="range" id="setTemperature" min="0" max="2" step="0.05" value="1">
+        </label>
+        <label class="range-field">
+          <span>Top-p <b id="setTopPVal">1.00</b></span>
+          <input type="range" id="setTopP" min="0.05" max="1" step="0.01" value="1">
+        </label>
+        <p class="hint">数值越低回答越稳、越高越发散。DeepSeek 官方说明：Temperature 在思考模式下不生效；Top-p 反之只在思考模式下生效（下限 0.95）。</p>
+      </div>
+      <label class="field">
+        <span>系统提示词</span>
+        <textarea id="setSystemPrompt" rows="5"></textarea>
+      </label>
+      <div class="field">
+        <span>联网搜索数据源</span>
+        <select id="setSearchProvider">
+          <option value="auto">自动（免 Key 优先）</option>
+          <option value="tavily">Tavily（需 Key）</option>
+          <option value="custom">自定义接口</option>
+          <option value="off">关闭</option>
+        </select>
+      </div>
+      <label class="field" id="tavilyField">
+        <span>Tavily API Key</span>
+        <input id="setTavilyKey" type="password" placeholder="tvly-..." autocomplete="off">
+      </label>
+      <div class="field" id="customSearchField">
+        <span>自定义搜索接口</span>
+        <input id="setCustomUrl" type="url" placeholder="https://example.com/search?q={query}">
+        <input id="setCustomKey" type="password" placeholder="Authorization Key（可选）" autocomplete="off">
+        <small>用 {query} 占位关键词；接口需返回 JSON 或支持 CORS。</small>
+      </div>
+      <div class="field">
+        <span>免 Key 搜索实例（每行一个，自动依次尝试）</span>
+        <textarea id="setInstances" rows="4"></textarea>
+      </div>
+      <div class="row-actions" style="justify-content:flex-start">
+        <button class="btn ghost mini" type="button" data-reset="prompt">重置提示词与搜索</button>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">听觉模型 · 语音转文字<button class="btn ghost mini" type="button" data-reset="asr">重置本区</button></h3>
+        <label class="check-field"><input type="checkbox" id="setAsrEnabled"><span>启用语音输入</span></label>
+        <div id="msetAsr" class="mset-list" data-mkind="asr"></div>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button class="btn ghost mini" data-add="asr" type="button"><span data-icon="plus"></span>添加配置</button>
+        </div>
+        <label class="field"><span>语言提示（可选）</span><input id="setAsrLang" type="text" placeholder="zh"></label>
+        <p class="hint">接口地址 / API Key 留空则沿用主模型那套配置；模型名留空则直接嫁接到主模型（仅当主模型自己就具备转写能力时才这么用）。本区最多 6 套配置。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">语音合成 · 朗读<button class="btn ghost mini" type="button" data-reset="tts">重置本区</button></h3>
+        <label class="check-field"><input type="checkbox" id="setTtsEnabled"><span>启用朗读按钮</span></label>
+        <div id="msetTts" class="mset-list" data-mkind="tts"></div>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button class="btn ghost mini" data-add="tts" type="button"><span data-icon="plus"></span>添加配置</button>
+        </div>
+        <label class="field"><span>音色</span><input id="setTtsVoice" type="text" placeholder="FunAudioLLM/CosyVoice2-0.5B:alex"></label>
+        <label class="check-field"><input type="checkbox" id="setTtsAuto"><span>回答完自动朗读</span></label>
+        <p class="hint">接口地址 / API Key 留空则沿用主模型那套配置；模型名留空则直接嫁接到主模型（仅当主模型自己就具备合成能力时才这么用）。本区最多 6 套配置。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">文生图<button class="btn ghost mini" type="button" data-reset="img">重置本区</button></h3>
+        <label class="check-field"><input type="checkbox" id="setImgEnabled"><span>启用画图开关</span></label>
+        <div id="msetImg" class="mset-list" data-mkind="img"></div>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button class="btn ghost mini" data-add="img" type="button"><span data-icon="plus"></span>添加配置</button>
+        </div>
+        <label class="field"><span>尺寸</span><input id="setImgSize" type="text" placeholder="1024x1024"></label>
+        <p class="hint">接口地址 / API Key 留空则沿用主模型那套配置；模型名留空则直接嫁接到主模型（仅当主模型自己就具备画图能力时才这么用）。本区最多 6 套配置。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">视觉模型 · 看图<button class="btn ghost mini" type="button" data-reset="vision">重置本区</button></h3>
+        <p class="hint">给图片写描述（图片转文字）用的模型。<b>只有主模型区那个「模型兼容」开关没勾时才用得上这里</b>——那时图片不直接发给主模型，而是先在这里转成文字描述。<br><b>主模型本身就能看图？</b>去上面主模型区把「模型兼容」勾上，本区整段留空即可。</p>
+        <label class="check-field"><input type="checkbox" id="setVisionEnabled"><span>启用独立视觉模型</span></label>
+        <div id="msetVision" class="mset-list" data-mkind="vision"></div>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button class="btn ghost mini" data-add="vision" type="button"><span data-icon="plus"></span>添加配置</button>
+        </div>
+        <p class="hint">主模型不是多模态（看不了图）时，在这一区填一个能看图的模型，比如硅基流动的 Qwen/Qwen2.5-VL-72B-Instruct，或阿里百炼的 qwen-vl-max。本区最多 6 套配置。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">图片<button class="btn ghost mini" type="button" data-reset="imgstore">重置本区</button></h3>
+        <p class="hint">自己发的图、AI 画的图都会自动生成一段文字描述；原图只保留若干轮（默认 10），到期后删掉原图、只留描述——省空间也省 token。不想要就把下面关掉。</p>
+        <label class="check-field"><input type="checkbox" id="setImgToText"><span>图片转文字存储（关闭则原图不删）</span></label>
+        <label class="field"><span>原图保留轮数</span><input id="setImgExpireTurns" type="text" inputmode="numeric" placeholder="10"></label>
+        <label class="check-field"><input type="checkbox" id="setNoImage"><span>无图模式（聊天、附件里的图片都不显示；头像照常）</span></label>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">角色扮演 · 记忆压缩<button class="btn ghost mini" type="button" data-reset="memory">重置本区</button></h3>
+        <label class="check-field"><input type="checkbox" id="setRoleplayEnabled"><span>启用角色扮演模式（侧栏出现角色切换）</span></label>
+        <p class="hint">全局「我的设定」：角色里留空时用这里的值。</p>
+        <label class="field"><span>我的名称</span><input id="setMyName" type="text"></label>
+        <label class="field"><span>我的性格</span><textarea id="setMyPersona" rows="2"></textarea></label>
+        <label class="field"><span>我的外貌</span><textarea id="setMyAppearance" rows="2"></textarea></label>
+        <label class="field"><span>我的背景</span><textarea id="setMyBackground" rows="2"></textarea></label>
+        <label class="field"><span>我的喜好</span><textarea id="setMyLikes" rows="2"></textarea></label>
+        <label class="check-field"><input type="checkbox" id="setAssistantCompress"><span>普通对话也自动压缩（默认只压缩角色扮演）</span></label>
+        <label class="field"><span>压缩用的模型（留空则用主模型）</span><input id="setCompressModel" type="text" placeholder="deepseek-flash"></label>
+        <label class="field"><span>上下文预警阈值（tokens）</span><input id="setTokenWarn" type="text" placeholder="30000"></label>
+        <label class="check-field"><input type="checkbox" id="setNotifyTasks"><span>任务完成提示（记忆压缩 / 认知更新 / 自动筛选）</span></label>
+        <div class="row-actions"><button id="openUsageBtn" class="btn" type="button"><span data-icon="chart-box-outline"></span>用量统计</button></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>角色记忆总览</h3>
+        <p class="hint">每个角色「主线 + 各条支线」的记忆都在这里，点标题展开，不用一个个角色切过去看。</p>
+        <div id="setMemoryList" class="memory-list"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>后台与通知</h3>
+        <label class="check-field"><input type="checkbox" id="setBgKeep"><span>后台常驻（生成中切到后台也不被系统掐断；生成完成时发一条状态栏通知）</span></label>
+        <p class="hint">开启后会申请「电池不优化」与通知权限；这两项要由系统授予，拒绝也不影响 App 其它功能。通知只在 App 处于后台、且生成结束时才发，点通知可回到那条对话。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>应用加密</h3>
+        <label class="check-field"><input type="checkbox" id="setLockEnabled"><span>开启应用加密（每次打开 App 先输口令）</span></label>
+        <p class="hint" id="setLockNote">说清楚：它是一道「口令门」，不是加密。挡的是「捡到手机随手翻」——聊天记录本身仍是明文存在本机（真正加密的只有角色记忆那一层）。忘记口令时可以让 AI 现场出题考你，也可以事先抄下一串一次性恢复码。</p>
+        <div class="row-actions">
+          <button id="setLockChange" class="btn ghost mini" type="button">改口令</button>
+          <button id="setLockCode" class="btn ghost mini" type="button">重设恢复码</button>
+        </div>
+        <div id="setLockState" class="hint"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>数据</h3>
+        <div class="row-actions"><button id="openDataBtn" class="btn" type="button"><span data-icon="content-copy"></span>导入 / 导出</button></div>
+        <div class="row-actions" style="justify-content:flex-start"><button id="clearCacheBtn" class="btn ghost mini" type="button">清理页面缓存</button></div>
+        <div id="dataUsageLine" class="hint"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>关于</h3>
+        <div class="row-actions"><button id="openAboutBtn" class="btn" type="button"><span data-icon="information-outline"></span>关于该应用</button></div>
+      </div>
+
+      <div class="row-actions">
+        <button id="resetSettingsBtn" class="btn ghost" type="button">恢复默认设置</button>
+        <button id="selfTestBtn" class="btn" type="button">连接自检</button>
+        <button id="saveSettingsBtn" class="btn primary" type="button">保存</button>
+      </div>
+      <div id="selfTestOut" class="selftest-out" hidden></div>
+    </div>
+  </div>
+</div>
+
+<div id="sessionModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>对话设置</h2>
+      <button class="icon-btn" data-close="sessionModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <p class="hint">只作用于当前这段对话，不影响其它对话；也不影响「设置」里的全局提示词。</p>
+      <label class="field">
+        <span>对话名称</span>
+        <input id="setSessionTitle" type="text" placeholder="留空则自动命名">
+      </label>
+      <label class="field">
+        <span>当前对话称呼</span>
+        <input id="setSessionAlias" type="text" placeholder="留空则显示「DeepLink」">
+      </label>
+      <label class="field">
+        <span>本对话的系统提示词</span>
+        <textarea id="setSessionPrompt" rows="6" placeholder="留空则使用「设置」里的全局提示词"></textarea>
+      </label>
+      <div id="sessionRoleWrap" class="settings-section">
+        <h3>角色扮演 · 本对话 <span id="sessionLineBadge" class="pill">主线</span></h3>
+        <label class="field"><span>当前关系（本对话专属，随记忆自动更新）</span><textarea id="setSessionRelation" rows="2" placeholder="此刻两人的关系状态…"></textarea></label>
+        <label class="field"><span>共同经历（本对话专属，随记忆自动更新）</span><textarea id="setSessionShared" rows="4" placeholder="两人共同经历的关键事件与约定…"></textarea></label>
+        <label class="field"><span>当前场景（本对话专属，随对话自动更新）</span><textarea id="setSessionScene" rows="3" placeholder="此刻在哪、发生什么、什么氛围…"></textarea></label>
+        <label class="field"><span>场景自动更新间隔（轮，默认 10）</span><input id="setSessionSceneEvery" type="number" min="1" step="1" inputmode="numeric"></label>
+        <label class="field"><span>对我的认知（本对话专属，可手改）</span><textarea id="setSessionCognition" rows="5"></textarea></label>
+        <div class="mem-title">记忆（本对话，只读）</div>
+        <div id="sessionMemoryBox" class="memory-box"></div>
+        <div class="mem-title">记忆纠偏</div>
+        <label class="field"><span>写下要纠正 / 补充的内容，AI 会改到记忆里</span><textarea id="sessionCorrectInput" rows="3" placeholder="例：小满不是我大学同学，是高中同学；阿哲其实 27 岁，不是 25。"></textarea></label>
+        <div class="char-actions">
+          <button id="sessionCorrectRun" class="btn ghost" type="button">AI 纠偏</button>
+        </div>
+        <p class="hint">出于对智能体的尊重，我们无法让您直接修改角色记忆，但您可以使用纠偏来进行一定量的纠正。请牢记记忆的珍贵，不要滥用该功能。</p>
+        <p class="hint">角色消息和你的消息都能「重新说」存多个版本；记忆压缩与认知更新一律以<b>当前选定的版本</b>为准。</p>
+        <div class="char-actions">
+          <button id="sessionReCompress" class="btn ghost" type="button">再压缩</button>
+          <button id="sessionCognitionUpdate" class="btn ghost" type="button">更新认知</button>
+          <button id="sessionRelationUpdate" class="btn ghost" type="button">更新关系与经历</button>
+          <button id="sessionSetMain" class="btn ghost" type="button">设为主线</button>
+        </div>
+        <label class="check-field"><input type="checkbox" id="setSessionAutoBackup"><span>自动备份本对话（存 App 内快照，去掉图片数据，保留最近 2 份）</span></label>
+        <div class="char-actions">
+          <button id="sessionBackupNow" class="btn ghost" type="button">立即备份</button>
+          <button id="sessionRestoreBackup" class="btn ghost" type="button">从备份恢复</button>
+        </div>
+        <div id="sessionBackupLine" class="hint"></div>
+      </div>
+      <div class="settings-section">
+        <h3>头像</h3>
+        <p class="hint">留空则跟随「设置」里的全局头像。</p>
+        <div class="field">
+          <span>我的头像</span>
+          <div class="avatar-field">
+            <div class="avatar-preview" id="setSessionAvatarUserPreview"></div>
+            <div class="avatar-btns">
+              <button class="btn" id="setSessionAvatarUserPick" type="button">选择图片</button>
+              <button class="btn ghost" id="setSessionAvatarUserClear" type="button">清除（用全局）</button>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <span>AI 头像</span>
+          <div class="avatar-field">
+            <div class="avatar-preview" id="setSessionAvatarAiPreview"></div>
+            <div class="avatar-btns">
+              <button class="btn" id="setSessionAvatarAiPick" type="button">选择图片</button>
+              <button class="btn ghost" id="setSessionAvatarAiClear" type="button">清除（用全局）</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>生成参数</h3>
+        <label class="check-field"><input type="checkbox" id="setSessionFollow" checked><span>跟随全局生成参数</span></label>
+        <label class="range-field">
+          <span>Temperature <b id="setSessionTempVal">1.00</b></span>
+          <input type="range" id="setSessionTemperature" min="0" max="2" step="0.05" value="1">
+        </label>
+        <label class="range-field">
+          <span>Top-p <b id="setSessionTopPVal">1.00</b></span>
+          <input type="range" id="setSessionTopP" min="0.05" max="1" step="0.01" value="1">
+        </label>
+        <p class="hint">勾选后跟随「设置」里的全局数值；取消勾选可单独调整本对话。DeepSeek 官方说明：Temperature 在思考模式下不生效；Top-p 反之只在思考模式下生效（下限 0.95）。</p>
+      </div>
+      <div class="settings-section">
+        <h3>桌面快捷方式</h3>
+        <p class="hint">给这条对话在桌面上建一个图标，点一下就直接进这条对话。</p>
+        <div class="char-actions">
+          <button id="sessionMakeShortcut" class="btn" type="button"><span data-icon="plus"></span>创建桌面快捷方式</button>
+          <button id="sessionRemoveShortcut" class="btn ghost" type="button">移除</button>
+        </div>
+      </div>
+      <div class="row-actions">
+        <button id="sessionPromptReset" class="btn ghost" type="button">清空（用全局）</button>
+        <button id="sessionPromptSave" class="btn primary" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="characterModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>角色扮演</h2>
+      <button class="icon-btn" data-close="characterModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <div id="charList" class="char-list"></div>
+      <div class="row-actions" style="justify-content:flex-start"><button id="charNewBtn" class="btn" type="button"><span data-icon="plus"></span>新建角色</button></div>
+      <div id="charEmpty" class="hint">选择一个角色后填写「当前设定」；「助手」没有角色卡，不参与角色扮演。</div>
+      <div id="charTools">
+        <label class="field"><span>角色名（用于列表显示）</span><input id="charName" type="text" placeholder="如：小满"></label>
+        <div class="char-split">
+          <div class="char-split-head">
+            <button id="charSplitBtn" class="btn ghost" type="button">AI 自动拆分</button>
+            <button id="charSplitHelp" class="icon-btn tiny" type="button" aria-label="说明"><span class="qmark">?</span></button>
+          </div>
+          <p id="charSplitHint" class="hint char-split-hint" hidden>懒得拆分？AI 一键细分！</p>
+          <div id="charSplitPanel" class="char-split-panel" hidden>
+            <label class="field"><span>把你想到的都写进来（想到什么写什么，不用管格式）</span><textarea id="charSplitInput" rows="5" placeholder="例：我是阿哲，25 岁，在上海做设计，性格闷骚、嘴硬心软；她叫小满，是我大学同学，说话软软的带点方言，喜欢喝凉茶……"></textarea></label>
+            <div class="char-actions">
+              <button id="charSplitCancel" class="btn ghost" type="button">收起</button>
+              <button id="charSplitRun" class="btn primary" type="button">AI 拆分</button>
+            </div>
+            <div id="charSplitState" class="hint"></div>
+          </div>
+        </div>
+        <div id="charForm"></div>
+        <p class="hint">「当前场景 / 对我的认知 / 记忆压缩 / 自动备份」都在每条对话的「对话设置」里（同一个角色可有主线 + 支线，各自分开）。</p>
+        <div class="settings-section">
+          <h3 class="sec-head">上下文筛选（只裁角色读到的，不改聊天记录）<button class="btn ghost mini" type="button" data-reset="charfilter">重置</button></h3>
+          <p class="hint">用自然语言写“不要喂给角色的内容”，如旁白 / 动作 / 衣着等能从上一段续写的细节。</p>
+          <label class="field"><span>筛选规则</span><textarea id="charFilterRule" rows="3" placeholder="例：只保留对白，去掉旁白、动作、衣着、环境描写"></textarea></label>
+          <label class="field"><span>每多少轮自动洗一次</span><input id="charFilterEvery" type="text" inputmode="numeric" placeholder="10"></label>
+          <div class="char-actions">
+            <button id="charFilterAI" class="btn ghost" type="button">AI 筛选</button>
+            <button id="charFilterNow" class="btn ghost" type="button">按规则洗一次</button>
+          </div>
+          <div id="charFilterState" class="hint"></div>
+        </div>
+        <div class="settings-section">
+          <h3>记忆（该角色所有对话）</h3>
+          <p class="hint">主线 + 各条支线各自分开记，这里一次性看全；点标题展开。要改请到对应对话的「对话设置」。</p>
+          <div id="charMemoryBox" class="memory-box"></div>
+        </div>
+        <div class="settings-section">
+          <h3>桌面快捷方式</h3>
+          <p class="hint">给这个角色的「主线对话」在桌面上建一个图标。</p>
+          <div class="char-actions">
+            <button id="charMakeShortcut" class="btn" type="button"><span data-icon="plus"></span>创建桌面快捷方式</button>
+            <button id="charRemoveShortcut" class="btn ghost" type="button">移除</button>
+          </div>
+        </div>
+        <div class="char-actions">
+          <button id="charSave" class="btn primary" type="button">保存设定</button>
+        </div>
+        <div id="charUsageLine" class="hint"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="usageModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>用量统计</h2>
+      <button class="icon-btn" data-close="usageModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <div id="usageGlobal" class="usage-list"></div>
+      <div class="settings-section"><h3>按会话</h3><div id="usageSessions" class="usage-list"></div></div>
+      <div class="settings-section"><h3>按角色</h3><div id="usageChars" class="usage-list"></div></div>
+      <p class="hint">缓存命中率 = 命中 tokens ÷ 输入 tokens（DeepSeek 自动上下文缓存）。</p>
+    </div>
+  </div>
+</div>
+
+<div id="aboutModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>关于</h2>
+      <button class="icon-btn" data-close="aboutModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <div class="about-hero">
+        <img class="about-hero-img" src="about.png" alt="DeepLink">
+        <div class="about-name">DeepLink</div>
+      </div>
+      <div class="about-menu">
+        <div class="about-row"><span>当前版本</span><b id="aboutVersion">v—</b></div>
+        <!-- 开源版：已移除作者联系方式与捐赠入口，APK 发行版中保留 -->
+
+        <details class="about-item">
+          <summary><span>创作初衷</span><span class="about-caret" data-icon="chevron-right"></span></summary>
+          <div class="about-body">对话不应总是冷冰冰，我想有一个有温度、符合自己喜欢的性格的 AI，同时也想花更少的钱狠狠地角色扮演。</div>
+        </details>
+        <details class="about-item">
+          <summary><span>使用指南</span><span class="about-caret" data-icon="chevron-right"></span></summary>
+          <div class="about-body guide">
+            <div class="guide-sec">
+              <h4>功能全景</h4>
+              <pre id="guideTree" class="feat-tree"></pre>
+            </div>
+            <div class="guide-sec">
+              <h4>一、先配好钥匙（DeepSeek API Key）</h4>
+              <ol>
+                <li>在浏览器打开 DeepSeek 开放平台：<a class="ext-link" href="https://platform.deepseek.com">platform.deepseek.com</a>（点它直接跳浏览器）。</li>
+                <li>注册/登录 → 左侧「API keys」→ 新建一个，复制那串 <code>sk-</code> 开头的密钥。</li>
+                <li>回到 App：右下角「设置」→「<b>主模型</b>」里那套「配置一」→ 把密钥填进「API Key」→ 往下滚点「保存设置」。</li>
+                <li>同一区那个「<b>模型兼容</b>」开关<b>默认别勾</b>——它表示「主模型自己就能看图」，DeepSeek 看不了，勾了发图反而报错。等你哪天换成能看图的主模型再说（见第十四节）。</li>
+                <li>想确认通不通：设置里点「连接自检」，出现「DeepSeek 直连：成功」就 OK。</li>
+                <li>余额要够：开放平台里充值 / 查余额；余额为 0 会请求失败。</li>
+              </ol>
+            </div>
+            <div class="guide-sec">
+              <h4>换别家平台？可以，但要知道三件事</h4>
+              <p>DeepSeek 不是唯一选择。只要对方「兼容 OpenAI 接口」，都能填进来用。<b>但请先知道</b>：</p>
+              <ul>
+                <li><b>多数比 DeepSeek 贵一些</b>。DeepSeek 的优势就是便宜；换别家通常是为了它的某款特殊模型（比如能看图的、能画图的），聊天本身没必要换。</li>
+                <li><b>地址要自己去搜</b>。App 里不内置别家的地址清单（每家会变），请到该平台的<b>官方文档</b>里找「兼容 OpenAI」的接口地址——通常是 <code>https://xxx/v1</code> 这种带版本号的样子。</li>
+                <li><b>模型名也要照文档抄</b>，大小写、斜杠、连字符一个都不能错。</li>
+              </ul>
+              <p><b>怎么填多套？</b>「设置 → 主模型」那块点「<b>添加配置</b>」，就能建第二、第三套，最多 <b>6 套</b>；每套都能单独起名（默认叫配置一、配置二…）。每套 = 一个平台的接口地址 + API Key + 它的模型名（<b>模型一栏每行写一个</b>，可以写好几个）。</p>
+              <p><b>什么时候才需要点「保存设置」？</b>记住这条就不会白填：<b>改卡片里的内容</b>（名字、地址、Key、模型名）要滚到底点「保存设置」才生效；而<b>「添加配置 / 删除 / 用这套」是点了就立刻生效并落盘</b>的，不用再点保存。（顺带一提：点这三个按钮时，你其它区卡片里没保存的改动也会一起被存下来——所以别把不想留的实验内容留在输入框里。）</p>
+              <p><b>聊天页右上角的模型按钮</b>（对话设置按钮左边）：点它会展开<b>所有配置里的全部模型</b>，分好组、点一下就切过去——<b>接口地址和 API Key 会跟着一起换</b>，不用回设置里手动改。这个按钮只切「主模型」，听觉/朗读/画图/视觉那是另一回事（见第十四节）。</p>
+            </div>
+            <div class="guide-sec">
+              <h4>二、开始聊天</h4>
+              <ul>
+                <li>底部输入框打字，点右边 ↑ 发送；电脑上回车也能发，Shift+回车换行。</li>
+                <li>想让它先想清楚：保持「深度思考」开着，右侧可选「思考·低 / 高 / 拉满」。</li>
+                <li><b>思考用哪种语言？</b>跟着你走：你这条消息以中文为主，它就被要求<b>全程用中文思考</b>；英文为主时才放开。</li>
+                <li>回答完不会再把你强行拽到底部：你翻上去看旧消息，它就停在那儿；你本来就贴着底部，它才继续跟。</li>
+                <li>要最新消息：开「联网搜索」，它会先查再答（可在设置里换搜索源）。</li>
+                <li>生成中点「停止」可随时中断。</li>
+              </ul>
+            </div>
+            <div class="guide-sec">
+              <h4>三、发文件 / 图片 / 拍照 / 语音</h4>
+              <ul>
+                <li><b>回形针</b>：上传文件或图片。文件（txt / md / 代码等）直接读成文字附在消息里；<b>图片走的是「先转文字再喂给模型」</b>——默认由「视觉模型」把图写成一段描述，再把描述发给主模型（因为绝大多数文字模型看不了图）。<b>只有</b>你确认主模型本身能看图、并在设置里勾了「<b>模型兼容</b>」时，原图才会直接发给主模型。见第十四节。</li>
+                <li><b>相机</b>：拍照或选图，拍完可裁剪、旋转、画笔、箭头、加文字，再选“附带在消息上”或“直接发送”。</li>
+                <li><b>麦克风</b>：语音输入（需在设置里配好「听觉模型」，硅基流动的 <code>FunAudioLLM/SenseVoiceSmall</code> 免费）。</li>
+                <li>打开<b>「画图」</b>开关后，可让 AI 生成图片（需配好「文生图」模型）。</li>
+              </ul>
+            </div>
+            <div class="guide-sec">
+              <h4>四、会话与历史</h4>
+              <ul>
+                <li>左上角菜单：侧栏里新建对话、切换、删除。</li>
+                <li>顶栏「对话设置」：改对话名、称呼、本对话专属提示词、头像、生成参数。</li>
+                <li>侧栏「搜索」：按时间 / 内容 / 时间+内容 跨所有会话搜，点结果跳到那条。</li>
+                <li>长按一条对话可以<b>置顶 / 取消置顶 / 上移 / 下移</b>；角色列表里长按角色也一样——置顶的排最上面。</li>
+              </ul>
+            </div>
+            <div class="guide-sec">
+              <h4>五、消息操作</h4>
+              <ul>
+                <li>每条 AI 消息下方有一排图标：修改、朗读、搜索、复制、重新说、删除。</li>
+                <li>「重新说」会新增一个回答版本，用 <b>‹ 1/2 ›</b> 切换；改提问也会联动。</li>
+                <li>长按 AI 消息进多选；长按我的消息弹菜单。</li>
+                <li>对话很长时，只先渲染<b>最近 20 条</b>；往上滑到顶（或点顶部「↑ 还有 N 条更早的消息」）会自动加载更早的——这样进会话不会一次建上千个节点而卡顿。</li>
+              </ul>
+            </div>
+            <div class="guide-sec">
+              <h4>六、主题、外观、头像</h4>
+              <ul>
+                <li>顶栏太阳/月亮图标：一键切日间/夜间。</li>
+                <li>侧栏「主题」：10 种色系任选。</li>
+                <li>设置里能传「我的头像」「AI 头像」，每个会话还能单独设。</li>
+                <li>想跟随手机系统的深/浅色：主题弹窗里选「<b>跟随系统</b>」；顶栏那个按钮只是快速切日/夜。</li>
+              </ul>
+            </div>
+            <div class="guide-sec">
+              <h4>七、角色扮演（重点）</h4>
+              <ol>
+                <li>开法：设置 → 打开「启用角色扮演模式」；侧栏顶部会出现角色切换条。</li>
+                <li>新建角色：点侧栏「+新角色」，或顶栏人形图标 →「新建角色」。</li>
+                <li>懒得逐项填？用「<b>AI 自动拆分</b>」（旁边 ? 有说明）：把想到的<b>一股脑写进</b>输入框，点「AI 拆分」——它按字段拆开；没提到的会依据现有文本推断补全，填好后还能改，最后点「保存设定」。</li>
+                <li>「当前设定」共 17 项：我的名称、你对我的称呼、你的名称、当前年龄、我的性格/外貌/背景/喜好、你的性格/外貌/背景/喜好、你的说话风格、世界观、共同经历（初始）、当前关系（初始）、AI 指令。填得越细，越像。</li>
+                <li>“我的名称/性格/外貌/背景/喜好”留空会自动沿用「设置」里的全局「我的设定」。</li>
+                <li>每个角色一套对话：第一条是<b>主线</b>，之后新建的算<b>支线</b>；在「对话设置」里可以把任意一条设为<b>主线</b>。</li>
+                <li><b>当前关系 / 共同经历 / 当前场景 / 对我的认知 / 记忆压缩</b>都是<b>按对话分开记</b>：主线与每条支线各一套，互不影响；都在那条对话的「对话设置」里。</li>
+                <li>其中<b>当前关系、共同经历随记忆一起自动更新</b>，<b>当前场景每聊若干轮自动刷新</b>（默认 10 轮，可在「对话设置」里改）——三样都随时能手改，改完以你写的为准。它们跟角色卡里的「共同经历（初始）/ 当前关系（初始）」不是一回事：角色卡里那份是<b>开局设定</b>，这三项记的是<b>这条对话现在走到哪了</b>。</li>
+                <li>「对我的认知」随对话自动更新，也能手改或点「更新认知」重算；历史太长就「再压缩」。</li>
+                <li><b>记忆栏</b>：对话设置里能看到<b>本对话</b>的记忆（日/周/月摘要 + 精华），「再压缩」就在它下面；角色弹窗（角色名下）能看到<b>该角色所有对话</b>的记忆；「设置 → 角色记忆总览」一次看全部角色，不用一个个切。</li>
+                <li><b>记忆纠偏</b>：记忆栏下面可以写一段话让 AI 纠正记忆（如“小满其实是高中同学”）。出于对智能体的尊重，无法让你直接改角色记忆，只能用纠偏做一定量的纠正——记忆很珍贵，别滥用。</li>
+                <li>「重新说」存了多个版本时，<b>记忆压缩和认知更新都以你当前选定的那个版本为准</b>。</li>
+              </ol>
+            </div>
+            <div class="guide-sec">
+              <h4>八、省 token 的记忆压缩与筛选</h4>
+              <ul>
+                <li><b>自动补压</b>：隔天再打开时，会把“今天以前”的对话按天压成日摘要，满 7 天并成周、满 30 天并成月。被摘要覆盖的旧原文不再发给模型，省 token。</li>
+                <li><b>再压缩</b>：把全部记忆极度提纯成一条精华，上下文太大时用它。</li>
+                <li><b>上下文筛选</b>：用大白话说“不要喂给角色什么”（如旁白/动作/衣着）。点「AI 筛选」→ 核对规则 → 采用并精简；也能「按规则洗一次」；可设「每 N 轮自动洗一次」。只在角色读取端裁剪，聊天记录一个字都不改。</li>
+                <li><b>用量与预警</b>：设置 →「用量统计」，看总输入/输出/总计/缓存命中率，按会话和角色分别看。上下文太大时会弹预警，去「再压缩」提纯。</li>
+              </ul>
+            </div>
+            <div class="guide-sec">
+              <h4>九、费用与省钱</h4>
+              <ul>
+                <li>DeepSeek 有<b>上下文缓存</b>：重复的前缀会命中缓存、单价更低。所以别频繁改动前面的大段设定，能提高命中率。</li>
+                <li>思考模式更贵（思考也算输出 token），不需要时可在设置里关掉。</li>
+              </ul>
+            </div>
+            <div class="guide-sec">
+              <h4>十、常见问题</h4>
+              <ul>
+                <li>请求失败/连不上：先「连接自检」，确认 Key、余额、网络。</li>
+                <li>图片用不了 / 发图就报错：多半是「视觉模型」没配好。默认模式下图片要先转成文字才能给主模型——去「设置 → 视觉模型」配一套能看图的（见第十四节）。<b>如果你勾了主模型区的「模型兼容」</b>，那图片是直接发给主模型的，主模型看不了图就会报错——把那个开关取消勾选即可。</li>
+                <li>语音/画图用不了：对应的「听觉 / 文生图 / 语音合成」模型没配齐。</li>
+                <li><b>回答只有「思考」、正文是空的</b>：这是模型偶尔的毛病 —— 它把话全写进了思考里，就"以为"自己已经答过了。分两种：<b>①思考里带着正文</b>（有些模型会在思考末尾用一个 <code>response</code> 当分界，把回答也写在思考字段里）——App 会<b>自动把这段提出来放回正文位</b>，不用你管；<b>②思考里真没有正文</b> —— App 会<b>自动补问一次</b>（只补一次）。两种都救不回来时，气泡里会留一条提醒，点下面的「<b>重新说</b>」再来一次就行。</li>
+                <li><b>思考看了一半就没了</b>：以前在生成过程中去动设置、切角色之类，会把整条回复冲掉，现在已修；真遇到先切走再切回该对话，内容不会丢（它早就存下来了）。</li>
+                <li>数据存在本机：卸载会清空，重要对话请自行备份。</li>
+              </ul>
+            </div>
+            <div class="guide-sec">
+              <h4>十一、图片会“过期”（省空间）</h4>
+              <ul>
+                <li>自己发的图片、AI 画的图片，发出去后都会<b>自动生成一段文字描述</b>存下来。这段描述由「<b>视觉模型</b>」写（主模型区勾了「模型兼容」时，就由主模型自己写）——所以<b>视觉模型没配好，描述就是空的</b>：默认模式下主模型收到的就只是「用户发来一张图，没有描述」。</li>
+                <li>原图本身<b>不再塞进聊天记录</b>：它被搬到 App 的文件夹里，聊天里只留一个引用（打包版存原生存储，网页版才退回浏览器存储）。所以记录不会因为图越攒越多而越来越臃肿。</li>
+                <li>原图只保留<b>若干轮</b>（默认 10，可在「设置 → 图片」里改）；到期后<b>删掉原图、只留描述</b>——聊天里原图变成「图片（原图已过期）· 描述」，之后喂给模型也只用这段文字。</li>
+                <li>为什么这么做：几十张 base64 图片会把应用撑大、也费 token，这样能省下来。</li>
+                <li>不想要？「设置 → 图片 → 图片转文字存储」关掉即可（原图就不再删）。</li>
+                <li>想留住原图？到期前在图片右下角点「保存」存到手机。</li>
+                <li>不想看图？设置 → 图片 → 打开「<b>无图模式</b>」，聊天和附件里的图片就不再显示（头像不受影响）。</li>
+              </ul>
+            </div>
+            <div class="guide-sec">
+              <h4>十二、应用加密（口令门）</h4>
+              <ol>
+                <li>开法：设置 → 「应用加密」 → 打开开关 → 设一个口令（至少 4 位）。</li>
+                <li>开了以后<b>每次冷启动都会先锁屏</b>，输对口令才进得去。从后台切回来不锁，不会每次都折腾你。</li>
+                <li>忘了口令有两条路。一是<b>恢复码</b>：开启时会给你一串一次性的，<b>只显示那一次</b>，请抄到纸上或存进密码管理器；用过就作废，<b>离线也能用</b>。二是<b>让 AI 出题</b>：它拿你最近的聊天记录现场出几个问题考你，答对才算本人——这条要联网、且设置里配好了 API Key。</li>
+                <li>防硬猜：连着输错会逐步冷却（错 4 次后锁 1 分钟，重启也还在）；AI 出题时答得太笼统会被追问，答错或者问完都答不上来会直接退出 App。</li>
+                <li>口令和恢复码都<b>只存散列</b>，App 里没有明文。所以忘了口令又丢了恢复码，就真进不去了——<b>请务必先把恢复码抄下来</b>。</li>
+                <li>说清楚它的边界：这是一道<b>「口令门」</b>，挡的是「手机被人捡到随手翻」，<b>不等于把数据加密了</b>。真正加密的东西在下一节。</li>
+              </ol>
+            </div>
+            <div class="guide-sec">
+              <h4>十三、数据与隐私</h4>
+              <ul>
+                <li>本机<b>加密存放</b>的内容包括：每段对话的<b>记忆 + 对我的认知</b>、<b>当前关系 / 共同经历 / 当前场景</b>，以及<b>整个角色卡</b>（名称·年龄·性格外貌背景喜好·世界观·共同经历·当前关系·AI 指令等 17 项）。做法是双层 AES（内层随机密钥，外层口令 MDLDDS），直接翻存储看不到明文。</li>
+                <li>自动备份的快照走<b>同一套裁剪规则</b>：备份里也只有密文，不会把明文另存一份。</li>
+                <li>「导出」时会让你<b>自己设一个口令</b>：导出文件用它加密，<b>口令不会存进 App</b>，导回时得输同一个——只有你能打开。忘了就永久解不开。</li>
+                <li><b>说清楚边界</b>：上面这层加密的密钥材料（设备标识 + 盐）都在这台机器上，它挡的是「拿到文件直接翻看」，<b>挡不住有备而来、能动手提取数据的人</b>。想再严一档只能靠「口令派生」（每次开机输口令、忘了就彻底没了），当前版本没做这个取舍。</li>
+                <li>数据都存在本机：<b>打包后的 App 用原生存储</b>（没有浏览器那 5 MB 的限制）；在网页/预览里打开时会退回浏览器存储。卸载 App 会连同数据一起删，请定期导出备份。</li>
+              </ul>
+            </div>
+            <div class="guide-sec">
+              <h4>十四、进阶：给「听觉 / 朗读 / 画图 / 视觉」配上模型</h4>
+              <p>DeepSeek 只会「聊天」，它<b>听、说、画、看都不行</b>。想用语音输入、朗读、画图、看图，得另外找一家服务商。好消息是<b>这四样都用同一套「<b>OpenAI 兼容</b>」标准接口</b>，注册一家就能全解决。</p>
+              <p><b>第一步：注册一个服务商</b>（推荐「硅基流动」：中文界面、支付宝充值、不用翻墙）</p>
+              <ol>
+                <li>打开 <a class="ext-link" href="https://cloud.siliconflow.cn">cloud.siliconflow.cn</a>，用手机号注册，然后<b>完成实名认证</b>（不实名调不了接口）。</li>
+                <li>登录后左侧找「<b>API 密钥</b>」→「新建密钥」→ 复制那串 <code>sk-</code> 开头的。</li>
+                <li>新用户会送十几元额度（约两千万 token）。下面推荐的模型里有几个是<b>免费</b>的，够你玩很久。</li>
+              </ol>
+              <p><b>第二步：先记四条铁规矩</b>（不知道这个，填了也是白填）</p>
+              <ul>
+                <li><b>地址必须带 <code>/v1</code></b>：写 <code>https://api.siliconflow.cn/v1</code>。<b>少写 /v1 会直接报 404</b>，这是踩得最多的坑。</li>
+                <li><b>「留空」会沿用主模型，但主模型没这本事</b>：每套配置的「接口地址 / API Key / 模型」留空时<b>会去沿用「主模型」那一套的值</b>。可 DeepSeek 只是个文字模型，压根没有转写 / 合成 / 画图 / 看图的接口——留空等于借了个不会干这活的模型。所以这四组<b>必须各填各的</b>。（唯一的例外是「视觉」：主模型自己就能看图时，让视觉区留空、改去勾主模型区的「模型兼容」，反而更好。）</li>
+                <li><b>填完要勾开关，还要往下滚点「保存设置」</b>。不勾开关等于没配，不保存等于白填。</li>
+                <li><b>每区都能建多套配置</b>：听觉 / 朗读 / 画图 / 视觉各自都有「<b>添加配置</b>」按钮，最多 <b>6 套</b>，彼此独立，互不影响（主模型那 6 套也跟它们互不影响）。每一套是「<b>名字 + 接口地址 + API Key + 模型</b>」四项，卡片右上角标着「使用中」的那套才是当前生效的，点别的卡片上的「<b>用这套</b>」切过去。</li>
+              </ul>
+              <p><b>第三步：分别去设置里填</b>（每一处都是：填进那张卡片 → 点「用这套」/保证它是「使用中」→ 勾开关 → 滚到底点「保存设置」）</p>
+              <ul>
+                <li><b>听觉（语音输入）</b> → 设置里找「<b>听觉模型 · 语音转文字</b>」。接口地址 <code>https://api.siliconflow.cn/v1</code>；API Key 填你的 <code>sk-…</code>；模型填 <code>FunAudioLLM/SenseVoiceSmall</code>（<b>免费</b>）。<br><b>别填 <code>whisper-1</code></b>——那是 OpenAI 的模型名，硅基流动上没有；输入框里的灰色提示字样只是<b>示例</b>，不是推荐值。语言提示可填 <code>zh</code>。最后勾上「启用语音输入」。<br>用法：点一下麦克风<b>开始录音、再点一下结束</b>，它会转成文字填进输入框（还得自己按发送）。</li>
+                <li><b>朗读（文字转语音）</b> → 「<b>语音合成 · 朗读</b>」。地址同上；模型填 <code>FunAudioLLM/CosyVoice2-0.5B</code>（约 0.05 元/千字）；<b>音色要写成 <code>FunAudioLLM/CosyVoice2-0.5B:alex</code> 这种「模型名:音色名」的格式</b>（这里已默认填好这一个，换别的音色时照同一格式改）。注意 <code>alloy</code> 是 OpenAI 的写法，在硅基流动上会报错。具体有哪些音色，看平台模型详情页。勾「启用朗读按钮」；想让它念完一条自动念下一条，再勾「回答完自动朗读」。<br>用法：每条 AI 消息下面有个喇叭图标，点一下念出来。</li>
+                <li><b>画图（文生图）</b> → 「<b>文生图</b>」。地址同上；模型填 <code>Kwai-Kolors/Kolors</code>（<b>免费</b>）或 <code>Tongyi-MAI/Z-Image-Turbo</code>（约 0.1 元/张）；尺寸填 <code>1024x1024</code>。勾「启用画图开关」。<br>用法：<b>设置里勾完，还要在输入框下方把「画图」开关也打开</b>（两处都开才生效），然后直接让它画。</li>
+                <li><b>视觉（看图 / 图片转文字）</b> → 「<b>视觉模型 · 看图</b>」。<b>它只干一件事：把图片转成一段文字描述</b>（不会用它来聊天）。DeepSeek 的主模型看不了图，所以你一发图、或 AI 一画图，都得靠这一区把图写成文字，主模型才「看」得到。地址同上；模型填 <code>Qwen/Qwen2.5-VL-72B-Instruct</code>（硅基流动）或 <code>qwen-vl-max</code>（阿里百炼），勾「启用独立视觉模型」。<br><b>但如果你的主模型本身就是多模态</b>（自己就能看图）：去主模型区把「<b>模型兼容</b>」勾上，本区<b>整段留空、开关也不用开</b>——看图会直接走主模型，这里配了也不生效。</li>
+              </ul>
+              <p><b>关于主模型区那个「模型兼容」开关</b>（很多人会配错，单独说一句）：<br><b>不勾（默认）</b>：主模型只当纯文字模型。图片一律先过「视觉模型」写成文字再喂给它——哪怕你换的主模型其实能看图也一样，图片不会直接发过去。<br><b>勾上</b>：主模型能看图，图片直接交给它，视觉区那套配置被无视。<br>一句话：<b>不勾最安全</b>，配错了最多是多花一次转文字的钱；勾错了则可能因为主模型看不了图而整条消息报错。<b>不确定就别勾。</b></p>
+              <p><b>第四步：提前知道这些坑</b></p>
+              <ul>
+                <li><b>报 404</b>：地址少了 <code>/v1</code>，或者末尾多带了斜杠、多写了路径。</li>
+                <li><b>报 401 / 403</b>：Key 复制不完整、没实名、或者余额为 0。</li>
+                <li><b>报 400 且提到 model</b>：模型名写错（大小写、斜杠、连字符都要一模一样）。</li>
+                <li><b>报 400 且提到 voice</b>：朗读音色格式不对，要「模型名:音色名」。</li>
+                <li><b>提示「未配置语音转写 / 语音合成 / 文生图接口地址或密钥」</b>：这一区<b>和主模型</b>的地址、Key <b>全都空着</b>——留空会去沿用主模型，主模型也空，那就真没得用了。</li>
+                <li><b>点麦克风没反应</b>：第一次会要麦克风权限，点了「拒绝」就再也调不出来，得去系统设置里放开；网页版或老封装还可能压根不支持录音。</li>
+                <li><b>点喇叭没声音</b>：有的环境不允许自动播放；也可能是音色或模型填错。</li>
+                <li><b>尺寸报错</b>：只填平台支持的尺寸（一般是 <code>1024x1024</code>、<code>768x1024</code> 这类），别自己编。个别平台只认 <code>image_size</code> 这个参数名，遇到这种就换一家。</li>
+                <li><b>朗读最费钱</b>：四样里只有它按字数收费，长回答反复点喇叭会花钱，注意。</li>
+              </ul>
+              <p><b>也可以用别家</b>：只要它「兼容 OpenAI 接口」就行——阿里云百炼的兼容模式地址 <code>https://dashscope.aliyuncs.com/compatible-mode/v1</code>，智谱 <code>https://open.bigmodel.cn/api/paas/v4</code>，OpenAI 官方 <code>https://api.openai.com/v1</code>（但要外网和境外支付，不方便）。<b>地址一定要带到带版本号的那一层</b>，模型名照平台文档抄。</p>
+              <p><b>顺带一提：联网搜索源</b>（设置里「联网搜索」那节）默认用内置的几个免费实例，不稳时可以填 <a class="ext-link" href="https://tavily.com">tavily.com</a> 申请的 Key（每月有免费额度），或自填一个搜索接口地址加密钥。</p>
+            </div>
+          </div>
+        </details>
+        <div class="row-actions" style="justify-content:flex-start;margin-top:12px">
+          <button id="replayIntroBtn" class="btn ghost" type="button">重看首次引导</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="dataModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>数据导入 / 导出</h2>
+      <button class="icon-btn" data-close="dataModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-section">
+        <h3>导出</h3>
+        <div class="field"><span>导出范围</span>
+          <select id="exportScope">
+            <option value="full">全部（设置 + 角色 + 会话）</option>
+            <option value="settings">仅全局设置</option>
+            <option value="characters">仅全部角色</option>
+            <option value="character">仅某个角色</option>
+            <option value="session">仅某个会话</option>
+          </select>
+        </div>
+        <div class="field" id="exportCharWrap" hidden><span>选择角色</span><select id="exportCharSel"></select></div>
+        <div class="field" id="exportSessionWrap" hidden><span>选择会话</span><select id="exportSessionSel"></select></div>
+        <label class="check-field"><input type="checkbox" id="exportKeys"><span>包含 API Key 等密钥（明文，谨慎分享）</span></label>
+        <label class="check-field"><input type="checkbox" id="exportNoImg"><span>不含原图（文件更小；导入后图片只剩文字描述）</span></label>
+        <div class="char-actions">
+          <button id="exportDownload" class="btn ghost" type="button">保存到 Download</button>
+          <button id="exportShare" class="btn ghost" type="button">分享文件</button>
+          <button id="exportCopy" class="btn ghost" type="button">复制 JSON</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>导入</h3>
+        <p class="hint">粘贴导出的 JSON，或选一个 .json 文件；同 ID 的会覆盖（有确认）。</p>
+        <label class="field"><span>JSON 文本</span><textarea id="importText" rows="4" placeholder="粘贴导出的 JSON…"></textarea></label>
+        <div class="char-actions">
+          <button id="importFileBtn" class="btn ghost" type="button">选择文件…</button>
+          <button id="importClipBtn" class="btn ghost" type="button">从剪贴板粘贴</button>
+          <button id="importTextBtn" class="btn primary" type="button">导入文本</button>
+        </div>
+        <input id="importFileInput" type="file" accept=".json,application/json" hidden>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="introModal" class="modal intro" aria-hidden="true">
+  <div class="modal-sheet small">
+    <div class="modal-body">
+      <div class="intro-pages">
+        <div class="intro-page">
+          <img class="intro-img" src="about.png" alt="DeepLink">
+          <div class="intro-h">欢迎使用 DeepLink</div>
+          <p class="intro-p">一个有温度的 AI 对话与角色扮演工具。<br>界面干净、数据存在本机、尽量帮你省 token。</p>
+        </div>
+        <div class="intro-page" hidden>
+          <div class="intro-h">功能全景</div>
+          <pre id="introTree" class="feat-tree"></pre>
+        </div>
+        <div class="intro-page" hidden>
+          <div class="intro-h">三步上手</div>
+          <p class="intro-p">1. 去 DeepSeek 开放平台（<a class="ext-link" href="https://platform.deepseek.com">platform.deepseek.com</a>）注册并创建一个 API Key。<br>2. 打开「设置」→「主模型」→ 把 Key 填进「配置一」→ 滚到底点「保存设置」。<br>3. 回到对话直接开聊；想角色扮演就打开「启用角色扮演模式」。</p>
+          <p class="intro-p">· 也可以用<b>别的平台</b>（兼容 OpenAI 接口的都行），但大多比 DeepSeek 贵、地址要自己去官方文档搜。<br>· 聊天页右上角的<b>模型按钮</b>能随时切主模型；听觉 / 朗读 / 画图 / 视觉想用的话，在设置里各配一套（见「使用指南 · 十四」）。<br>· 主模型区那个「<b>模型兼容</b>」开关<b>默认别勾</b>——它表示「主模型自己看得懂图」，DeepSeek 看不了，勾了发图会报错。想发图就配「视觉模型」。</p>
+        </div>
+        <div class="intro-page" hidden>
+          <div class="intro-h">隐私与安全</div>
+          <p class="intro-p">· 聊天记录、角色卡、设置都<b>存在本机</b>，不上传第三方。<br>· 记忆、角色卡、场景 / 关系 / 经历在本机<b>加密存放</b>；导出的文件由你自设口令加密，口令不存进 App。<br>· 可选开「<b>应用加密</b>」：每次冷启动先锁屏；忘了口令可用<b>一次性恢复码</b>或<b>让 AI 出题考你</b>找回。<br>· 实话一句：本机加密挡的是「捡到手机随手翻」，不是对抗专业的数据提取。</p>
+        </div>
+        <div class="intro-page" hidden>
+          <div class="intro-h">省心小功能</div>
+          <p class="intro-p">· 记忆压缩 / 再压缩 / 上下文筛选：让长对话不越聊越贵。<br>· 图片（自己发的 / AI 画的）会在若干轮后删原图、只留「<b>视觉模型</b>」写的文字描述，省空间也省 token。<br>· 对话很长时只先渲染<b>最近 20 条</b>、往上滑再加载，不会越拉越卡。<br>· 对话和角色都能<b>置顶、排序</b>（长按即可）。<br>· 记忆栏能看记忆，记错了可用「<b>记忆纠偏</b>」让 AI 纠正（勿滥用）。<br>· 消息「重新说」存了多版本时，记忆与认知以你<b>当前选定的版本</b>为准。<br>· 用量统计与预警：随时看花了多少。<br>· 导入导出与自动备份：换机、防丢。</p>
+          <p class="intro-p">更多在「设置 → 关于 → 使用指南」。</p>
+        </div>
+      </div>
+      <div id="introDots" class="intro-dots"></div>
+    </div>
+    <div class="intro-actions">
+      <button id="introSkip" class="btn ghost" type="button">跳过</button>
+      <span class="intro-spacer"></span>
+      <button id="introPrev" class="btn ghost" type="button">上一步</button>
+      <button id="introNext" class="btn primary" type="button">下一步</button>
+    </div>
+  </div>
+</div>
+
+<div id="themeModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>主题</h2>
+      <button class="icon-btn" data-close="themeModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <div id="modeSwitch" class="mode-switch"></div>
+      <div id="themeGrid" class="theme-grid"></div>
+    </div>
+  </div>
+</div>
+
+<div id="dialogModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet small">
+    <div class="modal-head"><h2 id="dialogTitle">提示</h2></div>
+    <div class="modal-body">
+      <p id="dialogText" class="dialog-text"></p>
+      <div class="row-actions">
+        <button id="dialogCancel" class="btn ghost" type="button">取消</button>
+        <button id="dialogOk" class="btn primary" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="passModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet small">
+    <div class="modal-head"><h2 id="passTitle">口令</h2></div>
+    <div class="modal-body">
+      <p id="passNote" class="dialog-text"></p>
+      <label class="field"><span>口令</span><input id="passInput" type="password" autocomplete="off"></label>
+      <label class="field" id="passConfirmWrap"><span>再输一遍</span><input id="passConfirm" type="password" autocomplete="off"></label>
+      <div class="row-actions">
+        <button id="passCancel" class="btn ghost" type="button">取消</button>
+        <button id="passOk" class="btn primary" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="pickModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet small">
+    <div class="modal-head">
+      <h2 id="pickTitle">选择</h2>
+      <button class="icon-btn" data-close="pickModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body"><div id="pickList" class="pick-list"></div></div>
+  </div>
+</div>
+
+<div id="msgMenuModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet small">
+    <div class="modal-head"><h2>消息操作</h2></div>
+    <div class="modal-body">
+      <div id="msgMenuList" class="menu-grid"></div>
+    </div>
+  </div>
+</div>
+
+<div id="rowMenuModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet small">
+    <div class="modal-head"><h2 id="rowMenuTitle">操作</h2></div>
+    <div class="modal-body">
+      <div id="rowMenuList" class="menu-grid"></div>
+    </div>
+  </div>
+</div>
+
+<div id="editModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2 id="editTitle">修改消息</h2>
+      <button class="icon-btn" data-close="editModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <label class="field"><textarea id="editText" rows="8"></textarea></label>
+      <div class="row-actions">
+        <button id="editCancel" class="btn ghost" type="button">取消</button>
+        <button id="editSave" class="btn primary" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="deleteModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>删除消息</h2>
+      <button class="icon-btn" data-close="deleteModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <p class="hint">勾选要删除的消息（默认只勾选触发的那条），可多选。</p>
+      <div id="deleteList" class="delete-list"></div>
+      <div class="row-actions">
+        <button id="deleteCancel" class="btn ghost" type="button">取消</button>
+        <button id="deleteOk" class="btn primary" type="button">删除</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="searchModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>搜索历史</h2>
+      <button class="icon-btn" data-close="searchModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <div id="searchModeSwitch" class="mode-switch"></div>
+      <label class="field" id="histKeywordField">
+        <span>关键词</span>
+        <input id="histKeyword" type="text" placeholder="搜索消息内容">
+      </label>
+      <div class="field" id="histTimeField">
+        <span>时间范围</span>
+        <div class="date-row">
+          <input id="histFrom" type="date">
+          <span class="date-sep">至</span>
+          <input id="histTo" type="date">
+        </div>
+      </div>
+      <div class="row-actions">
+        <button id="histSearchBtn" class="btn primary" type="button">搜索</button>
+      </div>
+      <div id="histResults" class="hist-results"></div>
+    </div>
+  </div>
+</div>
+
+<div id="cameraModal" class="camera-layer" hidden>
+  <div id="camStage" class="cam-stage">
+    <video id="camVideo" playsinline autoplay muted></video>
+    <div id="camLoading" class="cam-loading"><span class="spinner"></span><span>正在启动相机…</span></div>
+    <div id="camFocus" class="cam-focus" hidden></div>
+    <div class="cam-top">
+      <button id="camClose" class="cam-icon-btn" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+      <div class="cam-top-right">
+        <button id="camTorch" class="cam-pill" type="button" aria-pressed="false"><span data-icon="flashlight"></span><span>补光</span></button>
+        <button id="camFlip" class="cam-pill" type="button"><span data-icon="camera-flip-outline"></span><span>翻转</span></button>
+      </div>
+    </div>
+    <div id="camHint" class="cam-hint"></div>
+    <div class="cam-bottom">
+      <div id="camExposureWrap" class="cam-exposure" hidden>
+        <span>曝光</span><input id="camExposure" type="range" min="-2" max="2" step="0.1" value="0">
+      </div>
+      <button id="camShutter" class="cam-shutter" type="button" aria-label="拍照"></button>
+    </div>
+  </div>
+  <input id="camFallbackInput" type="file" accept="image/*" capture="environment" hidden>
+
+  <div id="camEdit" class="cam-edit" hidden>
+    <div class="cam-tools">
+      <button class="cam-tool" data-cam="crop" type="button"><span data-icon="crop"></span><span>裁剪</span></button>
+      <button class="cam-tool" data-cam="rotate" type="button"><span data-icon="rotate-right"></span><span>旋转</span></button>
+      <button class="cam-tool" data-cam="draw" type="button"><span data-icon="draw"></span><span>画笔</span></button>
+      <button class="cam-tool" data-cam="arrow" type="button"><span data-icon="arrow-top-right"></span><span>箭头</span></button>
+      <button class="cam-tool" data-cam="text" type="button"><span data-icon="format-text"></span><span>文字</span></button>
+      <button class="cam-tool" data-cam="undo" type="button"><span data-icon="undo-variant"></span><span>撤销</span></button>
+      <button class="cam-tool" data-cam="reset" type="button"><span data-icon="refresh"></span><span>重置</span></button>
+    </div>
+    <div id="camColors" class="cam-colors" hidden>
+      <button class="cam-color" data-color="#ff3b30" style="background:#ff3b30" type="button" aria-label="红色"></button>
+      <button class="cam-color" data-color="#ffcc00" style="background:#ffcc00" type="button" aria-label="黄色"></button>
+      <button class="cam-color" data-color="#34c759" style="background:#34c759" type="button" aria-label="绿色"></button>
+      <button class="cam-color" data-color="#0a84ff" style="background:#0a84ff" type="button" aria-label="蓝色"></button>
+      <button class="cam-color on" data-color="#ffffff" style="background:#ffffff" type="button" aria-label="白色"></button>
+      <button class="cam-color" data-color="#111111" style="background:#111111" type="button" aria-label="黑色"></button>
+    </div>
+    <div class="cam-canvas-wrap"><canvas id="camCanvas"></canvas></div>
+    <div id="camCropActions" class="cam-crop-actions" hidden>
+      <button id="camCropCancel" class="cam-btn-text" type="button">取消裁剪</button>
+      <button id="camCropOk" class="cam-btn-text primary" type="button">确定裁剪</button>
+    </div>
+    <div id="camTextBar" class="cam-text-bar" hidden>
+      <input id="camTextInput" type="text" placeholder="输入要标注的文字">
+      <button id="camTextOk" class="cam-btn-text primary" type="button">确定</button>
+      <button id="camTextCancel" class="cam-btn-text" type="button">取消</button>
+    </div>
+    <div class="cam-actions">
+      <button id="camRetake" class="cam-btn-text" type="button"><span data-icon="refresh"></span>重拍</button>
+      <button id="camClose2" class="cam-btn-text" type="button"><span data-icon="close"></span>关闭</button>
+      <button id="camAttach" class="cam-btn-text" type="button" aria-label="附带在消息上"><span data-icon="paperclip"></span>附带</button>
+      <button id="camSend" class="cam-btn-text primary" type="button"><span data-icon="arrow-up"></span>直接发送</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" class="toasts"></div>
+
+<!-- D2 应用加密：锁屏层。故意【不用 .modal】——它是独立全屏、盖住整个 App 的一层，
+     不是「弹窗」。z-index 比启动页还高，这样从冷启动第一帧起就挡住内容。
+     五个盒子按状态互斥显示（都用 setHidden 切，见 settings.js 的锁定模块）。 -->
+<div id="lockScreen" class="lock-screen" hidden>
+  <div class="lock-card">
+    <div class="lock-mark" data-icon="lock-outline"></div>
+
+    <div id="lockPassBox" class="lock-box">
+      <div class="lock-title">已开启应用加密</div>
+      <div class="lock-note">输入口令继续</div>
+      <input id="lockInput" class="lock-input" type="password" autocomplete="off" placeholder="口令">
+      <div class="lock-actions">
+        <button id="lockOk" class="btn primary" type="button">解锁</button>
+        <button id="lockForgot" class="btn ghost" type="button">忘记口令</button>
+      </div>
+      <div id="lockErr" class="lock-err"></div>
+    </div>
+
+    <div id="lockRecoverBox" class="lock-box" hidden>
+      <div class="lock-title">找回访问</div>
+      <div class="lock-note" id="recNote">两条路：先用事先抄好的恢复码（离线可用）；或者让 AI 基于你的聊天记录现场出几个问题考你。</div>
+      <input id="recInput" class="lock-input" type="text" autocomplete="off" placeholder="一次性恢复码">
+      <div class="lock-actions">
+        <button id="recOk" class="btn primary" type="button">用恢复码</button>
+        <button id="recAi" class="btn ghost" type="button">让 AI 问我</button>
+        <button id="recBack" class="btn ghost" type="button">返回</button>
+      </div>
+      <div id="recErr" class="lock-err"></div>
+    </div>
+
+    <div id="lockQuizBox" class="lock-box" hidden>
+      <div class="lock-title">回答几个问题</div>
+      <div class="lock-note" id="quizNote">正在根据你的聊天记录想问题…</div>
+      <div id="quizQ" class="lock-q"></div>
+      <input id="quizA" class="lock-input" type="text" autocomplete="off" placeholder="在这里回答">
+      <div class="lock-actions">
+        <button id="quizOk" class="btn primary" type="button">提交</button>
+        <button id="quizBack" class="btn ghost" type="button">放弃</button>
+      </div>
+      <div id="quizErr" class="lock-err"></div>
+    </div>
+
+    <div id="lockResetBox" class="lock-box" hidden>
+      <div class="lock-title">设置新口令</div>
+      <div class="lock-note" id="resetNote">验证通过。设一个新口令，下次用它解锁。</div>
+      <input id="resetPass1" class="lock-input" type="password" autocomplete="off" placeholder="新口令">
+      <input id="resetPass2" class="lock-input" type="password" autocomplete="off" placeholder="再输一次">
+      <div class="lock-actions">
+        <button id="resetOk" class="btn primary" type="button">保存新口令</button>
+        <button id="resetBack" class="btn ghost" type="button">取消</button>
+      </div>
+      <div id="resetErr" class="lock-err"></div>
+    </div>
+
+    <div id="lockDeadBox" class="lock-box" hidden>
+      <div class="lock-title">验证没有通过</div>
+      <div class="lock-note" id="deadNote">为保护里面的内容，稍后会自动退出。</div>
+      <div class="lock-actions">
+        <button id="deadOk" class="btn ghost" type="button">现在退出</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 一次性恢复码：开启加密 / 重设时展示一次，之后只留散列 -->
+<div id="codeScreen" class="lock-screen" hidden>
+  <div class="lock-card">
+    <div class="lock-mark" data-icon="shield-key-outline"></div>
+    <div class="lock-title">一次性恢复码</div>
+    <div class="lock-note">忘了口令、又没法联网让 AI 出题时，用它解锁。<b>只显示这一次</b>：请抄到纸上或存进密码管理器。用过一次就作废。</div>
+    <div class="lock-code" id="codeText"></div>
+    <div class="lock-actions">
+      <button id="codeCopy" class="btn ghost" type="button">复制</button>
+      <button id="codeOk" class="btn primary" type="button">我已抄好</button>
+    </div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="store.js"></script>
+<script src="search.js"></script>
+<script src="files.js"></script>
+<script src="api.js"></script>
+<script src="media.js"></script>
+<script src="ui.js"></script>
+<script src="memory.js"></script>
+<script src="probe.js"></script>
+<script src="app.js"></script>
+<script src="chat.js"></script>
+<script src="roleplay.js"></script>
+<script src="settings.js"></script>
+<script src="camera.js"></script>
+<script src="activity.js"></script>
+</body>
+</html>
