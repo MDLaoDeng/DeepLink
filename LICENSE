@@ -1,21 +1,54 @@
-MIT License
+DeepLink 开放使用许可 v1.0
+==========================
 
-Copyright (c) 2026 DeepLink
+（作者寄语：本人比较开放宽松，欢迎大家自由使用、学习、修改和分享。
+ 唯一的请求很简单——尊重一下作者的付出：署名，以及商业用途先跟我说一声。）
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+版权所有 (c) 2026 DeepLink 作者。保留所有权利。
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+一、你可以免费做的事
+--------------------
+在遵守本许可全部条款的前提下，你可以：
+
+1. 免费使用、复制、修改本项目；
+2. 将本项目或修改后的版本用于个人学习、研究、非商业分享；
+3. 将本项目（含修改后的版本）打包、分发，或放进你自己的开源项目。
+
+
+二、署名要求（所有用途都必须遵守）
+----------------------------------
+无论个人用途还是商业用途，只要使用、分发本项目，或基于本项目创作衍生作品，
+你都必须：
+
+1. 完整保留本许可证文件（LICENSE）；
+2. 在显著位置（如项目主页、关于页面、源代码头部或文档中）清晰注明原作者
+   与项目来源（DeepLink），不得删除或篡改原作者的署名信息。
+
+
+三、商业用途须经事先授权
+------------------------
+任何以营利为目的的使用，包括但不限于：将本项目或其衍生作品用于商业产品、
+付费服务、广告或流量变现、企业内部商业运营等，都必须：
+
+1. 事先以电子邮件形式，向作者说明使用主体、具体用途与使用范围；
+2. 取得作者的明确同意（书面或邮件回复）之后，方可使用。
+
+未经事先授权，不得将本项目用于任何商业用途。
+
+联系邮箱：（请填写作者邮箱）
+
+
+四、免责声明
+------------
+本项目按“现状”提供，不附带任何明示或默示的担保，包括但不限于对适销性、
+特定用途适用性及不侵权的担保。在任何情况下，作者均不对因使用或无法使用
+本项目而产生的任何直接或间接损失承担责任。
+本项目产生的 AI 生成内容由相应大模型生成，请使用者自行甄别；角色扮演相关
+内容为虚构演绎，与任何现实人物无关。
+
+
+五、其他
+--------
+本许可未明确授予的商标权、专利权及其他权利，仍归各自权利人所有。
+本许可的最终解释权归原作者所有。
