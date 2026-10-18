@@ -27,9 +27,32 @@
     return String(v.content || "");
   }
 
-  function dayTranscript(msgs) {
+  /* 这条线的「AI 这边」到底叫什么。**必须带具体名字**：一律标成「角色：」的话，
+     日更摘要和「对用户的认知」都分不清是用户做的还是角色做的 —— 一对一也一样会混
+     （AI 会把角色做的事写成用户的特质）。群聊由每条消息自带的 speakerName 决定。 */
+  function aiNameOf(rec) {
+    try {
+      if (rec && rec.isGroup) return "群成员";
+      const id = rec && rec.characterId;
+      if (id) {
+        const st = window.Store;
+        const list = (st && st.getCharacters) ? st.getCharacters() : [];
+        for (let i = 0; i < list.length; i++) {
+          if (list[i] && list[i].id === id) return String(list[i].name || "角色");
+        }
+      }
+    } catch (e) { /* 拿不到名字就退回默认 */ }
+    return (rec && rec.characterId) ? "角色" : "助手";
+  }
+
+  function speakerOf(m, aiName) {
+    if (m && m.role === "user") return "用户";
+    return (m && m.speakerName) ? String(m.speakerName) : (aiName || "角色");
+  }
+
+  function dayTranscript(msgs, aiName) {
     return msgs
-      .map((m) => (m.role === "user" ? "用户：" : "角色：") + msgText(m).trim())
+      .map((m) => speakerOf(m, aiName) + "：" + msgText(m).trim())
       .filter((t) => t.replace(/^[^：]*：/, "").trim().length > 1)
       .join("\n");
   }
@@ -43,8 +66,45 @@
   }
 
   /* 某会话「尚未被摘要覆盖」的最近原文 */
-  function recentTranscript(messages, coveredUntil, maxMsgs) {
-    return dayTranscript(collectSessionMsgs(messages, coveredUntil, maxMsgs));
+  function recentTranscript(messages, coveredUntil, maxMsgs, rec) {
+    return dayTranscript(collectSessionMsgs(messages, coveredUntil, maxMsgs), aiNameOf(rec));
+  }
+
+  /* 会话的全部消息 = 主聊天消息 + 手机消息（手机里聊的内容同样要进三层记忆）。
+     手机消息就地映射成「有 variants 的普通消息」，下游的 msgText / dayTranscript 直接认；
+     无正文的结构化消息（转账 / 位置 / 图片 / 语音 / 通话）给一句可读的占位描述。 */
+  function allMsgs(rec) {
+    const out = (rec && rec.messages) ? rec.messages.slice() : [];
+    const ph = (rec && rec.phone && rec.phone.msgs) || [];
+    for (let i = 0; i < ph.length; i++) {
+      const m = ph[i];
+      if (!m || m.kind === "sys") continue;
+      let txt = String(m.text || "");
+      if (!txt) {
+        if (m.kind === "image") txt = "[图片]" + (m.desc ? "：" + m.desc : "");
+        else if (m.kind === "transfer") txt = "[转账]";
+        else if (m.kind === "location") txt = "[位置]" + (m.place ? "：" + m.place : "");
+        else if (m.kind === "voice") txt = "[语音]";
+        else if (m.kind === "call") txt = "[通话]";
+      }
+      /* ⚠️ 形状必须跟主聊天一致：用户消息 variants 是「字符串」，助手消息是「对象 {content,q}」。
+         全用字符串的话，msgText 的助手分支取 v.content 会拿到 undefined，角色在手机里说的话
+         就会被日更 / 压缩整个丢掉（等于白聊）。 */
+      const isUser = m.role === "user";
+      out.push({
+        role: isUser ? "user" : "assistant",
+        ts: m.ts || 0,
+        /* 手机里也可能是群聊（多个人在一个手机群里说话），说话人要一并带下去 */
+        speaker: m.speaker || "",
+        speakerName: m.speakerName || "",
+        variants: [isUser ? txt : { content: txt, q: 0 }],
+        vi: 0
+      });
+    }
+    /* 手机消息是「追加」在主消息后面的，跨端消息的真实先后会被打乱。
+       下游按时间生成日摘要 / 场景，这里先按 ts 归并（Chrome 83 的 sort 是稳定的）。 */
+    out.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
+    return out;
   }
 
   /* 分层记忆拼成可注入的文本（越久越靠前） */
@@ -58,14 +118,31 @@
     return out.join("\n");
   }
 
+  /* 「我的人设」：设置里独立存的最多 10 套（全局，存本机）。
+     id 指向当前选中的那套；找不到就退第一套。 */
+  function activePersona(settings) {
+    const s = settings || {};
+    const list = Array.isArray(s.personas) ? s.personas : [];
+    if (!list.length) return {};
+    const id = s.activePersonaId || "";
+    for (let i = 0; i < list.length; i++) {
+      if (list[i] && list[i].id === id) return list[i];
+    }
+    return list[0] || {};
+  }
+
+  /* 我的设定的取值优先级（用户口径：「以角色卡的为准」）：
+     角色卡里的「你的*」→ 当前选中的「我的人设」→ 旧的 settings.my*（历史遗留字段）。 */
   function resolveMy(settings, f) {
     const s = settings || {};
+    const p = activePersona(settings);
     return {
-      name: f.myName || s.myName || "",
-      persona: f.myPersona || s.myPersona || "",
-      appearance: f.myAppearance || s.myAppearance || "",
-      background: f.myBackground || s.myBackground || "",
-      likes: f.myLikes || s.myLikes || ""
+      name: f.myName || p.myName || s.myName || "",
+      persona: f.myPersona || p.myPersona || s.myPersona || "",
+      appearance: f.myAppearance || p.myAppearance || s.myAppearance || "",
+      background: f.myBackground || p.myBackground || s.myBackground || "",
+      likes: f.myLikes || p.myLikes || s.myLikes || "",
+      callMe: f.aiCallMe || p.aiCallMe || ""
     };
   }
 
@@ -75,8 +152,10 @@
     const f = ch.fields || {};
     const my = resolveMy(settings, f);
     const L = [CONFIG.ROLEPLAY_PROMPT, ""];
+    const _tl = timeLine(ch, s);
+    if (_tl) { L.push(_tl); L.push(""); }
     L.push("【我（用户）的设定】");
-    L.push("名称：" + (my.name || "未设定") + "；你对我的称呼：" + (f.aiCallMe || my.name || "未设定"));
+    L.push("名称：" + (my.name || "未设定") + "；你对我的称呼：" + (my.callMe || my.name || "未设定"));
     if (my.persona) L.push("性格：" + my.persona);
     if (my.appearance) L.push("外貌：" + my.appearance);
     if (my.background) L.push("背景：" + my.background);
@@ -101,6 +180,299 @@
     const mem = memoryText(s && s.memory);
     if (mem) { L.push(""); L.push("【记忆摘要】"); L.push(mem); }
     return L.join("\n").trim();
+  }
+
+  /* 只取「这个角色是谁」—— 群聊里要给每个成员各来一份，不能带上「我」的设定和这条线的记忆。 */
+  function personaText(ch) {
+    if (!ch) return "";
+    const f = ch.fields || {};
+    const L = [];
+    L.push("名称：" + (f.aiName || ch.name || "未设定"));
+    if (f.age) L.push("年龄：" + f.age);
+    if (f.aiPersona) L.push("性格：" + f.aiPersona);
+    if (f.aiAppearance) L.push("外貌：" + f.aiAppearance);
+    if (f.aiBackground) L.push("背景：" + f.aiBackground);
+    if (f.aiLikes) L.push("喜好：" + f.aiLikes);
+    if (f.aiStyle) L.push("说话风格：" + f.aiStyle);
+    if (f.world) { L.push(""); L.push("世界观：" + f.world); }
+    if (f.aiDirective) { L.push(""); L.push("AI 指令：" + f.aiDirective); }
+    return L.join("\n").trim();
+  }
+
+  /* ── 故事时间轴（10-15）────────────────────────────────────────
+     会话上存 `s.time = { start, setAt }`：**设定那一刻（现实 setAt）故事里正好是 start**。
+     之后按 1:1 跟随现实流动 —— 现实过了多久、故事里就过多久。
+     所以「当前故事时间 = 现在 + (start - setAt)」，全篇只用一个常数偏移，简单且不漂。
+
+     合法区间：由角色的「出生日期」+「你的当前年龄」定出来 —— [生日+年龄岁, 生日+年龄+1岁)。
+     例：出生 2011-02-01、写着他 12 岁 → 只能落在 2023-02-01 ~ 2024-02-01 这一年内。
+     写 2011（还没出生）或 2027（那时 16 岁了）都算背离设定，一律拒绝。
+     缺出生日期或年龄读不出数字时不限制（validRange 回 null）。 */
+  const DAY_MS = 86400000;
+  const WEEK_CN = ["日", "一", "二", "三", "四", "五", "六"];
+
+  function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+
+  /* 加减「年」：用 Date 构造而不是加固定毫秒，闰年 / 月长才不会算歪 */
+  function addYears(ms, n) {
+    const d = new Date(ms);
+    return new Date(d.getFullYear() + n, d.getMonth(), d.getDate(),
+      d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()).getTime();
+  }
+  function parseYMD(v) {
+    const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(v || "").trim());
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]), dd = Number(m[3]);
+    if (!(y >= 1900 && y <= 2200 && mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31)) return null;
+    return new Date(y, mo - 1, dd, 0, 0, 0, 0).getTime();
+  }
+  /* 年龄字段可能写成「17」「17岁」「17 岁高三」—— 取第一段数字，读不出就当没填 */
+  function ageOf(ch) {
+    const f = (ch && ch.fields) || {};
+    const m = /(\d{1,3})/.exec(String(f.age || ""));
+    if (!m) return null;
+    const n = Number(m[1]);
+    return (n >= 0 && n <= 200) ? n : null;
+  }
+  function validRange(ch) {
+    const f = (ch && ch.fields) || {};
+    const b = parseYMD(f.birth);
+    const a = ageOf(ch);
+    if (b === null || a === null) return null;
+    return { from: addYears(b, a), to: addYears(b, a + 1) };
+  }
+
+  function timeOffset(s) {
+    const t = s && s.time;
+    if (!t || typeof t.start !== "number" || typeof t.setAt !== "number") return 0;
+    return t.start - t.setAt;
+  }
+  function hasTimeline(s) { return !!(s && s.time && typeof s.time.start === "number"); }
+
+  /* ── 离线锚点（10-15 追加）────────────────────────────────────
+     退出（切后台 / 关页）时把「那一刻」写进 s.time.leftAt，毫秒级。
+     下次进来算「所隔时间」用它 —— 比拿最后一条消息的时间靠谱：
+     你可能只是看了会儿没说话就退出了。
+     ※ 只留这一个锚点：剧情生成 / 主动发过消息之后会 rebaseTime 覆盖掉它，
+       旧锚点一律丢弃（用户口径：只保留有对应剧情、动作的时间节点）。 */
+  function markLeft(s, ms) {
+    if (!s || !s.time) return false;
+    s.time.leftAt = (typeof ms === "number") ? ms : Date.now();
+    return true;
+  }
+  /* 这次进来「隔了多久」（毫秒）。没开时间系统 / 没有锚点 → null */
+  function awayGap(s, nowMs) {
+    const t = s && s.time;
+    if (!t || typeof t.leftAt !== "number") return null;
+    const now = (typeof nowMs === "number") ? nowMs : Date.now();
+    return Math.max(0, now - t.leftAt);
+  }
+  /* 以「当前这一刻」为新基准重新起算：start 就是此刻的故事时间、setAt 是此刻的现实时间。
+     偏移不变（故事仍 1:1 跟随现实），但旧锚点（leftAt）就此作废，
+     离线那一段算是「已经用剧情 / 动作交代过」，不再重复计入。 */
+  function rebaseTime(s, kind) {
+    const t = s && s.time;
+    if (!t) return false;
+    const story = nowOf(s);
+    const real = Date.now();
+    s.time = { start: story, setAt: real, marker: kind || "", markerAt: real };
+    return true;
+  }
+  /* 跳过剧情生成时用（10-18 用户口径）：
+     时间**承接上一次离开那一刻** —— 把故事时钟往回拨「这次离线了多久」，
+     离线那一段不算进故事里。和 rebaseTime 正好相反：
+       rebaseTime = 离线那段「已经用剧情交代过」，时间照常推进；
+       holdTime   = 没交代，那段时间作废，回来还是走的时候那个点。 */
+  function holdTime(s, gapMs) {
+    const t = s && s.time;
+    if (!t) return false;
+    const story = nowOf(s) - Math.max(0, gapMs || 0);
+    const real = Date.now();
+    s.time = { start: story, setAt: real, marker: "hold", markerAt: real };
+    return true;
+  }
+  /* 故事里的「现在」。冻结中（s.time.frozenAt 有值）就一直停在那一刻 ——
+     用户「暂时退出」时用它，免得离开的那段被算进故事里。 */
+  function nowOf(s) {
+    const t = s && s.time;
+    const base = (t && typeof t.frozenAt === "number") ? t.frozenAt : Date.now();
+    return base + timeOffset(s);
+  }
+  /* ── 时间冻结（10-16 用户要求）────────────────────────
+     双击对话设置里那个时间就冻结 / 再双击解冻；退出应用时也会问一句。
+     冻结期间故事时间不走（nowOf 停在冻结那一刻）。 */
+  function isFrozen(s) { return !!(s && s.time && typeof s.time.frozenAt === "number"); }
+  function freezeTime(s) {
+    if (!s || !s.time || isFrozen(s)) return false;
+    s.time.frozenAt = Date.now();
+    return true;
+  }
+  function unfreezeTime(s) {
+    if (!isFrozen(s)) return false;
+    const story = nowOf(s);          /* 冻结那一刻的故事时间（必须在删 frozenAt 之前取） */
+    const real = Date.now();
+    /* 冻结期间的时间不算数：以「解冻这一刻」为新基准，故事仍 1:1 跟随现实 */
+    delete s.time.frozenAt;
+    s.time.start = story;
+    s.time.setAt = real;
+    return true;
+  }
+  /* 把一条现实时间戳换算成故事时间（手机消息的 ts 就是现实时间戳） */
+  function storyAt(s, realMs) { return (typeof realMs === "number" ? realMs : Date.now()) + timeOffset(s); }
+  function fmtStory(ms, withSec) {
+    const d = new Date(ms);
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) + " " +
+      pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + (withSec ? (":" + pad2(d.getSeconds())) : "");
+  }
+  function fmtStoryShort(ms) {
+    const d = new Date(ms);
+    return (d.getMonth() + 1) + "月" + d.getDate() + "日 " + pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+  }
+  function weekdayOf(ms) { return "周" + WEEK_CN[new Date(ms).getDay()]; }
+  /* 只要时:分 —— 顶栏那个按钮窄，塞不下日期 */
+  function fmtHM(ms) {
+    const d = new Date(ms);
+    return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+  }
+  /* 这个时间点合不合法（带角色时）。返回 { ok, from, to } */
+  function checkTime(ch, ms) {
+    const r = validRange(ch);
+    if (!r) return { ok: true, from: null, to: null };
+    return { ok: ms >= r.from && ms < r.to, from: r.from, to: r.to };
+  }
+  /* 给 AI 看的时间行 */
+  function timeLine(ch, s) {
+    if (!s || !hasTimeline(s)) return "";
+    const ms = nowOf(s);
+    let t = "【当前时间】" + fmtStory(ms) + "（" + weekdayOf(ms) + "）—— 这是你们故事里的「现在」，" +
+      "顺着它往下写，别倒退、也别跳到别的季节。";
+    const r = validRange(ch);
+    if (r) {
+      t += "\n【时间范围】角色只可能处在这个区间内：" + fmtStory(r.from).slice(0, 10) + " 至 " +
+        fmtStory(r.to).slice(0, 10) + "。写日期时不要越出这个范围。";
+    }
+    return t;
+  }
+
+  /* 中文数字（够用就行：一二三…十，十一，二十，二十五） */
+  function cnNum(s) {
+    const map = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+    const t = String(s || "").trim();
+    if (/^\d+$/.test(t)) return Number(t);
+    if (t === "十") return 10;
+    if (/^十[零一二三四五六七八九]$/.test(t)) return 10 + map[t[1]];
+    if (/^[一二两三四五六七八九]十$/.test(t)) return map[t[0]] * 10;
+    if (/^[一二两三四五六七八九]十[零一二三四五六七八九]$/.test(t)) return map[t[0]] * 10 + map[t[2]];
+    return (map[t] === undefined ? NaN : map[t]);
+  }
+  /* 从一段话里认一个「钟点」（20:30 / 晚上八点半 / 八点二十）→ 那一天的那个时刻 */
+  function clockFrom(label, base) {
+    const t = String(label || "");
+    let hh = NaN, mm = 0, part = "";
+    let m = /(\d{1,2})\s*[:：]\s*(\d{1,2})/.exec(t);
+    if (m) { hh = Number(m[1]); mm = Number(m[2]); }
+    else {
+      m = /(凌晨|清晨|早上|上午|中午|下午|傍晚|晚上|夜里|夜)?([零一二三四五六七八九十两\d]{1,3})点(半|[零一二三四五六七八九十两\d]{1,3}分)?/.exec(t);
+      if (!m) return null;
+      part = m[1] || "";
+      hh = cnNum(m[2]);
+      if (m[3]) mm = (m[3] === "半") ? 30 : cnNum(String(m[3]).replace("分", ""));
+    }
+    if (!isFinite(hh) || hh > 24 || !isFinite(mm) || mm > 59) return null;
+    if (/下午|傍晚|晚上|夜里|夜/.test(part) && hh < 12) hh += 12;
+    if (/凌晨|清晨/.test(part) && hh === 12) hh = 0;
+    if (part === "中午" && hh < 12) hh += 12;
+    const d = new Date(base);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh % 24, mm, 30, 0).getTime();
+  }
+  /* 认一条括号里的话，给出「新的故事时间」。认不出回 null */
+  function jumpOne(raw, base, ctx) {
+    const t = String(raw || "").replace(/\s+/g, "");
+    if (!t) return null;
+    const day = (n) => base + n * DAY_MS;
+    const at = (ms, hh, mm) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm, 0, 0).getTime(); };
+    let m;   /* 提前声明：下面好几段都要复用（写进后面的分支里会踩 TDZ） */
+    if (/(第二天|次日|明天)(早上|上午|清晨)/.test(t)) return { ms: at(day(1), 8, 0), label: "第二天早上" };
+    if (/(第二天|次日|明天)中午/.test(t)) return { ms: at(day(1), 12, 0), label: "第二天中午" };
+    if (/(第二天|次日|明天)(晚上|傍晚|夜里)/.test(t)) return { ms: at(day(1), 20, 0), label: "第二天晚上" };
+    if (/(第二天|次日|明天)/.test(t)) return { ms: day(1), label: "第二天" };
+    if (/后天/.test(t)) return { ms: day(2), label: "后天" };
+    if (/昨天/.test(t)) return { ms: day(-1), label: "前一天" };
+    if (/前天/.test(t)) return { ms: day(-2), label: "前两天" };
+    if (/几天后|过了几天|过了几天后/.test(t)) return { ms: day(3), label: "几天后" };
+    if (/一周后|一星期后|七天后/.test(t)) return { ms: day(7), label: "一周后" };
+    if (/一个月后/.test(t)) return { ms: day(30), label: "一个月后" };
+    /* 通用的「N 单位后」：两天后 / 三年后 / 半个月后 / 三周后… */
+    m = /(半|[零一二三四五六七八九十两\d]{1,3})(年|个月|月|周|星期|天)后/.exec(t);
+    if (m) {
+      const n = (m[1] === "半") ? 0.5 : cnNum(m[1]);
+      const u = m[2];
+      if (isFinite(n) && n > 0) {
+        /* 「半年后」不能 Math.round(0.5)=1 变成整年：不满 1 年的按天数折算 */
+        const ms2 = (u === "年") ? (n >= 1 ? addYears(base, Math.round(n)) : day(n * 365))
+          : (u === "个月" || u === "月") ? day(n * 30)
+            : (u === "周" || u === "星期") ? day(n * 7)
+              : day(n);
+        return { ms: ms2, label: m[1] + u + "后" };
+      }
+    }
+    if (/过了一会|过一会儿|一会儿|片刻后|稍后|没多久/.test(t)) return { ms: base + 15 * 60000, label: "过了一小会儿" };
+    if (/半小时后|半个小时后/.test(t)) return { ms: base + 30 * 60000, label: "半小时后" };
+    m = /(半|[零一二三四五六七八九十两\d]{1,3})(年|个月|月|周|星期|天)前/.exec(t);
+    if (m) {
+      const n = (m[1] === "半") ? 0.5 : cnNum(m[1]);
+      const u = m[2];
+      if (isFinite(n) && n > 0) {
+        /* 同「后」分支：「半年前」不能 Math.round(0.5)=1 变成整年 */
+        const ms3 = (u === "年") ? (n >= 1 ? addYears(base, -Math.round(n)) : day(-n * 365))
+          : (u === "个月" || u === "月") ? day(-n * 30)
+            : (u === "周" || u === "星期") ? day(-n * 7)
+              : day(-n);
+        return { ms: ms3, label: m[1] + u + "前" };
+      }
+    }
+    m = /([零一二三四五六七八九十两\d]{1,3})个?小时后/.exec(t);
+    if (m) { const h = cnNum(m[1]); if (isFinite(h) && h > 0 && h <= 72) return { ms: base + h * 3600000, label: h + " 小时后" }; }
+    m = /([零一二三四五六七八九十两\d]{1,3})分钟后/.exec(t);
+    if (m) { const n = cnNum(m[1]); if (isFinite(n) && n > 0 && n <= 1440) return { ms: base + n * 60000, label: n + " 分钟后" }; }
+    if (/到达?约定|约定的时间|约定时间|到点了|该走了|时间到了/.test(t)) {
+      /* 从最近的对话里捞一个钟点（例：上一句说的「八点见」），把时间推到那一刻 */
+      const c = clockFrom(String((ctx && ctx.recent) || "") + " " + t, base);
+      if (c !== null) return { ms: (c <= base ? c + DAY_MS : c), label: "约定的时间" };
+      return { ms: base + 2 * 3600000, label: "约定的时间（按两小时后算）" };
+    }
+    const c = clockFrom(t, base);
+    if (c !== null) return { ms: (c <= base ? c + DAY_MS : c), label: "当天的 " + fmtStory(c).slice(11, 16) };
+    return null;
+  }
+  /* 只看括号里的内容；一段话里可能有好几个括号，取第一个认得出的 */
+  function parseTimeJump(text, base, ctx) {
+    const re = /[（(]([^）)]{1,60})[）)]/g;
+    let m;
+    while ((m = re.exec(String(text || ""))) !== null) {
+      const r = jumpOne(m[1], base, ctx);
+      if (r) return r;
+    }
+    return null;
+  }
+  /* 最近几条消息拼一行，给「到了约定时间」当上下文 */
+  function recentLine(s) {
+    try {
+      return (allMsgs(s) || []).slice(-8).map((m) => msgText(m)).join(" ").slice(-500);
+    } catch (e) { return ""; }
+  }
+  /* 按用户输入里的括号把故事时间推过去。返回：
+       null                    = 没认出来，什么都不做
+       { ok:false, from, to }  = 认出来了但越出角色设定，必须拒绝
+       { ok:true, ms, label }  = 可以推，ms 是新的「故事现在」 */
+  function tryJumpTime(s, ch, text) {
+    if (!s) return null;
+    const base = hasTimeline(s) ? nowOf(s) : Date.now();
+    const r = parseTimeJump(text, base, { recent: recentLine(s) });
+    if (!r) return null;
+    const ck = checkTime(ch, r.ms);
+    if (!ck.ok) return { ok: false, label: r.label, from: ck.from, to: ck.to };
+    return { ok: true, ms: r.ms, label: r.label };
   }
 
   function ensureMemory(rec) {
@@ -132,7 +504,7 @@
     if (!settings.apiKey) return { days: 0, usage: null, newText: "" };
     const cutoff = startOfToday();
     const groups = {};
-    (rec.messages || []).forEach((msg) => {
+    allMsgs(rec).forEach((msg) => {
       const ts = msg.ts || 0;
       if (!ts || ts <= m.coveredUntil || ts >= cutoff) return;
       const d = dateStr(ts);
@@ -143,7 +515,7 @@
     let done = 0;
     const newParts = [];
     for (const d of dates) {
-      const text = dayTranscript(groups[d]);
+      const text = dayTranscript(groups[d], aiNameOf(rec));
       if (text.length > 20) {
         const out = await summarize(settings, CONFIG.COMPRESS_PROMPTS.daily, "日期：" + d + "\n\n" + text, 700);
         usage = Api.sumUsage(usage, out.usage);
@@ -253,12 +625,16 @@
   /* 用近期原文更新「当前场景」（会话级动态值）。sinceTs = 上次更新覆盖到的时间点 */
   async function updateScene(rec, save, settings, sinceTs) {
     if (!settings.apiKey) return null;
-    const txt = recentTranscript(rec.messages, sinceTs || 0, 40);
+    const txt = recentTranscript(allMsgs(rec), sinceTs || 0, 40, rec);
     if (!txt.trim()) return null;
     const out = await summarize(settings, CONFIG.COMPRESS_PROMPTS.scene,
       "现有场景：\n" + (rec.scene || "（空）") + "\n\n近期对话：\n" + txt, 400);
-    if (out.text.trim()) { rec.scene = out.text.trim(); if (save) save(); }
-    return out.usage;
+    const changed = !!(out.text && out.text.trim());
+    if (changed) { rec.scene = out.text.trim(); if (save) save(); }
+    /* 返回 {usage, changed}：调用方据此决定要不要推进水位线。
+       空输出时若照样当成功、把水位线推过去，这一天的场景更新就被静默跳过、之后不再重试
+       （与 rollup / reCompress 的「拿到非空结果才推进」口径一致）。 */
+    return { usage: out.usage, changed: changed };
   }
 
   /* 上线补压：日压缩 → 周/月并合 → 更新认知。opts.cognition 控制是否维护认知档案 */
@@ -273,6 +649,59 @@
       usage = Api.sumUsage(usage, rs && rs.usage);
     }
     return { usage: usage, days: res.days };
+  }
+
+  /* 日更：场景 / 共同经历 / 关系 每天各更新一次（用户拍板：默认开）。
+     水位线**拆成两条**：rec.dailySceneDay（场景）、rec.dailyRelationDay（关系/经历），
+     另保留 rec.dailyDay 作为「两项都完成」的汇总标记（别处还在读它）。
+     【为什么拆】原来只要任一项成功就把「今天已完成」打上 —— 失败的那项当天不再重试，
+     等于静默丢掉一次更新；可改成「两项都成功才推进」又会让老是失败的那项天天重跑、白烧钱。
+     拆开之后：各自成功各自推进，第二天谁没完成就只补谁。
+     底线不变：**拿到非空结果才推进**（changed），空输出停在原地等下次。
+     返回本次合并后的用量（供 recordUsage 记在「日更」名下）。 */
+  async function dailyRefresh(rec, save, settings, base) {
+    if (!rec || !settings || !settings.apiKey) return null;
+    if (settings.dailyUpdate === false) return null;
+    const today = dateStr(Date.now());
+    /* 兼容旧数据：老版本只记 rec.dailyDay。当它等于今天、而两条新水位线还没建立起来时，
+       就认为「今天已经跑过」，直接跳过 —— 否则升级当天会白跑一遍（白花钱）。 */
+    if (rec.dailyDay === today && rec.dailySceneDay === undefined && rec.dailyRelationDay === undefined) return null;
+    /* 每项每天最多试 2 次（rec.dailyTries）：
+       一次失败不会让整天都不补；模型老是吐不出内容时，也不会「每发一条消息就重试一次」白烧钱。 */
+    const tries = (rec.dailyTries && rec.dailyTries.day === today) ? rec.dailyTries : { day: today, scene: 0, relation: 0 };
+    rec.dailyTries = tries;
+    const needScene = (rec.dailySceneDay !== today) && tries.scene < 2;
+    const needRelation = (rec.dailyRelationDay !== today) && tries.relation < 2;
+    if (!needScene && !needRelation) return null;
+    const since = rec.dailyDayTs || (rec.memory && rec.memory.coveredUntil) || 0;
+    const txt = recentTranscript(allMsgs(rec), since, 80, rec);
+    /* 没有新对话可总结 → 两项都标记完成（不打无谓的请求） */
+    if (!txt.trim()) {
+      rec.dailySceneDay = today; rec.dailyRelationDay = today;
+      rec.dailyDay = today; if (save) save();
+      return null;
+    }
+    let usage = null;
+    let done = false;
+    if (needScene) {
+      tries.scene++;
+      const su = await updateScene(rec, save, settings, since);
+      if (su && su.usage) usage = Api.sumUsage(usage, su.usage);
+      /* su 为 null = 压根没有可总结的文本（不是失败）→ 也算完成，别天天重试 */
+      if (!su || su.changed) { rec.dailySceneDay = today; done = true; }
+    }
+    if (needRelation) {
+      tries.relation++;
+      const rs = await updateRelationShared(rec, save, settings, base, txt);
+      if (rs && rs.usage) usage = Api.sumUsage(usage, rs.usage);
+      /* changed=false 说明模型两轮都没吐出可用内容 → 不推进，下次再补 */
+      if (rs && rs.changed) { rec.dailyRelationDay = today; done = true; }
+    }
+    if (rec.dailySceneDay === today && rec.dailyRelationDay === today) {
+      rec.dailyDay = today; rec.dailyDayTs = Date.now(); done = true;
+    }
+    if (done && save) save();
+    return usage;
   }
 
   /* ── 上下文筛选 ────────────────────────────────── */
@@ -320,7 +749,7 @@
     const covered = (sess.memory && sess.memory.coveredUntil) || 0;
     const msgs = collectSessionMsgs(sess.messages, covered, 80);
     if (!msgs.length) return { ok: false, reason: "empty" };
-    const input = dayTranscript(msgs);
+    const input = dayTranscript(msgs, aiNameOf(sess));
     if (input.replace(/\s/g, "").length < 8) return { ok: false, reason: "empty" };
     const out = await summarize(settings, CONFIG.COMPRESS_PROMPTS.filter, "筛选规则：\n" + rule + "\n\n对话：\n" + input, 2000);
     cw.turns = parseTurns(out.text, msgs);
@@ -406,5 +835,9 @@
     return { ok: true, usage: out.usage };
   }
 
-  window.Memory = { buildSystemText, memoryText, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, correctMemory };
+  window.Memory = { buildSystemText, personaText, memoryText, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, correctMemory, activePersona,
+    /* 故事时间轴（10-15）：主对话 / 手机 / 世界生成 / 摘要都读它 */
+    hasTimeline, timeOffset, nowOf, storyAt, fmtStory, fmtStoryShort, weekdayOf,
+    validRange, checkTime, timeLine, parseYMD, addYears, ageOf, tryJumpTime, DAY_MS, fmtHM,
+    markLeft, awayGap, rebaseTime, holdTime, isFrozen, freezeTime, unfreezeTime };
 })();

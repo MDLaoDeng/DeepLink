@@ -167,6 +167,31 @@
     })));
   }
 
+  /* DeepSeek 自家搜索（2026-10-17 上线的 /v1/tools/search）。
+     用主模型那套 baseUrl + apiKey，不用额外填 Key —— 这是它比 Tavily 省事的地方。
+     计费：每次 0.005 元，**只有返回非空结果才收钱**，失败和空结果免费。
+     结果里带 summary（600~800 字，本来就是写给模型看的），拿它当 snippet
+     比那 100 字的 description 有用得多。 */
+  async function deepseek(query, settings) {
+    const key = String(settings.apiKey || "");
+    if (!key) throw new Error("主模型没有 API Key，用不了 DeepSeek 搜索");
+    const root = String(settings.baseUrl || "").replace(/\/+$/, "").replace(/\/v1$/i, "");
+    if (!/deepseek\.com/i.test(root)) throw new Error("主模型不是 DeepSeek，接不了它的搜索");
+    const data = await fetchJson(root + "/v1/tools/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+      body: JSON.stringify({ query: String(query || "").slice(0, 128), count: 6, need_content: false })
+    }, 20000);
+    return clean((data.results || []).map((r) => ({
+      title: r.title || r.site_name || "",
+      url: r.url,
+      snippet: r.summary || r.description || r.content || ""
+    })));
+  }
+  function deepseekReady(settings) {
+    return !!String(settings.apiKey || "") && /deepseek\.com/i.test(String(settings.baseUrl || ""));
+  }
+
   const Search = {
     /* 返回 { provider, results:[{title,url,snippet}] } */
     async search(query, settings) {
@@ -174,6 +199,9 @@
 
       if (mode === "off") return { provider: "off", results: [] };
 
+      if (mode === "deepseek") {
+        return { provider: "DeepSeek", results: await deepseek(query, settings) };
+      }
       if (mode === "tavily") {
         return { provider: "Tavily", results: await tavily(query, settings) };
       }
@@ -181,8 +209,17 @@
         return { provider: "自定义", results: await custom(query, settings) };
       }
 
-      // auto：免 Key 源并行，按 SearXNG > DuckDuckGo > Wikipedia 优先级择优
+      /* auto：主模型就是 DeepSeek 时**先走它自己的搜索** —— 质量比免费源稳、带长摘要，
+         代价是每次 0.005 元。失败或没结果再往下面的免费源退，用户永远拿得到东西。 */
       let lastErr = null;
+      if (deepseekReady(settings)) {
+        try {
+          const results = await deepseek(query, settings);
+          if (results.length) return { provider: "DeepSeek", results };
+        } catch (e) { lastErr = e; }
+      }
+
+      // 免 Key 源并行，按 SearXNG > DuckDuckGo > Wikipedia 优先级择优
       try {
         const hit = await racePrefer([
           { name: "SearXNG", promise: searxng(query, settings) },

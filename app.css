@@ -43,7 +43,9 @@ body {
 .splash {
   position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 200;
   background-color: #000000;
-  display: flex; align-items: center; justify-content: center;
+  /* 列方向：上面是启动动画舞台（图片/头像），下面是文字块 */
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  overflow: hidden;
   transition: opacity .6s ease, transform .6s ease;
   /* 最后一道闸：JS 定时器全被系统冻住（切后台 / 录屏 / 投屏）时，
      CSS 动画仍会按时间轴走到终点，到点自己隐掉。8 秒足够晚，不会跟正常收尾抢。 */
@@ -56,6 +58,188 @@ body {
                sans-serif;
 }
 .splash.hide { opacity: 0; transform: scale(1.04); pointer-events: none; }
+
+/* 启动动画舞台：放自定义图片 / 角色头像（没设就空着，不影响布局） */
+.splash-stage { display: flex; align-items: center; justify-content: center; margin-bottom: 20px; }
+.splash-stage:empty { display: none; }
+.splash-pic {
+  display: block; width: 108px; height: 108px; object-fit: cover;
+  border-radius: 50%; border: 2px solid rgba(255, 255, 255, .16);
+  background-color: rgba(255, 255, 255, .06);
+  -webkit-animation: splash-pop .8s cubic-bezier(.22, .8, .24, 1) both;
+  animation: splash-pop .8s cubic-bezier(.22, .8, .24, 1) both;
+}
+@-webkit-keyframes splash-pop { from { opacity: 0; -webkit-transform: scale(.55); } to { opacity: 1; -webkit-transform: none; } }
+@keyframes splash-pop { from { opacity: 0; transform: scale(.55); } to { opacity: 1; transform: none; } }
+
+/* ── 五套启动动画（data-anim 1~5）─────────────────────────────
+   纯 CSS（动画 / 变换 / 伪元素），Chrome 83 稳过。
+   每套比"能跑"多下了一点功夫：光泽扫过、多层光晕、纸页投影、双环呼吸、头像光圈。
+   装饰一律用 ::before / ::after，不往 DOM 里塞节点（也就不会影响排版）。 */
+@-webkit-keyframes splash-word {
+  from { opacity: 0; -webkit-transform: translateY(20px); }
+  to { opacity: 1; -webkit-transform: none; }
+}
+@keyframes splash-word {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: none; }
+}
+@-webkit-keyframes splash-line { to { width: 72px; } }
+@keyframes splash-line { to { width: 72px; } }
+
+/* 1 经典：文字先后浮起 + 下划线展开 + 一道光斜扫过 */
+.splash[data-anim="1"] .splash-mark .w1 {
+  -webkit-animation: splash-word 1.1s cubic-bezier(.16, 1, .3, 1) both;
+  animation: splash-word 1.1s cubic-bezier(.16, 1, .3, 1) both;
+}
+.splash[data-anim="1"] .splash-mark .w2 {
+  -webkit-animation: splash-word 1.1s cubic-bezier(.16, 1, .3, 1) .18s both;
+  animation: splash-word 1.1s cubic-bezier(.16, 1, .3, 1) .18s both;
+}
+.splash[data-anim="1"] .splash-line {
+  -webkit-animation: splash-line .9s cubic-bezier(.16, 1, .3, 1) .72s forwards;
+  animation: splash-line .9s cubic-bezier(.16, 1, .3, 1) .72s forwards;
+}
+.splash[data-anim="1"]::after {
+  content: ""; position: absolute; top: -30%; bottom: -30%; width: 38%; left: -55%;
+  pointer-events: none; -webkit-transform: skewX(-14deg); transform: skewX(-14deg);
+  background: linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.10) 42%,
+    rgba(255,255,255,.26) 50%, rgba(255,255,255,.10) 58%, rgba(255,255,255,0) 100%);
+  -webkit-animation: splash-sheen 1.6s cubic-bezier(.3, .7, .2, 1) .3s both;
+  animation: splash-sheen 1.6s cubic-bezier(.3, .7, .2, 1) .3s both;
+}
+@-webkit-keyframes splash-sheen {
+  from { left: -55%; opacity: 0; } 18% { opacity: 1; } to { left: 116%; opacity: 0; }
+}
+@keyframes splash-sheen {
+  from { left: -55%; opacity: 0; } 18% { opacity: 1; } to { left: 116%; opacity: 0; }
+}
+
+/* 2 星点：两圈光晕交错向外扩散（配 box-shadow 做柔光），文字随后浮起 */
+.splash[data-anim="2"] .splash-mark .w1 {
+  -webkit-animation: splash-word 1s cubic-bezier(.16, 1, .3, 1) .3s both;
+  animation: splash-word 1s cubic-bezier(.16, 1, .3, 1) .3s both;
+}
+.splash[data-anim="2"] .splash-mark .w2 {
+  -webkit-animation: splash-word 1s cubic-bezier(.16, 1, .3, 1) .44s both;
+  animation: splash-word 1s cubic-bezier(.16, 1, .3, 1) .44s both;
+}
+.splash[data-anim="2"] .splash-line {
+  -webkit-animation: splash-line .8s ease .88s forwards; animation: splash-line .8s ease .88s forwards;
+}
+.splash[data-anim="2"]::before,
+.splash[data-anim="2"]::after {
+  content: ""; position: absolute; left: 50%; top: 42%;
+  width: 84px; height: 84px; margin: -42px 0 0 -42px; border-radius: 50%;
+  pointer-events: none;
+  box-shadow: 0 0 0 0 rgba(130, 205, 255, .55), 0 0 40px 0 rgba(77, 141, 255, .30);
+  -webkit-animation: splash-halo 2.4s cubic-bezier(.15, .6, .3, 1) infinite;
+  animation: splash-halo 2.4s cubic-bezier(.15, .6, .3, 1) infinite;
+}
+.splash[data-anim="2"]::after {
+  -webkit-animation-delay: 1.2s; animation-delay: 1.2s;
+  box-shadow: 0 0 0 0 rgba(34, 211, 238, .50), 0 0 34px 0 rgba(34, 211, 238, .26);
+}
+@-webkit-keyframes splash-halo {
+  0% { opacity: 0; -webkit-transform: scale(.45); } 22% { opacity: .95; } 100% { opacity: 0; -webkit-transform: scale(3.6); }
+}
+@keyframes splash-halo {
+  0% { opacity: 0; transform: scale(.45); } 22% { opacity: .95; } 100% { opacity: 0; transform: scale(3.6); }
+}
+
+/* 3 纸页：一张带投影的卡片从下方带点倾角滑上来，文字从卡片上浮现 */
+.splash[data-anim="3"]::before {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 258px; height: 168px; margin: -84px 0 0 -129px; border-radius: 16px;
+  pointer-events: none;
+  background: linear-gradient(158deg, rgba(255, 255, 255, .085), rgba(255, 255, 255, .015));
+  border: 1px solid rgba(255, 255, 255, .10);
+  box-shadow: 0 22px 56px -20px rgba(0, 0, 0, .68);
+  -webkit-animation: splash-rise 1s cubic-bezier(.16, 1, .3, 1) both;
+  animation: splash-rise 1s cubic-bezier(.16, 1, .3, 1) both;
+}
+.splash[data-anim="3"] .splash-mark {
+  -webkit-animation: splash-word .9s cubic-bezier(.16, 1, .3, 1) .34s both;
+  animation: splash-word .9s cubic-bezier(.16, 1, .3, 1) .34s both;
+}
+.splash[data-anim="3"] .splash-mark .w1,
+.splash[data-anim="3"] .splash-mark .w2 { -webkit-animation: none; animation: none; }
+.splash[data-anim="3"] .splash-line {
+  -webkit-animation: splash-line .8s ease .72s forwards; animation: splash-line .8s ease .72s forwards;
+}
+@-webkit-keyframes splash-rise {
+  from { opacity: 0; -webkit-transform: translateY(52px) rotate(-2.2deg); } to { opacity: 1; -webkit-transform: none; }
+}
+@keyframes splash-rise {
+  from { opacity: 0; transform: translateY(52px) rotate(-2.2deg); } to { opacity: 1; transform: none; }
+}
+
+/* 4 呼吸：大小两圈错开呼吸，像在缓慢起落 */
+.splash[data-anim="4"]::before,
+.splash[data-anim="4"]::after {
+  content: ""; position: absolute; left: 50%; top: 44%; border-radius: 50%;
+  pointer-events: none;
+  width: 220px; height: 220px; margin: -110px 0 0 -110px;
+  border: 1.5px solid rgba(77, 141, 255, .48);
+  -webkit-animation: splash-breathe 3s ease-in-out infinite;
+  animation: splash-breathe 3s ease-in-out infinite;
+}
+.splash[data-anim="4"]::after {
+  width: 286px; height: 286px; margin: -143px 0 0 -143px;
+  border-color: rgba(34, 211, 238, .38);
+  -webkit-animation-delay: 1.5s; animation-delay: 1.5s;
+}
+@-webkit-keyframes splash-breathe {
+  0%, 100% { -webkit-transform: scale(.80); opacity: .22; }
+  50% { -webkit-transform: scale(1.08); opacity: .82; }
+}
+@keyframes splash-breathe {
+  0%, 100% { transform: scale(.80); opacity: .22; }
+  50% { transform: scale(1.08); opacity: .82; }
+}
+.splash[data-anim="4"] .splash-mark .w1 {
+  -webkit-animation: splash-word 1.1s cubic-bezier(.16, 1, .3, 1) .55s both;
+  animation: splash-word 1.1s cubic-bezier(.16, 1, .3, 1) .55s both;
+}
+.splash[data-anim="4"] .splash-mark .w2 {
+  -webkit-animation: splash-word 1.1s cubic-bezier(.16, 1, .3, 1) .7s both;
+  animation: splash-word 1.1s cubic-bezier(.16, 1, .3, 1) .7s both;
+}
+.splash[data-anim="4"] .splash-line {
+  -webkit-animation: splash-line .9s ease 1.2s forwards; animation: splash-line .9s ease 1.2s forwards;
+}
+
+/* 5 头像：头像弹出后有一圈光圈扩散，文字再跟上 */
+.splash[data-anim="5"] .splash-stage { position: relative; }
+.splash[data-anim="5"] .splash-pic {
+  -webkit-animation: splash-pop 1s cubic-bezier(.16, 1, .3, 1) both;
+  animation: splash-pop 1s cubic-bezier(.16, 1, .3, 1) both;
+  box-shadow: 0 12px 34px -12px rgba(0, 0, 0, .7);
+}
+.splash[data-anim="5"] .splash-stage::before {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 108px; height: 108px; margin: -54px 0 0 -54px; border-radius: 50%;
+  pointer-events: none; border: 2px solid rgba(130, 205, 255, .5);
+  -webkit-animation: splash-ring 1.9s cubic-bezier(.15, .6, .3, 1) .45s infinite;
+  animation: splash-ring 1.9s cubic-bezier(.15, .6, .3, 1) .45s infinite;
+}
+@-webkit-keyframes splash-ring {
+  0% { opacity: .75; -webkit-transform: scale(.94); } 100% { opacity: 0; -webkit-transform: scale(1.95); }
+}
+@keyframes splash-ring {
+  0% { opacity: .75; transform: scale(.94); } 100% { opacity: 0; transform: scale(1.95); }
+}
+.splash[data-anim="5"] .splash-mark .w1 {
+  -webkit-animation: splash-word 1s cubic-bezier(.16, 1, .3, 1) .95s both;
+  animation: splash-word 1s cubic-bezier(.16, 1, .3, 1) .95s both;
+}
+.splash[data-anim="5"] .splash-mark .w2 {
+  -webkit-animation: splash-word 1s cubic-bezier(.16, 1, .3, 1) 1.09s both;
+  animation: splash-word 1s cubic-bezier(.16, 1, .3, 1) 1.09s both;
+}
+.splash[data-anim="5"] .splash-line {
+  -webkit-animation: splash-line .9s ease 1.5s forwards; animation: splash-line .9s ease 1.5s forwards;
+}
 
 .splash-mark {
   display: flex; flex-direction: column; align-items: center;
@@ -146,6 +330,21 @@ body {
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .session-list { flex: 1; overflow-y: auto; padding: 6px 10px; -webkit-overflow-scrolling: touch; }
+/* ── 侧栏三栏（10-16 用户要求）：助手 / 现实扮演角色 / 手机角色 ──
+   三栏共用同一块区域，点标题切栏（.on 高亮）。 */
+.side-tabs { display: flex; padding: 0 8px 6px; }
+.side-tab {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center;
+  padding: 7px 4px; border: 0; background: transparent; color: var(--text-mute);
+  font: inherit; font-size: 11px; line-height: 1.2; cursor: pointer; border-radius: 11px;
+  transition: background-color .22s, color .22s;
+}
+.side-tab .ic { font-size: 17px; margin-bottom: 3px; }
+.side-tab > span:last-child { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-tab.on { background-color: var(--panel-2); color: var(--accent); }
+.side-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.side-pane[hidden] { display: none; }
+.char-list-side { flex: 1; overflow-y: auto; padding: 6px 10px; -webkit-overflow-scrolling: touch; }
 .side-foot {
   display: flex; padding: 10px 14px calc(14px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border);
@@ -161,6 +360,12 @@ body {
 }
 .session-item > *:not(:last-child) { margin-right: 8px; }
 .session-item:active { transform: scale(.98); }
+/* 会话列表的空态 / 「正在读取本地数据…」——
+   读失败时先用它占位，别让用户对着一片空白以为数据丢了（见 app.js 的 showReadingHint） */
+.session-empty { padding: 18px 14px; font-size: 13px; line-height: 1.6; color: var(--text-mute); text-align: center; }
+/* 角色弹窗顶部的「还差几栏才能开始对话」：缺着标红、齐了变主题色 */
+.char-ready-miss { color: var(--danger); }
+.char-ready-ok { color: var(--accent); }
 .session-item.active { background-color: var(--panel-2); color: var(--text); }
 .session-item .s-title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .session-item .s-del {
@@ -186,7 +391,9 @@ body {
   background-color: var(--glass);
   z-index: 10;
 }
-.topbar > *:not(:last-child) { margin-right: 10px; }
+/* 顶栏元素多（菜单 / 标题 / 模型 / 时间 / 角色 / 手机 / 日夜），间距收紧一点，
+   否则 420px 宽的机器上标题会被挤成一个字 */
+.topbar > *:not(:last-child) { margin-right: 6px; }
 .topbar-title { flex: 1; font-weight: 600; font-size: 15px; overflow: hidden;
   white-space: nowrap; text-overflow: ellipsis; }
 .pill {
@@ -266,7 +473,8 @@ body {
 .avatar {
   width: 30px; height: 30px; border-radius: 10px; flex: none; overflow: hidden;
   display: flex; align-items: center; justify-content: center; font-size: 15px;
-  background-color: var(--panel-2); border: 1px solid var(--border);
+  /* 无框：靠背景色区分即可（见「能无框就无框」那条口径） */
+  background-color: var(--panel-2); border: 1px solid transparent;
 }
 .avatar img, .avatar-preview img, .s-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .msg.user .avatar { background-color: var(--user-bg); color: var(--user-ink); border: 0; }
@@ -275,7 +483,9 @@ body {
   max-width: calc(100% - 44px);
   padding: 11px 14px; border-radius: 16px;
   background-color: var(--ai-bg); color: var(--ai-ink);
-  border: 1px solid var(--border);
+  /* 去边框（10-18 用户口径：能无框就无框）：气泡本来就有背景色 + 一层柔阴影，
+     再描一圈线只会显得碎。保留 1px 透明边框，避免去掉后盒模型尺寸跳 2px。 */
+  border: 1px solid transparent;
   box-shadow: var(--shadow);
   overflow-wrap: break-word; word-break: break-word;
 }
@@ -350,7 +560,9 @@ body {
 
 /* ── 相机 ────────────────────────────────────────── */
 .camera-layer {
-  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 120;
+  /* 高度跟「可视视口」走（app.js 把 --app-h 喂在 documentElement 上），不用 bottom:0：
+     安卓里软键盘弹起时 fixed 的 bottom 仍钉在布局视口底部，文字工具的输入框会被键盘盖住。 */
+  position: fixed; top: 0; right: 0; left: 0; height: var(--app-h, 100vh); z-index: 120;
   background-color: #000; display: flex; flex-direction: column;
 }
 .cam-stage { position: relative; flex: 1; overflow: hidden; display: flex; }
@@ -583,6 +795,127 @@ body {
 .icon-btn.send { background-color: var(--accent); color: var(--accent-ink); border: 0; }
 .icon-btn.danger { background-color: var(--danger); color: #fff; border: 0; }
 .icon-btn:disabled { opacity: .4; }
+/* 夜间 10 套主题的 --danger 都是浅粉 #E7798C，配白字对比度只有约 2.8:1
+   （图标能看清的最低要求是 3:1）——「停止生成 / 多选删除 / 挂断 / 录音中」在夜里都偏淡。
+   这里在夜间统一压深一档：#C2415A 配白字约 5:1；日间主题不受影响。 */
+body[data-mode="dark"] .icon-btn.danger,
+body[data-mode="dark"] .mic-btn.recording,
+body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
+
+/* ── 快捷回复（10-14）─────────────────────────────────────────────
+   按钮**无边框**：输入框右侧已经有一个明显的主按钮（发送），
+   再给快捷回复加底加描边就会变成两个「主按钮」，视觉上打架。 */
+.icon-btn.quick-btn { border: 0; background-color: transparent; width: 36px; color: var(--text-dim); }
+.icon-btn.quick-btn.on { color: var(--accent); }
+/* 这条对话还没有记忆时（用户口径：有记忆才能点）—— 置灰、按压也不给回弹，
+   点下去会弹一句「还没有记忆，聊几轮后再用」，见 chat.js 的 quickOpen。 */
+.icon-btn.quick-btn.disabled { opacity: .34; }
+.icon-btn.quick-btn.disabled:active { transform: none; }
+
+/* 加号（拍照 + 上传文件合并入口）：无边框「更多」，点开右上角的小浮窗 */
+.icon-btn.plus-btn { border: 0; background-color: transparent; color: var(--text-dim); }
+.icon-btn.plus-btn:active { background-color: var(--panel-2); }
+
+/* ── 弹出式小浮窗（加号 / 对话设置共用）─────────────────────────────
+   位置由 app.js 按锚点按钮算，贴在按钮边上；点空白或选中某项即收起。 */
+.popover {
+  position: fixed; z-index: 380; min-width: 150px;
+  border: 1px solid var(--border); border-radius: 12px; padding: 6px;
+  background-color: var(--panel); box-shadow: 0 10px 26px rgba(0, 0, 0, .3);
+}
+.popover[hidden] { display: none; }
+.po-item {
+  display: flex; align-items: center; width: 100%;
+  border: 0; background-color: transparent; color: var(--text);
+  font-size: 14px; padding: 10px 12px; border-radius: 9px;
+  cursor: pointer; text-align: left;
+}
+.po-item .ic { width: 18px; height: 18px; flex: none; margin-right: 10px; color: var(--text-dim); }
+.po-item:active { background-color: var(--panel-2); }
+.po-item.readonly { color: var(--text-dim); font-size: 12px; cursor: default; }
+.po-item.readonly:active { background-color: transparent; }
+.po-item.readonly .ic { width: 16px; height: 16px; }
+
+/* 面板占住软键盘收起后空出来的底部那一块 */
+.quick-panel {
+  margin-top: 8px; border-top: 1px solid var(--border);
+  max-height: 40vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.qp-head { display: flex; align-items: center; padding: 6px 2px; position: sticky; top: 0; background-color: var(--glass); }
+.qp-head > *:not(:last-child) { margin-right: 8px; }
+.qp-title { display: flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--text); }
+.qp-title .ic { width: 15px; height: 15px; margin-right: 5px; }
+.qp-count { flex: 1; font-size: 12px; color: var(--text-dim); }
+.qp-list { display: flex; flex-direction: column; }
+.qp-list > * { margin-bottom: 8px; }
+.qp-item {
+  display: flex; align-items: flex-start; border: 1px solid var(--border);
+  border-radius: 12px; background-color: var(--panel); padding: 8px 10px;
+}
+/* 修改按钮放在每条回复的**左边**（用户指定的位置） */
+.qp-edit {
+  flex: none; width: 32px; height: 32px; border-radius: 9px; margin-right: 8px;
+  border: 0; background-color: transparent; color: var(--accent); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.qp-edit:active { transform: scale(.9); }
+.qp-text { flex: 1; font-size: 14px; line-height: 1.5; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.qp-hint { font-size: 12px; color: var(--text-dim); padding: 4px 2px 10px; }
+
+/* 「继续说」（最后一条角色消息的操作栏里，和修改 / 复制 / 删除同一排）。
+   用主题强调色，免得在一排灰图标里被忽略；尺寸照旧走 .act-btn。 */
+.cont-act { color: var(--accent); }
+.cont-act:active { background-color: var(--panel-2); }
+
+/* ── 剧情卡（世界生成采纳的那段）：聊天流里居中一张，点开看全文 ───── */
+.msg.world-card { justify-content: center; margin: 12px 0; }
+.world-card-btn {
+  display: flex; align-items: center; max-width: 88%; min-width: 168px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background-color: var(--panel); color: var(--text);
+  font-size: 13px; padding: 9px 12px; cursor: pointer; text-align: left;
+}
+.world-card-btn .wc-ic { width: 16px; height: 16px; flex: none; margin-right: 8px; color: var(--accent); }
+.world-card-btn .wc-text { flex: 1; }
+.world-card-btn .wc-caret { width: 16px; height: 16px; flex: none; margin-left: 8px; color: var(--text-dim); }
+.world-card-btn:active { transform: scale(.98); }
+.msg.world-card.selected .world-card-btn { box-shadow: 0 0 0 2px var(--accent); }
+
+/* 全屏查看：铺满屏幕，左上角返回。正文即灌给 AI 的那一份 */
+.world-view {
+  display: none; position: fixed; left: 0; top: 0; right: 0; bottom: 0;
+  z-index: 420; flex-direction: column; background-color: var(--bg);
+}
+.world-view.show { display: flex; }
+.wv-head {
+  display: flex; align-items: center; flex: none;
+  padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+  border-bottom: 1px solid var(--border); background-color: var(--glass);
+}
+.wv-back { border: 0; background-color: transparent; }
+.wv-title { flex: 1; text-align: center; font-weight: 600; font-size: 15px; margin-right: 40px; }
+.wv-body {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 16px 16px calc(28px + env(safe-area-inset-bottom));
+  font-size: 15px; line-height: 1.85; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+}
+
+/* 输入区的故事时钟（点一下去改）。数字用等宽字形，秒数跳动时不会左右晃 */
+
+/* 剧情生成：一段一个输入框，直接改 */
+.world-edit { display: flex; flex-direction: column; }
+.world-edit > * + * { margin-top: 8px; }
+.world-edit textarea {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  padding: 8px 10px; border-radius: 10px; font: inherit; font-size: 14px; line-height: 1.55;
+  background-color: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); outline: none;
+}
+.world-edit textarea:focus { border-color: var(--accent); box-shadow: var(--glow); }
+
+/* 手机：相邻消息隔了 3 分钟以上就插一条居中的时分（两边都算） */
+.ph-time { text-align: center; font-size: 12px; color: var(--text-mute); margin: 12px 0 4px; }
 
 .composer-tools { display: flex; align-items: center; padding: 8px 2px 0; flex-wrap: wrap; }
 .composer-tools > * { margin-right: 8px; margin-bottom: 8px; }
@@ -628,16 +961,86 @@ body {
   background-color: var(--scrim);
   opacity: 0; pointer-events: none; transition: opacity .3s ease;
 }
+/* 蒙层轻模糊：透出底下的内容但不抢戏。只给「浮窗式」弹窗加 ——
+   设置/用量/导入导出是整页实色底（var(--bg)），模糊它纯属白烧 GPU。 */
+.modal:not(#settingsModal):not(#usageModal):not(#dataModal) {
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
 .modal.show { opacity: 1; pointer-events: auto; }
+/* 自绘选择面板要压在「任何弹窗」之上 —— 它是从别的弹窗里弹出来的二级面板，
+   而 .modal 全是 z-index:60（同级时靠 DOM 顺序决定先后），偏偏 #pickModal 排在
+   #groupModal 之前 → 新建群聊里点「导入某条线的记忆」时，选择面板会被群聊弹窗盖住（实测截图为证）。
+   单独抬到 75：高于所有弹窗（60），低于提示条（80）—— 提示该在最上面。
+   ⚠️ 别改成靠 DOM 顺序解决：以后每新增一个弹窗都要重新排位置，抬层级一次管住。 */
+#pickModal { z-index: 75; }
 .modal-sheet {
   width: 100%; max-height: 88vh; display: flex; flex-direction: column;
   background-color: var(--panel); border-top-left-radius: 22px; border-top-right-radius: 22px;
   border-top: 1px solid var(--border);
-  transform: translateY(14px); transition: transform .34s cubic-bezier(.22, 1, .36, 1);
+  /* 进：从下方浮起 + 轻微放大 + 淡入；出：反向。曲线用「先冲过头再回弹」那味儿的缓出。 */
+  transform: translateY(18px) scale(.985);
+  opacity: 0;
+  transition: transform .38s cubic-bezier(.22, 1, .36, 1), opacity .26s ease;
   padding-bottom: env(safe-area-inset-bottom);
 }
-.modal.show .modal-sheet { transform: translateY(0); }
+.modal.show .modal-sheet { transform: translateY(0) scale(1); opacity: 1; }
 .modal-sheet.small { border-radius: 18px; margin: auto 16px; max-width: 420px; }
+
+/* ── 设置 = 整页而非浮窗（10-17 用户要求）────────────────────────
+   仍然走 .modal 的 show/hide 机制（UI.openModal/closeModal 不用改），
+   只把布局从「底部弹出的 sheet」覆盖成整屏层：背景铺满、去掉圆角与位移。
+   左上角那个返回键在「子页」时回首页、在首页时就是关闭设置（右上角的 × 已隐藏）。 */
+#settingsModal {
+  align-items: stretch;
+  background-color: var(--bg);
+  z-index: 88;
+}
+#settingsModal .modal-sheet {
+  width: 100%; max-width: none; height: 100%; max-height: 100%;
+  border-radius: 0; border-top: 0;
+  /* 整页的进出动画：从右侧轻推进来 + 淡入（像 iOS 的页面 push）。
+     以前是 transform: none —— 所以设置页是「瞬间出现 / 瞬间消失」，一点过渡都没有。 */
+  transform: translateX(26px) scale(.995);
+  opacity: 0;
+  transition: transform .34s cubic-bezier(.22, 1, .36, 1), opacity .24s ease;
+  padding-top: env(safe-area-inset-top);
+}
+#settingsModal.show .modal-sheet { transform: translateX(0) scale(1); opacity: 1; }
+#settingsModal .modal-body { flex: 1; min-height: 0; overflow-y: auto; }
+#settingsModal .modal-head { justify-content: flex-start; }
+#settingsModal .modal-head h2 { flex: 1; }
+#settingsModal .modal-head .icon-btn[data-close] { display: none; }
+/* 左上角那个返回键也走无框（10-17 用户要求），只留按下时的底色反馈 */
+#settingsBack { border: 0; background-color: transparent; }
+#settingsBack:active { background-color: var(--panel-2); }
+
+/* 「用量统计」「导入导出」也做成整页（用户口径：子页都该是页面，不是浮窗）。
+   层级 90 压在设置页(88)之上 —— 以前这两个开的是 60 层的老弹窗，
+   被 88 层的设置页整个盖住，表现就是「点了没反应」，而关掉设置后它又冒出来。 */
+#usageModal, #dataModal {
+  align-items: stretch;
+  background-color: var(--bg);
+  z-index: 90;
+}
+#usageModal .modal-sheet, #dataModal .modal-sheet {
+  width: 100%; max-width: none; height: 100%; max-height: 100%;
+  border-radius: 0; border-top: 0;
+  /* 和设置页同一套「从右侧推进来」的进出动画 */
+  transform: translateX(26px) scale(.995);
+  opacity: 0;
+  transition: transform .34s cubic-bezier(.22, 1, .36, 1), opacity .24s ease;
+  padding-top: env(safe-area-inset-top);
+}
+#usageModal.show .modal-sheet, #dataModal.show .modal-sheet { transform: translateX(0) scale(1); opacity: 1; }
+#usageModal .modal-body, #dataModal .modal-body { flex: 1; min-height: 0; overflow-y: auto; }
+#usageModal .modal-head, #dataModal .modal-head { justify-content: flex-start; }
+#usageModal .modal-head h2, #dataModal .modal-head h2 { flex: 1; }
+/* 整页里保留左上角返回键，收掉右上角叉号（返回即关闭，少一个重复按钮） */
+#usageModal .modal-head .icon-btn[data-close]:not(.sg-back),
+#dataModal .modal-head .icon-btn[data-close]:not(.sg-back) { display: none; }
+.sg-back { border: 0; background-color: transparent; }
+.sg-back:active { background-color: var(--panel-2); }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 18px 8px;
@@ -689,7 +1092,21 @@ body {
 .selftest-line.bad { color: var(--danger); }
 .selftest-line.skip { color: var(--text-mute); }
 
-.topbar .icon-btn { width: 34px; height: 34px; border-radius: 10px; font-size: 15px; }
+/* 顶层按钮一律无边框（只剩「模型切换」那个胶囊保留底与描边） */
+.topbar .icon-btn {
+  width: 34px; height: 34px; border-radius: 10px; font-size: 15px;
+  border: 0; background-color: transparent; color: var(--text);
+}
+.topbar .icon-btn:active { background-color: var(--panel-2); }
+/* 「对话设置」按钮上顺带显示故事时间（只放时:分，顶栏没地方放日期） */
+.topbar .icon-btn.head-clock { width: auto; padding: 0 6px; }
+.head-clock .ic { width: 16px; height: 16px; flex: none; }
+.head-clock .hc-text { margin-left: 5px; font-size: 11px; color: var(--text-dim); }
+.head-clock .hc-text:empty { display: none; }
+.head-clock.out { color: var(--danger); }
+.head-clock.out .hc-text { color: var(--danger); }
+/* 时间冻结中：读数用主题色标出来，一眼看出「故事时间停住了」 */
+.head-clock.frozen .hc-text { color: var(--accent); }
 
 .mode-switch {
   display: flex; margin-bottom: 16px; padding: 4px;
@@ -758,36 +1175,210 @@ body.tts-on .act-btn.read-act { display: inline-flex; }
   margin: 0 0 12px; font-size: 13.5px; font-weight: 600; color: var(--text-dim);
 }
 .section-fields { padding-left: 10px; border-left: 2px solid var(--panel-2); }
-.check-field {
-  display: flex; align-items: center; cursor: pointer;
-  font-size: 13px; color: var(--text); margin-bottom: 12px;
+
+/* ── 设置页：7 大模块入口（10-16 用户要求「点进去再做具体设置」）──────
+   HTML 结构不动，靠 data-group 标记每个 section；首页只显示 #settingsHome，
+   选中某个组后只显示该组的 section。加一个 section 只需在 settings.js 的表里加一行。 */
+.sg-item {
+  display: flex; align-items: center; width: 100%; text-align: left;
+  padding: 12px; margin-bottom: 10px;
+  background-color: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 14px; font: inherit; cursor: pointer;
+  transition: transform .18s, border-color .25s;
 }
-.check-field > *:not(:last-child) { margin-right: 8px; }
-/* 勾选框（Chrome 83 不支持 accent-color，只能自绘；原生样式在深色主题下就是一块「纯白直角」） */
+.sg-item:active { transform: scale(.985); border-color: var(--accent); }
+.sg-ic {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 11px; font-size: 20px;
+  background-color: rgba(127, 127, 127, .16); color: var(--accent);
+}
+.sg-tx { flex: 1; min-width: 0; margin: 0 10px; display: flex; flex-direction: column; }
+.sg-tx b { font-size: 14.5px; font-weight: 600; color: var(--text); }
+.sg-tx i { font-style: normal; font-size: 11.5px; color: var(--text-mute); margin-top: 3px; line-height: 1.4; }
+.sg-go { flex: none; font-size: 18px; color: var(--text-mute); }
+
+/* 默认不显示任何 section（首页只显示入口）；进入某个组时只显示该组。
+   ⚠️「先全隐藏、再按组显示」是必需的 —— 少了第一行，进入某组时其它组的 section 会照常显示出来。 */
+#settingsBody .settings-section { display: none; }
+#settingsBody.sg #settingsHome { display: none; }
+#settingsBody.sg[data-sg="basic"] .settings-section[data-group="basic"],
+#settingsBody.sg[data-sg="advanced"] .settings-section[data-group="advanced"],
+#settingsBody.sg[data-sg="persona"] .settings-section[data-group="persona"],
+#settingsBody.sg[data-sg="storage"] .settings-section[data-group="storage"],
+#settingsBody.sg[data-sg="about"] .settings-section[data-group="about"] { display: block; }
+
+/* 底部给右下角悬浮的「连接自检」留位，别压住「保存」 */
+#settingsBody { padding-bottom: 74px; }
+.modal-sheet { position: relative; }
+.selftest-fab {
+  position: absolute; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 6; box-shadow: 0 6px 18px rgba(0, 0, 0, .28);
+}
+
+/* ── 离线原因：抽屉式浮窗（10-17）────────────────────────────
+   从右侧滑入的管理面板。列表滚动条自己画（细、主题色、给内容留出 padding-right），
+   不用系统默认那条 —— 它在老内核上会压住文字（「穿模」）。 */
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 95; display: flex; }
+.drawer[hidden] { display: none; }
+.drawer-mask { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background-color: var(--scrim); }
+.drawer-panel {
+  position: relative; margin-left: auto; width: 88%; max-width: 430px; height: 100%;
+  display: flex; flex-direction: column; background-color: var(--panel);
+  border-left: 1px solid var(--border);
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  animation: drawer-in .28s cubic-bezier(.22, 1, .36, 1);
+}
+@keyframes drawer-in { from { transform: translateX(24px); opacity: .6; } to { transform: translateX(0); opacity: 1; } }
+.drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.drawer-head h2 { margin: 0; font-size: 16px; }
+.reason-list { flex: 1; min-height: 0; overflow-y: auto; padding-right: 8px; margin: 8px 0 12px; }
+.reason-list::-webkit-scrollbar { width: 5px; }
+.reason-list::-webkit-scrollbar-track { background-color: transparent; }
+.reason-list::-webkit-scrollbar-thumb { background-color: var(--text-mute); border-radius: 3px; }
+.reason-item { display: flex; align-items: center; padding: 11px 12px; margin-bottom: 8px;
+  background-color: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; }
+.reason-item > span { flex: 1; min-width: 0; font-size: 14px; color: var(--text); word-break: break-all; }
+.reason-item .r-del { flex: none; margin-left: 8px; }
+.reason-add { display: flex; align-items: center; }
+.reason-add > *:not(:last-child) { margin-right: 8px; }
+.reason-add input { flex: 1; min-width: 0; }
+/* 「存储」区：一行总览 + 每类一条占比横条。
+   （Chrome 83 的 flex 不能用 gap，元素间距一律走 margin） */
+.storage-sum { font-size: 13px; color: var(--text); margin-bottom: 10px; }
+.storage-bars { margin-bottom: 12px; }
+.st-row { display: flex; align-items: center; margin-bottom: 7px; }
+.st-name { flex: none; width: 96px; font-size: 12.5px; color: var(--text-dim); }
+.st-bar {
+  flex: 1; min-width: 0; height: 8px; margin: 0 9px;
+  border-radius: 5px; background-color: var(--panel-2); overflow: hidden;
+}
+.st-fill { display: block; height: 100%; border-radius: 5px; background-color: var(--accent); }
+.st-val { flex: none; font-size: 11.5px; color: var(--text-mute); }
+/* live2D 测试结果是多行文本（协议 / 贴图 / XHR 各一行），要按行显示 */
+#live2dTestOut { white-space: pre-line; }
+.check-field {
+  /* align-items 用 flex-start：说明占两行时（如「状态量化」那条），勾选框要贴住第一行文字，
+     不能卡在两行中间。line-height 取 20px：比勾选框（18px）略高一点，
+     既让两行说明之间有点呼吸感，单行时勾选框和文字也仍然对得齐。 */
+  display: flex; align-items: flex-start; cursor: pointer;
+  font-size: 13px; line-height: 20px; color: var(--text); margin-bottom: 12px;
+}
+/* 勾选框以外的子元素（万一某条有两个）之间留空。
+   注意：**这条管不到勾选框本身** —— 它的 margin 被下面 1104 行那条属性选择器
+   （特异性更高、位置更后）用 `margin: 0` 压掉了，间距统一在 1104 行给。 */
+.check-field > *:not(:last-child) { margin-right: 12px; }
+/* 勾选框（Chrome 83 不支持 accent-color，只能自绘；原生样式在深色主题下就是一块「纯白直角」）
+   四处共用同一套自绘：设置项 .check-field、消息里的任务清单 .bubble li.md-task、
+   「删除消息」弹窗的条目 .delete-item、新建群聊的成员行 .group-member
+   （不覆盖的话删消息时那一列原生小方块与整体风格不搭）。
+   ⚠️ 群聊那处必须带 [type="checkbox"]：成员行在 <div class="field"> 里面，
+   会被上面的 `.field input { width: 100% }` 命中，把勾选框拉满整行、
+   头像和名字直接被挤出屏幕（多一个属性选择器才压得住那条后代规则）。 */
 .check-field input[type="checkbox"],
-.bubble li.md-task input[type="checkbox"] {
+.bubble li.md-task input[type="checkbox"],
+.delete-item input[type="checkbox"],
+.group-member input[type="checkbox"] {
   -webkit-appearance: none; appearance: none;
-  position: relative; flex: none;
+  position: relative; flex: none; box-sizing: border-box;
   border: 1.5px solid var(--border); border-radius: 6px;
   background-color: var(--panel-2);
   transition: background-color .18s, border-color .18s, transform .14s;
 }
-.check-field input[type="checkbox"] { width: 18px; height: 18px; margin: 0; }
+/* 勾选框与说明文字的水平间距**只能写在这条**上：
+   上面 `.check-field > *:not(:last-child)`（特异性 0,2,0）给的 margin-right
+   会被这里的 `margin` 简写（0,2,1，且位置在后）整体覆盖 —— 之前两次把间距
+   从 8px 调到 12px 都没生效，根因就在这（实际一直是 0）。 */
+.check-field input[type="checkbox"] { width: 18px; height: 18px; margin: 0 10px 0 0; }
 .bubble li.md-task input[type="checkbox"] { width: 16px; height: 16px; border-radius: 5px; }
-.check-field input[type="checkbox"]:focus { outline: none; }
-.check-field input[type="checkbox"]:active { transform: scale(.9); }
+/* 删消息的条目是 align-items:flex-start 的两行文字，勾选框略微下沉才对得齐首行。
+   间距同理必须写在这里（`margin` 简写会压掉上面 `.delete-item > *:not(:last-child)` 的 margin-right）。 */
+.delete-item input[type="checkbox"] { width: 18px; height: 18px; margin: 2px 8px 0 0; border-radius: 6px; }
+.group-member input[type="checkbox"] { width: 18px; height: 18px; margin: 0 10px 0 0; padding: 0; }
+.check-field input[type="checkbox"]:focus,
+.delete-item input[type="checkbox"]:focus { outline: none; }
+.check-field input[type="checkbox"]:active,
+.delete-item input[type="checkbox"]:active { transform: scale(.9); }
 .check-field input[type="checkbox"]:checked,
-.bubble li.md-task input[type="checkbox"]:checked {
+.bubble li.md-task input[type="checkbox"]:checked,
+.delete-item input[type="checkbox"]:checked,
+.group-member input[type="checkbox"]:checked {
   border-color: var(--accent); background-color: var(--accent);
 }
 /* 对勾：左/上各 50% + 自身半宽高的负外边距 → 任何尺寸下都自动居中 */
 .check-field input[type="checkbox"]:checked::after,
-.bubble li.md-task input[type="checkbox"]:checked::after {
+.bubble li.md-task input[type="checkbox"]:checked::after,
+.delete-item input[type="checkbox"]:checked::after,
+.group-member input[type="checkbox"]:checked::after {
   content: ""; position: absolute; left: 50%; top: 50%;
   width: 3px; height: 7px; margin: -4.5px 0 0 -2.5px;
   border: solid var(--accent-ink); border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
+
+/* 预设角色选择：头像 + 名字 + 标签的卡片网格（Chrome 83 不用 flex gap） */
+/* 新消息气泡：从下方弹入（微信那种）。
+   只给「新来的」那几条加这个类（见 phone.js 的 prevCount）——
+   整块重渲染时若所有气泡都播一遍，每次出消息整屏都会闪。 */
+.ph-row.ph-enter {
+  -webkit-animation: ph-enter .28s cubic-bezier(.22, .9, .3, 1.06) both;
+  animation: ph-enter .28s cubic-bezier(.22, .9, .3, 1.06) both;
+}
+@-webkit-keyframes ph-enter {
+  from { opacity: 0; -webkit-transform: translateY(16px) scale(.96); }
+  to { opacity: 1; -webkit-transform: none; }
+}
+@keyframes ph-enter {
+  from { opacity: 0; transform: translateY(16px) scale(.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 手机聊天页的独立背景层（跟聊天背景同一套做法：叠同色罩 + 模糊/亮度）。
+   必须压在所有手机内容之下、又能盖住面板底色，所以是 absolute + z-index:0。 */
+.phone-bg {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  z-index: 0; pointer-events: none;
+  background-size: cover; background-position: center; background-repeat: no-repeat;
+  /* 同 #main > .chat-bg：模糊层单独合成，别在滚动手机消息时反复重算 */
+  will-change: transform;
+  -webkit-backface-visibility: hidden; backface-visibility: hidden;
+}
+#phoneChatView > *:not(.phone-bg) { position: relative; z-index: 1; }
+
+/* 手机聊天：顶部「对方正在输入…」提示条。
+   手机端刻意不做逐字流式（用户拍板），生成过程只用这一条交代。 */
+.phone-typing-bar {
+  padding: 4px 14px 5px; font-size: 11.5px; line-height: 1.4;
+  color: var(--text-mute); background-color: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.phone-typing-bar::after {
+  content: ""; display: inline-block; width: 3px; height: 3px; margin-left: 5px;
+  border-radius: 50%; background-color: currentColor; vertical-align: middle;
+  -webkit-animation: ph-typing-blink 1.2s ease-in-out infinite;
+  animation: ph-typing-blink 1.2s ease-in-out infinite;
+}
+@-webkit-keyframes ph-typing-blink { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@keyframes ph-typing-blink { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+
+/* 正文里（…）包起来的内容：旁白 / 动作 / 括号备注，整体压暗一档跟正话分开。
+   不换字色而是降透明度，这样在所有主题下都不会跟背景撞色。 */
+.paren { opacity: .62; }
+
+.preset-list { display: flex; flex-wrap: wrap; margin: 0 -5px; }
+.preset-card {
+  width: calc(33.333% - 10px); margin: 0 5px 12px; padding: 10px 8px;
+  box-sizing: border-box; border-radius: 12px; text-align: center;
+  background-color: var(--panel-2); border: 1px solid var(--border);
+  cursor: pointer; transition: transform .14s, border-color .18s;
+}
+.preset-card:hover { border-color: var(--accent); }
+.preset-card:active { transform: scale(.96); }
+.preset-card img {
+  display: block; width: 64px; height: 64px; margin: 0 auto 6px;
+  border-radius: 50%; background-color: var(--panel);
+}
+.preset-card b { display: block; font-size: 13px; font-weight: 600; color: var(--text); }
+.preset-card span { display: block; margin-top: 2px; font-size: 11px; line-height: 1.35; color: var(--text-mute); }
 
 /* 滑条（Chrome 83 不支持 accent-color，必须自绘） */
 .range-field { display: flex; flex-direction: column; margin-bottom: 18px; }
@@ -824,8 +1415,14 @@ body.tts-on .act-btn.read-act { display: inline-flex; }
 
 /* ── 提示条 ───────────────────────────────────────── */
 .toasts {
-  position: fixed; left: 0; right: 0; bottom: calc(96px + env(safe-area-inset-bottom));
-  z-index: 80; display: flex; flex-direction: column; align-items: center; pointer-events: none; padding: 0 14px;
+  /* 加上「键盘高度」= 100vh - 可视视口高度（--app-h 由 app.js 实时喂）。
+     软键盘弹起时提示条跟着上移，不然会被键盘盖住；没弹键盘时这项为 0，位置不变。 */
+  position: fixed; left: 0; right: 0;
+  bottom: calc(96px + env(safe-area-inset-bottom) + (100vh - var(--app-h, 100vh)));
+  /* 460 = 压过所有层（锁屏 420 / 相机 120 / 设置子页 90 / 设置页 88）。
+     以前是 80 —— 在设置页里点「清理页面缓存」，提示条被 88 层的设置页整个盖住，
+     表现成「点了没有任何反馈」（真机反馈）。提示条本来就该永远在最上面。 */
+  z-index: 460; display: flex; flex-direction: column; align-items: center; pointer-events: none; padding: 0 14px;
 }
 /* ── 提示条 ───────────────────────────────────────── */
 .toasts > *:not(:last-child) { margin-bottom: 8px; }
@@ -1140,7 +1737,13 @@ body.no-image .gen-img-wrap img { display: none !important; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11.5px; line-height: 1.7; color: var(--text-dim);
   white-space: pre; overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
+/* 顶部把滚动条宽度设成了 0（全局隐藏），功能树这种「不换行、必须横向滚动」的长行
+   就会被当成内容被截断。这里单独放开它的横向滚动条，给一个「可以横滑」的视觉提示。 */
+.feat-tree::-webkit-scrollbar { height: 5px; width: 0; }
+.feat-tree::-webkit-scrollbar-track { background-color: transparent; }
+.feat-tree::-webkit-scrollbar-thumb { background-color: var(--border); border-radius: 3px; }
 
 /* ── 超长会话：加载更早 / 过期图片 ─────────────── */
 .earlier-msg {
@@ -1214,3 +1817,766 @@ body.no-image .gen-img-wrap img { display: none !important; }
 .lock-actions .btn { margin: 4px 4px 0; }
 .lock-err { min-height: 18px; margin-top: 8px; font-size: 12.5px; line-height: 1.6; color: #e5534b; text-align: center; }
 .lock-err.ok { color: var(--accent); }
+
+/* ── 6.0.0：自定义聊天背景 / 用量花费 ───────────────── */
+/* 背景层垫在 #main 最底下，消息 / 输入区都在它上面。
+   「放大 6%」是为了盖住 blur 在边缘留下的半透明圈。 */
+#main > .chat-bg {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 0;
+  pointer-events: none;
+  background-size: cover; background-position: center; background-repeat: no-repeat;
+  transform: scale(1.06); transform-origin: center;
+  /* 背景层带 blur 时，滚动消息会触发整层重新模糊（掉帧）。
+     提到独立合成层后，滚动只是移动上面的内容，背景不再跟着重算。 */
+  will-change: transform;
+  -webkit-backface-visibility: hidden; backface-visibility: hidden;
+}
+#main > .topbar, #main > .messages, #main > .composer { position: relative; z-index: 1; }
+#main > .drop-hint, #main > .select-bar { z-index: 3; }
+.bg-preview { background-size: cover; background-position: center; background-repeat: no-repeat; }
+.usage-row .u-cost { color: var(--accent); font-weight: 600; }
+
+/* ── 6.0.0：手机（类微信）────────────────────────────────────────
+   独立全屏一层（和相机层同套路，不是 .modal）：返回键由 app.js 直接问
+   window.DL.phone，才能做到「通话中 → 聊天 → 列表 → 关闭」逐级退。 */
+.phone-layer {
+  /* 同相机层：高度跟「可视视口」走，不用 bottom:0 —— 否则软键盘弹起时手机输入框、
+     转账/位置弹层、发布动态输入框都会被键盘盖住。 */
+  position: fixed; top: 0; right: 0; left: 0; height: var(--app-h, 100vh); z-index: 70;
+  display: flex; align-items: stretch; justify-content: center;
+  background-color: var(--bg);
+}
+.phone-shell {
+  position: relative; width: 100%; max-width: 520px; height: 100%;
+  display: flex; flex-direction: column; overflow: hidden;
+  background-color: var(--bg); background-image: var(--bg-grad);
+}
+/* 进手机页的入场动画：外壳从右侧轻滑 + 淡入，列表项再按序跟一小步。
+   只在「进页面」那一次挂类（phone.js 的 playEnter / ps.enterAnim），
+   不然每次重渲染都播一遍会整屏闪。 */
+.phone-shell.phone-enter {
+  -webkit-animation: phone-shell-in .26s cubic-bezier(.22, .8, .24, 1) both;
+  animation: phone-shell-in .26s cubic-bezier(.22, .8, .24, 1) both;
+}
+@-webkit-keyframes phone-shell-in { from { opacity: 0; -webkit-transform: translateX(26px) scale(.985); } to { opacity: 1; -webkit-transform: none; } }
+@keyframes phone-shell-in { from { opacity: 0; transform: translateX(26px) scale(.985); } to { opacity: 1; transform: none; } }
+/* 退出手机页：外壳轻右移 + 淡出，180ms 后由 closePhone 真正隐藏（用户口径：退出也要有过渡） */
+.phone-shell.phone-leave {
+  -webkit-animation: phone-shell-out .18s cubic-bezier(.4, 0, .7, 1) both;
+  animation: phone-shell-out .18s cubic-bezier(.4, 0, .7, 1) both;
+  pointer-events: none;
+}
+@-webkit-keyframes phone-shell-out { from { opacity: 1; -webkit-transform: none; } to { opacity: 0; -webkit-transform: translateX(24px) scale(.99); } }
+@keyframes phone-shell-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(24px) scale(.99); } }
+/* 视图切换（列表 ↔ 聊天 ↔ 动态）：只作用在视图容器上，不重播整页外壳。
+   10-18 改：三个视图改成**叠层**（绝对定位），切换时是「一层推着一层」，
+   而不是先消失再淡入 —— 用户明确说过「手机页点进角色消息界面没有转场」。
+   top: 26px 对上 .phone-bar 的高度，改 bar 高度这里要一起改。 */
+.ph-view-in {
+  -webkit-animation: ph-view-in .2s cubic-bezier(.22, .8, .24, 1) both;
+  animation: ph-view-in .2s cubic-bezier(.22, .8, .24, 1) both;
+}
+@-webkit-keyframes ph-view-in { from { opacity: 0; -webkit-transform: translateX(14px); } to { opacity: 1; -webkit-transform: none; } }
+@keyframes ph-view-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+
+/* 前进：新页从右侧整页推进来，底下那页同步左移一点（视差），推完再隐藏 */
+.phone-view.ph-in-right {
+  z-index: 3;
+  -webkit-animation: ph-in-right .27s cubic-bezier(.22, .8, .24, 1) both;
+  animation: ph-in-right .27s cubic-bezier(.22, .8, .24, 1) both;
+}
+@-webkit-keyframes ph-in-right { from { -webkit-transform: translateX(100%); } to { -webkit-transform: none; } }
+@keyframes ph-in-right { from { transform: translateX(100%); } to { transform: none; } }
+.phone-view.ph-out-left {
+  z-index: 2; pointer-events: none;
+  -webkit-animation: ph-out-left .27s cubic-bezier(.22, .8, .24, 1) both;
+  animation: ph-out-left .27s cubic-bezier(.22, .8, .24, 1) both;
+}
+@-webkit-keyframes ph-out-left { from { -webkit-transform: none; opacity: 1; } to { -webkit-transform: translateX(-26%); opacity: .55; } }
+@keyframes ph-out-left { from { transform: none; opacity: 1; } to { transform: translateX(-26%); opacity: .55; } }
+
+/* 返回：当前页整页右移退出，露出底下原本就在的列表（列表不重播动画） */
+.phone-view.ph-out-right {
+  z-index: 3; pointer-events: none;
+  -webkit-animation: ph-out-right .26s cubic-bezier(.4, 0, .6, 1) both;
+  animation: ph-out-right .26s cubic-bezier(.4, 0, .6, 1) both;
+}
+@-webkit-keyframes ph-out-right { from { -webkit-transform: none; } to { -webkit-transform: translateX(100%); } }
+@keyframes ph-out-right { from { transform: none; } to { transform: translateX(100%); } }
+.ph-item-enter {
+  -webkit-animation: ph-item-in .24s cubic-bezier(.22, .8, .24, 1) both;
+  animation: ph-item-in .24s cubic-bezier(.22, .8, .24, 1) both;
+}
+@-webkit-keyframes ph-item-in { from { opacity: 0; -webkit-transform: translateX(10px); } to { opacity: 1; -webkit-transform: none; } }
+@keyframes ph-item-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+@media (min-width: 700px) {
+  .phone-layer { align-items: center; background-color: var(--scrim); }
+  .phone-shell { height: min(880px, 94vh); border-radius: 24px; border: 1px solid var(--border); box-shadow: var(--shadow); }
+}
+
+.phone-bar {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  position: relative; height: 26px; padding: 0 14px;
+  font-size: 12px; color: var(--text-dim);
+}
+.phone-clock { position: absolute; left: 16px; font-weight: 600; color: var(--text); }
+.phone-notch { width: 96px; height: 15px; border-radius: 0 0 12px 12px; background-color: var(--border); }
+
+/* 视图层：绝对定位铺满 bar 以下的区域，三个视图可以短暂叠在一起做转场。
+   聊天 / 动态自带不透明底色（列表在下面时不透出来）；列表不需要，它一直是最底层。 */
+.phone-view {
+  position: absolute; top: 26px; right: 0; bottom: 0; left: 0; z-index: 1;
+  display: flex; flex-direction: column;
+}
+#phoneChatView, #phoneMomentsView { background-color: var(--bg); }
+.phone-head {
+  flex: none; display: flex; align-items: center;
+  padding: 6px 10px 8px; border-bottom: 1px solid var(--border);
+}
+.phone-head-title {
+  flex: 1; text-align: center; font-size: 16px; font-weight: 600; color: var(--text);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.phone-head .icon-btn:first-child { margin-right: 2px; }
+
+.phone-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; }
+.phone-empty { padding: 30px 22px; color: var(--text-mute); font-size: 13.5px; line-height: 1.7; text-align: center; }
+.phone-item {
+  /* 高度对齐微信「聊天列表」那种紧凑感：40 头像 + 上下各 8 = 56px（原来是 66px） */
+  display: flex; align-items: center; padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.phone-item:active { background-color: var(--panel-2); }
+.phone-item.open { background-color: var(--panel-2); }
+.ph-av {
+  flex: none; width: 40px; height: 40px; border-radius: 10px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background-color: var(--panel-2); color: var(--text-dim);
+}
+.ph-av img { width: 100%; height: 100%; object-fit: cover; }
+.ph-av .ic { font-size: 20px; }
+
+/* 手机头像设置（底部弹层里的那块） */
+.ph-avset { padding: 4px 0 2px; }
+.ph-avset-pv { display: flex; justify-content: center; margin-bottom: 14px; }
+.ph-avset-pv .ph-av { width: 84px; height: 84px; border-radius: 18px; }
+.ph-avset-pv .ph-av .ic { font-size: 38px; }
+.ph-avset-row { display: flex; }
+.ph-avset-row .btn { flex: 1; }
+/* 不用 gap：Chrome 83 的 flex 不支持 */
+.ph-avset-row .btn + .btn { margin-left: 10px; }
+.ph-avset-hint {
+  margin: 12px 0 0; font-size: 12.5px; line-height: 1.6;
+  color: var(--text-dim); text-align: center;
+}
+
+/* 手机设置（齿轮进来）：背景预览 + 模糊/亮度滑块 */
+.ph-set { padding: 4px 0 2px; }
+.ph-set-pv {
+  width: 100%; height: 132px; border-radius: 14px; margin-bottom: 12px;
+  background-color: var(--panel-2); background-size: cover; background-position: center;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-mute); font-size: 12.5px;
+}
+.ph-set-row { display: flex; }
+.ph-set-row .btn { flex: 1; }
+/* 不用 gap：Chrome 83 的 flex 不支持 */
+.ph-set-row .btn + .btn { margin-left: 10px; }
+.ph-set-slider { display: block; margin-top: 14px; }
+.ph-set-slider-top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12.5px; color: var(--text-dim); margin-bottom: 6px;
+}
+.ph-set-slider-top b { font-weight: 600; color: var(--text); }
+.ph-set-slider-top i { font-style: normal; color: var(--text-mute); }
+.ph-set-slider input[type="range"] { width: 100%; }
+.ph-set-hint { margin: 14px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-mute); }
+
+/* 「这条线」设置里的普通字段（音色 / live2D 模型） */
+.ph-set-field { display: block; margin-top: 14px; }
+.ph-set-field > span { display: block; font-size: 12.5px; color: var(--text-dim); margin-bottom: 6px; }
+.ph-set-field input, .ph-set-field select { width: 100%; }
+.phone-item-mid { flex: 1; min-width: 0; margin: 0 10px; }
+.phone-item-name { font-size: 14.5px; font-weight: 600; color: var(--text); }
+.phone-item-pv {
+  margin-top: 1px; font-size: 12px; color: var(--text-mute);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.phone-item-right { flex: none; display: flex; flex-direction: column; align-items: flex-end; }
+.phone-item-time { font-size: 11.5px; color: var(--text-mute); }
+/* 「这个角色名下还有几条线」的展开箭头（按角色分组后才有；展开时翻上去并染色） */
+.phone-item-caret {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; line-height: 1; margin-top: 3px; color: var(--text-mute);
+  -webkit-transition: transform .2s ease, color .2s ease;
+  transition: transform .2s ease, color .2s ease;
+}
+.phone-item-caret.open { transform: rotate(180deg); color: var(--accent); }
+/* 展开区：角色名下属于手机页的那几条线，从左侧引一条细线，点哪条进哪条 */
+.phone-sub {
+  background-color: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  padding: 2px 0 5px;
+}
+.phone-sub-item {
+  display: flex; align-items: center;
+  margin-left: 30px; padding: 8px 14px 8px 10px;
+  border-left: 2px solid var(--border);
+  font-size: 13px; color: var(--text-dim);
+}
+.phone-sub-item:active { background-color: var(--bg); }
+.phone-sub-dot {
+  flex: none; width: 6px; height: 6px; border-radius: 50%;
+  background-color: var(--text-mute); margin-right: 9px;
+}
+.phone-sub-title {
+  flex: 1; min-width: 0; color: var(--text);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.phone-sub-tag {
+  flex: none; margin-left: 8px; padding: 1px 6px; border-radius: 6px;
+  font-size: 11px; background-color: var(--accent); color: var(--accent-ink);
+}
+.phone-sub-count { flex: none; margin-left: 8px; font-size: 11.5px; color: var(--text-mute); }
+
+/* 聊天 */
+.phone-msgs {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px 6px;
+  -webkit-overflow-scrolling: touch;
+}
+.phone-tip {
+  margin: 20px 16px; padding: 12px 14px; border-radius: 12px;
+  background-color: var(--panel-2); border: 1px dashed var(--border);
+  color: var(--text-mute); font-size: 12.5px; line-height: 1.7;
+}
+.ph-row { display: flex; align-items: flex-start; margin-bottom: 12px; }
+.ph-row.me { flex-direction: row-reverse; }
+.ph-row .ph-av { width: 36px; height: 36px; border-radius: 10px; }
+.ph-row .ph-av .ic { font-size: 18px; }
+.ph-col { max-width: 74%; margin: 0 9px; display: flex; flex-direction: column; }
+.ph-row.me .ph-col { align-items: flex-end; }
+.ph-bubble {
+  padding: 9px 12px; border-radius: 14px; font-size: 14.5px; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word;
+  background-color: var(--ai-bg); color: var(--ai-ink);
+}
+.ph-row.me .ph-bubble { background-color: var(--user-bg); color: var(--user-ink); }
+.ph-typing { display: flex; align-items: center; padding: 12px 14px; }
+.ph-typing i {
+  width: 6px; height: 6px; border-radius: 50%; background-color: var(--text-mute);
+  display: inline-block; margin-right: 4px;
+  -webkit-animation: ph-blink 1.2s infinite ease-in-out;
+  animation: ph-blink 1.2s infinite ease-in-out;
+}
+.ph-typing i:nth-child(2) { animation-delay: .2s; }
+.ph-typing i:nth-child(3) { animation-delay: .4s; }
+@-webkit-keyframes ph-blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+@keyframes ph-blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+.ph-row.sys { justify-content: center; }
+.ph-sys {
+  margin: 4px auto; padding: 4px 10px; border-radius: 10px;
+  background-color: var(--panel-2); color: var(--text-mute); font-size: 11.5px;
+}
+
+/* 撤回占位：居中一行小灰字，不带头像 */
+.ph-recalled {
+  width: 100%; text-align: center;
+  font-size: 11.5px; color: var(--text-mute); padding: 4px 0;
+}
+
+/* 转账卡（微信转账样式） */
+.ph-transfer {
+  width: 210px; border-radius: 12px; overflow: hidden;
+  background-color: #f5a623; color: #fff;
+}
+.ph-transfer-top { display: flex; align-items: center; padding: 13px 14px; }
+.ph-transfer-ic {
+  flex: none; width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background-color: rgba(255,255,255,.25); margin-right: 11px;
+}
+.ph-transfer-ic .ic { font-size: 20px; color: #fff; }
+.ph-transfer-main { flex: 1; min-width: 0; }
+.ph-transfer-amt { font-size: 19px; font-weight: 700; line-height: 1.25; }
+.ph-transfer-note { font-size: 12px; opacity: .92; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ph-transfer-foot {
+  padding: 6px 14px; background-color: rgba(0,0,0,.10); font-size: 11.5px; letter-spacing: 1px;
+}
+
+/* 位置卡 */
+.ph-loc {
+  width: 240px; border-radius: 12px; overflow: hidden;
+  background-color: var(--ai-bg); border: 1px solid var(--border);
+}
+.ph-loc-map { display: block; width: 100%; height: 138px; }
+.ph-loc-info { padding: 9px 12px; }
+.ph-loc-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.ph-loc-sub { margin-top: 2px; font-size: 12px; color: var(--text-mute); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* 图片 / 语音 / 通话 */
+.ph-image { max-width: 200px; border-radius: 12px; overflow: hidden; background-color: var(--panel-2); }
+.ph-image img { display: block; width: 100%; }
+body.no-image .ph-image img { display: none; }
+.ph-voice {
+  display: flex; align-items: center; padding: 9px 12px; border-radius: 14px;
+  background-color: var(--ai-bg); color: var(--ai-ink); font-size: 13.5px;
+}
+.ph-row.me .ph-voice { background-color: var(--user-bg); color: var(--user-ink); }
+.ph-voice.playable { cursor: pointer; }
+.ph-voice-txt { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 8px; }
+.ph-voice-dur { color: var(--text-mute); font-size: 12px; }
+.ph-voice-wave { display: inline-flex; align-items: center; }
+.ph-voice-wave i {
+  display: inline-block; width: 3px; height: 12px; border-radius: 2px;
+  background-color: currentColor; opacity: .55; margin-right: 2px;
+}
+.ph-voice-wave i:nth-child(2) { height: 8px; }
+.ph-voice-wave i:nth-child(3) { height: 14px; }
+.ph-callb {
+  display: flex; align-items: center; padding: 9px 12px; border-radius: 14px;
+  background-color: var(--ai-bg); color: var(--ai-ink); font-size: 13.5px;
+}
+.ph-row.me .ph-callb { background-color: var(--user-bg); color: var(--user-ink); }
+.ph-callb .ic { margin-right: 6px; }
+
+/* 底部功能条 + 输入区 */
+.phone-actions {
+  flex: none; display: flex; flex-wrap: wrap; padding: 8px 8px 2px;
+  border-top: 1px solid var(--border);
+}
+.phone-act {
+  flex: 1; min-width: 60px; display: flex; flex-direction: column; align-items: center;
+  padding: 8px 4px; margin: 2px; border: none; border-radius: 12px;
+  background-color: var(--panel-2); color: var(--text-dim); font: inherit; font-size: 11.5px;
+}
+.phone-act:active { background-color: var(--border); }
+.phone-act .ic { font-size: 20px; margin-bottom: 3px; color: var(--accent); }
+.phone-composer {
+  flex: none; display: flex; align-items: center; padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+}
+.phone-input {
+  flex: 1; min-width: 0; margin: 0 8px; padding: 10px 13px; border-radius: 20px; font: inherit; font-size: 14.5px;
+  background-color: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); outline: none;
+}
+.phone-input:focus { border-color: var(--accent); }
+.phone-send {
+  flex: none; padding: 9px 15px; border: none; border-radius: 20px; font: inherit; font-size: 14px; font-weight: 600;
+  background-color: var(--accent); color: var(--accent-ink);
+}
+.phone-send:disabled { opacity: .55; }
+
+/* 底部弹层（转账 / 位置 / 选线共用） */
+.phone-sheet {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 5;
+  display: flex; align-items: flex-end; background-color: var(--scrim);
+}
+.phone-sheet-card {
+  width: 100%; padding: 16px 18px calc(16px + env(safe-area-inset-bottom));
+  background-color: var(--panel); border-top-left-radius: 18px; border-top-right-radius: 18px;
+  border-top: 1px solid var(--border);
+}
+/* 手机页右上角的加号：无框（10-17 用户要求） */
+#phoneAddBtn { border: 0; background-color: transparent; }
+#phoneAddBtn:active { background-color: var(--panel-2); }
+
+/* 手机页右上角「+」浮窗的两个入口（发布动态 / 新建联系人） */
+.ph-add-item {
+  display: flex; align-items: center; width: 100%; text-align: left;
+  padding: 11px 10px; margin-bottom: 8px; border: 0; border-radius: 12px;
+  background-color: var(--panel-2); color: var(--text); font: inherit; cursor: pointer;
+  transition: transform .18s;
+}
+.ph-add-item:active { transform: scale(.985); }
+.ph-add-ic {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 10px; font-size: 19px;
+  background-color: rgba(127, 127, 127, .16); color: var(--accent);
+}
+.ph-add-tx { flex: 1; min-width: 0; margin-left: 10px; display: flex; flex-direction: column; }
+.ph-add-tx b { font-size: 14px; font-weight: 600; color: var(--text); }
+.ph-add-tx i { font-style: normal; font-size: 11.5px; color: var(--text-mute); margin-top: 2px; line-height: 1.35; }
+#phoneAddCancel { width: 100%; margin-top: 4px; }
+.phone-sheet-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 12px; }
+.phone-sheet-body { margin-bottom: 12px; }
+.phone-sheet-actions { display: flex; justify-content: flex-end; }
+.phone-sheet-actions > *:not(:last-child) { margin-right: 10px; }
+.ph-field { display: flex; flex-direction: column; margin-bottom: 12px; }
+.ph-field > span { font-size: 12.5px; color: var(--text-dim); margin-bottom: 6px; }
+.ph-field input {
+  width: 100%; padding: 10px 12px; border-radius: 11px; font: inherit;
+  background-color: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); outline: none;
+}
+.ph-field input:focus { border-color: var(--accent); box-shadow: var(--glow); }
+.ph-line-list { max-height: 46vh; overflow-y: auto; }
+.ph-line {
+  display: flex; align-items: center; padding: 11px 4px; border-bottom: 1px solid var(--border);
+}
+.ph-line:last-child { border-bottom: none; }
+.ph-line input { margin-right: 10px; }
+.ph-line-title { flex: 1; font-size: 14px; color: var(--text); }
+
+/* 通话层 */
+.phone-call {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 6;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 15% 20px calc(28px + env(safe-area-inset-bottom));
+  background-color: var(--bg); background-image: var(--bg-grad);
+}
+.phone-call-avatar {
+  width: 96px; height: 96px; border-radius: 50%; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background-color: var(--panel-2); color: var(--text-dim); margin-bottom: 16px;
+}
+.phone-call-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.phone-call-avatar .ic { font-size: 44px; }
+.phone-call-name { font-size: 20px; font-weight: 600; color: var(--text); }
+.phone-call-state { margin-top: 6px; font-size: 13px; color: var(--text-dim); }
+.phone-call-timer { margin-top: 8px; font-size: 26px; font-weight: 300; color: var(--text); letter-spacing: 1px; }
+.phone-call-said {
+  flex: 1; width: 100%; margin-top: 18px; padding: 12px;
+  font-size: 14px; line-height: 1.7; color: var(--text-dim); text-align: center;
+  overflow-y: auto;
+}
+.phone-call-actions { flex: none; display: flex; align-items: center; justify-content: center; }
+.phone-call-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  /* 三个按钮平排：92×3 + 外边距，原来 margin 0 16px 在 <400px 的机器上会溢出 */
+  width: 92px; height: 92px; margin: 0 10px; border: none; border-radius: 50%;
+  background-color: var(--panel-2); color: var(--text); font: inherit; font-size: 12px;
+}
+.phone-call-btn .ic { font-size: 26px; margin-bottom: 4px; }
+.phone-call-btn.danger { background-color: var(--danger); color: #fff; }
+
+/* 侧栏底部按钮：手机 / 主题 / 设置 三个平分一行，不再挤成一团 */
+.side-foot .btn { flex: 1; min-width: 0; padding-left: 6px; padding-right: 6px; }
+/* 侧边栏底部三个按钮改成「无框纯图标」（用户要求去掉文字）：
+   去掉边框与底色，图标放大到 20px 并取正文色（够醒目），按压时才浮出底色与主题色。 */
+.side-foot .btn.ghost {
+  border: 0; background-color: transparent; color: var(--text);
+  height: 46px; padding: 0; font-size: 20px;
+}
+.side-foot .btn.ghost:active { background-color: var(--panel-2); color: var(--accent); }
+
+/* ── 6.0.0：群聊 ──────────────────────────────────────────────
+   一个会话可以挂多个角色；AI 每条话前面标出「谁说的」，头像也换成那个人。 */
+.msg-speaker {
+  margin: 0 0 4px; font-size: 12px; font-weight: 600;
+  color: var(--accent); letter-spacing: .2px;
+}
+.msg.user .msg-speaker { display: none; }
+.s-badge.group { background-color: var(--accent); color: var(--accent-ink); }
+
+/* 新建群聊：成员多选列表 */
+.group-members {
+  max-height: 46vh; overflow-y: auto; padding: 4px 0;
+  border: 1px solid var(--border); border-radius: 12px; background-color: var(--panel-2);
+}
+.group-member {
+  display: flex; align-items: center; padding: 9px 12px;
+  border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.group-member:last-child { border-bottom: none; }
+/* 尺寸/自绘样式统一在上面那套「勾选框」规则里（必须带 [type] 才能压过 .field input） */
+.g-av {
+  flex: none; width: 32px; height: 32px; margin-right: 10px; border-radius: 9px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background-color: var(--panel); color: var(--text-dim); font-size: 16px;
+}
+.g-av img { width: 100%; height: 100%; object-fit: cover; }
+.g-name { font-size: 14px; color: var(--text); }
+
+#groupImport {
+  width: 100%; padding: 10px 12px; border-radius: 11px; font: inherit; font-size: 14px;
+  background-color: var(--panel-2); color: var(--text); border: 1px solid var(--border); outline: none;
+}
+#groupImport:focus { border-color: var(--accent); }
+
+/* 手机群聊：气泡上方标出「谁说的」 */
+.ph-name { margin: 0 2px 3px; font-size: 11.5px; font-weight: 600; color: var(--accent); }
+.ph-row.me .ph-name { display: none; }
+
+/* ── 6.0.0：手机动态（朋友圈）──────────────────────────────── */
+.phone-moments { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px 20px; -webkit-overflow-scrolling: touch; }
+/* 置顶「动态」入口已在 10-17 去掉（挪进右上角「+」浮窗），这条样式留着但不再命中 */
+.phone-moments-entry .ph-av { background-color: var(--accent); color: var(--accent-ink); }
+.ph-moment {
+  padding: 12px 0 14px; border-bottom: 1px solid var(--border);
+}
+.ph-moment-head { display: flex; align-items: center; }
+.ph-moment-head .ph-av { width: 38px; height: 38px; border-radius: 10px; }
+.ph-moment-meta { flex: 1; min-width: 0; margin-left: 10px; }
+.ph-moment-name { font-size: 14.5px; font-weight: 600; color: var(--text); }
+.ph-moment-time { font-size: 11.5px; color: var(--text-mute); margin-top: 2px; }
+.ph-moment-del {
+  flex: none; padding: 5px 10px; border: 1px solid var(--border); border-radius: 9px;
+  background-color: transparent; color: var(--text-dim); font: inherit; font-size: 12px;
+}
+.ph-moment-del:active { background-color: var(--panel-2); }
+.ph-moment-text { margin-top: 9px; font-size: 14.5px; line-height: 1.6; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.ph-moment-img { margin-top: 9px; border-radius: 12px; overflow: hidden; background-color: var(--panel-2); }
+.ph-moment-img img { display: block; width: 100%; max-height: 320px; object-fit: cover; }
+body.no-image .ph-moment-img img { display: none; }
+.ph-moment-vis { margin-top: 8px; font-size: 12px; color: var(--text-mute); }
+
+/* 发布动态弹层 */
+.ph-post-text {
+  width: 100%; padding: 10px 12px; border-radius: 11px; font: inherit; font-size: 14.5px; resize: vertical;
+  background-color: var(--panel-2); color: var(--text); border: 1px solid var(--border); outline: none;
+  box-sizing: border-box;
+}
+.ph-post-text:focus { border-color: var(--accent); }
+.ph-post-imgrow { display: flex; align-items: center; margin-top: 10px; }
+.ph-post-imgrow .btn { margin-right: 10px; }
+.ph-post-preview { flex: 1; min-width: 0; }
+.ph-post-preview img { max-height: 84px; border-radius: 10px; display: block; }
+.ph-post-ai { display: flex; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.ph-post-ai input {
+  flex: 1; min-width: 150px; margin-right: 8px; padding: 9px 12px; border-radius: 11px; font: inherit; font-size: 13.5px;
+  background-color: var(--panel-2); color: var(--text); border: 1px solid var(--border); outline: none;
+}
+.ph-post-ai input:focus { border-color: var(--accent); }
+.ph-post-ainote { flex-basis: 100%; margin-top: 8px; font-size: 12.5px; color: var(--text-dim); line-height: 1.6; }
+.ph-post-label { margin: 14px 0 6px; font-size: 12.5px; color: var(--text-dim); }
+
+/* 助手总结（关系剖析）输出框 */
+.summary-box {
+  margin-top: 8px; padding: 10px 12px; border-radius: 11px; min-height: 20px;
+  background-color: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); font-size: 13px; line-height: 1.7;
+  white-space: pre-wrap; word-break: break-word;
+}
+.summary-box:empty { display: none; }
+
+/* ── 6.0.0：状态量化（气泡下方的折叠框）────────────────────── */
+.msg-status {
+  margin-top: 10px; border: 1px solid var(--border); border-radius: 12px;
+  background-color: var(--panel-2); overflow: hidden;
+}
+.msg-status > summary {
+  list-style: none; cursor: pointer; -webkit-user-select: none; user-select: none;
+  padding: 7px 12px; font-size: 12.5px; color: var(--text-dim);
+  display: flex; align-items: center;
+}
+.msg-status > summary > *:not(:last-child) { margin-right: 7px; }
+.msg-status > summary::-webkit-details-marker { display: none; }
+.msg-status .st-ic { display: inline-flex; color: var(--accent); }
+.msg-status .st-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.msg-status .caret { display: inline-flex; margin-left: auto; transition: transform .28s ease; font-size: 11px; }
+.msg-status[open] .caret { transform: rotate(90deg); }
+.msg-status .st-body { padding: 4px 12px 11px; border-top: 1px dashed var(--border); animation: fade-slide .3s both; }
+.st-row { display: flex; align-items: center; font-size: 12.5px; color: var(--text-dim); }
+.st-row:not(:last-child) { margin-bottom: 6px; }
+.st-name { flex: none; width: 56px; color: var(--text); }
+.st-bar { flex: 1; height: 8px; margin: 0 9px; border-radius: 5px; background-color: var(--border); overflow: hidden; }
+.st-fill { display: block; height: 100%; border-radius: 5px; background-color: var(--accent); }
+.st-val { flex: none; width: 30px; text-align: right; }
+
+/* ── 6.0.0：live2D 视频通话 ───────────────────────────────────
+   画面层在最底（z-index:0），名字/时长/气泡/按钮叠在上层。
+   live2D 跑不起来时退回「首帧静态图」（.phone-call-fallback 里的角色图）。 */
+.phone-call-stage { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 0; overflow: hidden; background-color: var(--panel-2); }
+/* 视频通话的虚化底色：一层背景图铺满（往后放一圈 overscan，免得模糊后露出边缘），
+   上面再叠 live2D canvas / 静态兜底头像。 */
+.phone-call-bg {
+  position: absolute; top: -12%; right: -12%; bottom: -12%; left: -12%;
+  background-position: center; background-size: cover; background-repeat: no-repeat;
+  filter: blur(22px) saturate(1.04); transform: scale(1.06); opacity: .92;
+}
+.phone-call-canvas { display: block; width: 100%; height: 100%; }
+.phone-call-fallback { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; }
+/* 兜底：不用铺满整层的封面图，改成居中一枚圆头像（压在虚化底上更像「视频通话中」） */
+.phone-call-fallback img {
+  width: 138px; height: 138px; border-radius: 50%; object-fit: cover;
+  border: 2px solid rgba(255,255,255,.38); box-shadow: 0 14px 36px rgba(0,0,0,.42);
+}
+.phone-call-fallback .ic { font-size: 88px; color: rgba(255,255,255,.9); }
+.phone-call-info { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; }
+.phone-call-said { position: relative; z-index: 1; }
+.phone-call-actions { position: relative; z-index: 1; }
+/* 视频模式下：隐藏圆形头像（画面层已经有人了），文字加描边保证在图上可读 */
+.phone-call.video .phone-call-avatar { display: none; }
+.phone-call.video .phone-call-info { padding-top: calc(15% - 96px + env(safe-area-inset-top)); }
+.phone-call.video .phone-call-name,
+.phone-call.video .phone-call-state,
+.phone-call.video .phone-call-timer,
+.phone-call.video .phone-call-said { text-shadow: 0 1px 6px rgba(0,0,0,.55); color: #fff; }
+.phone-call.video .phone-call-name { color: #fff; }
+.phone-call.video .phone-call-state { color: rgba(255,255,255,.88); }
+.phone-call.video .phone-call-timer { color: #fff; }
+.phone-call.video .phone-call-said { color: rgba(255,255,255,.92); }
+
+/* ── 富文本（酒馆卡里的 HTML，在聊天气泡里渲染出来的那块）─────────
+   只给白名单标签做样式：原卡的 CSS 一律不进来，否则会污染整个界面。 */
+.dl-rich { font-size: 14.5px; line-height: 1.75; word-break: break-word; }
+.dl-rich p { margin: 0 0 .7em; }
+.dl-rich p:last-child { margin-bottom: 0; }
+.dl-rich h1, .dl-rich h2, .dl-rich h3,
+.dl-rich h4, .dl-rich h5, .dl-rich h6 {
+  margin: .85em 0 .4em; line-height: 1.35; font-weight: 700; color: var(--text);
+}
+.dl-rich h1 { font-size: 1.32em; }
+.dl-rich h2 { font-size: 1.18em; }
+.dl-rich h3 { font-size: 1.06em; }
+.dl-rich h4, .dl-rich h5, .dl-rich h6 { font-size: 1em; }
+.dl-rich ul, .dl-rich ol { margin: .45em 0 .75em; padding-left: 1.45em; }
+.dl-rich li { margin: .2em 0; }
+.dl-rich blockquote {
+  margin: .6em 0; padding: .35em 0 .35em .8em;
+  border-left: 3px solid var(--border); color: var(--text-dim);
+}
+.dl-rich hr { border: 0; border-top: 1px solid var(--border); margin: .9em 0; }
+.dl-rich code {
+  font-family: ui-monospace, Consolas, monospace; font-size: .92em;
+  background-color: var(--panel-2); padding: 1px 5px; border-radius: 5px;
+}
+.dl-rich pre {
+  margin: .6em 0; padding: 10px 12px; background-color: var(--panel-2);
+  border-radius: 8px; overflow-x: auto;
+}
+.dl-rich pre code { background-color: transparent; padding: 0; }
+.dl-rich table { border-collapse: collapse; margin: .6em 0; width: 100%; font-size: .95em; }
+.dl-rich th, .dl-rich td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+.dl-rich th { background-color: var(--panel-2); font-weight: 600; }
+.dl-rich img.dl-rich-img { max-width: 100%; border-radius: 8px; display: block; margin: .5em 0; }
+.dl-rich a.dl-rich-a { color: var(--accent); text-decoration: underline; }
+.dl-rich details { margin: .6em 0; }
+.dl-rich summary { cursor: pointer; color: var(--text-dim); }
+
+/* ── 备忘录（侧栏入口 + 红点 + 清单）───────────────────────── */
+#reminderBtn { position: relative; }
+/* 红点点在外圈留一点缝，别贴死按钮边缘 */
+#reminderDot {
+  position: absolute; top: 5px; right: 5px; width: 8px; height: 8px;
+  border-radius: 50%; background-color: var(--danger);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.reminder-item {
+  display: flex; align-items: flex-start; padding: 10px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.reminder-item:last-child { border-bottom: 0; }
+.reminder-item > input[type="checkbox"] { margin: 3px 10px 0 0; flex: none; }
+.reminder-tx { flex: 1; min-width: 0; }
+.reminder-tx b {
+  display: block; font-size: 14px; font-weight: 500; line-height: 1.5; color: var(--text);
+  overflow-wrap: break-word; word-break: break-word;
+}
+.reminder-tx small { display: block; margin-top: 2px; font-size: 12px; color: var(--text-mute); }
+.reminder-tx small.late { color: var(--danger); }
+.reminder-item.done .reminder-tx b { color: var(--text-mute); text-decoration: line-through; }
+.reminder-del { flex: none; opacity: .55; }
+
+/* ── 双线：手机聊天的「线下侧写」（不是对话，是一段旁白）────────── */
+.msg.offline { padding: 2px 0; }
+.msg.offline .offline-text {
+  margin-left: 40px; padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--border);
+  font-size: 13.5px; line-height: 1.7; font-style: italic;
+  color: var(--text-mute); white-space: pre-wrap;
+  overflow-wrap: break-word; word-break: break-word;
+}
+.msg.offline .offline-text::before {
+  content: "线下 · "; font-style: normal; font-size: 11.5px; letter-spacing: .04em; opacity: .8;
+}
+
+/* ── 滚轮式日期 / 时间选择（10-18 用户要求，替代系统原生控件）────── */
+.wp-mask {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 520;
+  display: flex; align-items: flex-end;
+  background-color: rgba(0, 0, 0, .42);
+}
+.wp-mask[hidden] { display: none; }
+.wp-sheet {
+  width: 100%; background-color: var(--panel);
+  border-top-left-radius: 20px; border-top-right-radius: 20px;
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: wpUp .26s cubic-bezier(.22, 1, .36, 1);
+}
+@keyframes wpUp {
+  from { transform: translateY(24px); opacity: .5; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.wp-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+}
+.wp-head b { font-size: 15px; font-weight: 600; color: var(--text); }
+.wp-btn {
+  border: 0; background-color: transparent; color: var(--text-dim);
+  font-size: 14px; padding: 6px 8px; border-radius: 8px;
+}
+.wp-btn:active { background-color: var(--panel-2); }
+.wp-btn.wp-ok { color: var(--accent); font-weight: 600; }
+.wp-cols {
+  position: relative; display: flex; align-items: stretch;
+  height: 180px; padding: 0 10px;
+}
+/* 中间那条选中带（36px 高，正好落在第 3 行） */
+.wp-marker {
+  position: absolute; left: 10px; right: 10px; top: 72px; height: 36px;
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  pointer-events: none;
+}
+.wp-col {
+  flex: 1; overflow-y: scroll; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.wp-col::-webkit-scrollbar { width: 0; height: 0; }
+.wp-item {
+  text-align: center; font-size: 15px; color: var(--text-mute);
+  transition: color .12s ease;
+}
+.wp-item.on { color: var(--text); font-weight: 600; }
+.wp-pad { pointer-events: none; }
+
+
+/* ── 群聊 · 对彼此的认知（10-18）──────────────────────────
+   两级折叠：一级是「谁」，二级是「他对谁」。用 details/summary 实现，
+   Chrome 83 原生支持，不用自己管展开状态。 */
+.peer-cog-list { margin: 8px 0 6px; }
+.peer-cog-list .pc-role {
+  border: 1px solid var(--border); border-radius: 10px; margin-bottom: 6px;
+  background-color: var(--panel-2); overflow: hidden;
+}
+.peer-cog-list .pc-role > summary,
+.peer-cog-list .pc-sub > summary {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 12px; font-size: 13px; font-weight: 600; color: var(--text);
+  cursor: pointer; list-style: none; outline: none;
+}
+.peer-cog-list summary::-webkit-details-marker { display: none; }
+.peer-cog-list .pc-role > summary::after,
+.peer-cog-list .pc-sub > summary::after {
+  content: "▸"; font-size: 11px; color: var(--text-mute); margin-left: 8px;
+}
+.peer-cog-list .pc-role[open] > summary::after,
+.peer-cog-list .pc-sub[open] > summary::after { content: "▾"; }
+.peer-cog-list .pc-sub { border-top: 1px solid var(--border); background-color: var(--panel); }
+.peer-cog-list .pc-sub > summary { padding-left: 24px; font-size: 12.5px; font-weight: 400; color: var(--text-dim); }
+.peer-cog-list .pc-body {
+  padding: 2px 14px 12px 22px; font-size: 13px; line-height: 1.7; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+}
+.peer-cog-list .pc-none { padding: 12px 14px; font-size: 12.5px; color: var(--text-mute); line-height: 1.6; }
+.peer-cog-ops { display: flex; align-items: center; margin-top: 8px; }
+.peer-cog-ops > *:not(:last-child) { margin-right: 10px; }
+.peer-cog-ops .hint { margin: 0; }
+.peer-cog-h3 { margin-top: 18px; }
+
+
+/* 群聊成员行右侧的「关联哪条线」（10-18）：小号自绘下拉，名字占满剩余宽度 */
+.group-member .g-name { flex: 1; min-width: 0; }
+.group-member select.g-line { display: none; }
+.group-member .pick-btn {
+  flex: none; max-width: 44%; padding: 5px 9px; font-size: 12px;
+  border-radius: 8px; border: 1px solid var(--border);
+  background-color: var(--panel-2); color: var(--text-dim);
+  display: inline-flex; align-items: center;
+}
+.group-member .pick-btn .pick-arrow { margin-left: 6px; }
+.group-member.no-line { opacity: .55; }
+
+.group-member .g-noline { flex: none; font-size: 12px; color: var(--text-mute); }

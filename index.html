@@ -11,13 +11,14 @@
 </head>
 <body data-theme="graphite" data-mode="dark">
 
-<div id="splash" class="splash" aria-hidden="true">
+<div id="splash" class="splash" aria-hidden="true" data-anim="1">
+  <div class="splash-stage" id="splashStage"></div>
   <div class="splash-mark">
-    <span class="w1">Deep</span>
-    <span class="w2">Link</span>
+    <span class="w1" id="splashW1">Deep</span>
+    <span class="w2" id="splashW2">Link</span>
     <span class="splash-line"></span>
   </div>
-  <div class="splash-credit">耄耋老登/DS共同制作</div>
+  <div class="splash-credit" id="splashCredit">耄耋老登/DS共同制作</div>
 </div>
 <script>
 /* 启动自愈：偶尔样式表没加载上、或主题变量没注入（症状：白底黑字、没有边框），
@@ -29,16 +30,19 @@
     var tries = function () { try { return +(sessionStorage.getItem(KEY) || 0); } catch (e) { return 0; } };
     var setTries = function (n) { try { sessionStorage.setItem(KEY, n); } catch (e) {} };
     var clearTries = function () { try { sessionStorage.removeItem(KEY); } catch (e) {} };
-    /* 只看「样式表本身有没有加载」：不拿背景色做判据（主题变量还没注入时会误判，导致白重载） */
+    /* 判「样式表有没有挂上」。
+       老写法看 document.styleSheets 里 app.css 的 cssRules.length —— 但首次启动时
+       存储迁移把 IO 占满，样式表可能「节点已在、规则还没解析完」，条数是 0，
+       于是被判成「没加载」→ 重插 → 5 秒后整页重载 → 用户先看到白底黑字、
+       再莫名其妙「又走一遍启动动画」（真机反馈）。
+       现在改成只看对象在不在，**永远不靠规则条数**。 */
     var cssLoaded = function () {
       try {
+        var link = document.getElementById("appCss");
+        if (link && link.sheet) return true;          /* 已关联样式表 = 加载完成 */
         var sheets = document.styleSheets;
         for (var i = 0; i < sheets.length; i++) {
-          var s = sheets[i];
-          if (String(s.href || "").indexOf("app.css") < 0) continue;
-          var n = 0;
-          try { n = s.cssRules ? s.cssRules.length : 0; } catch (e) { return true; }
-          return n > 0;
+          if (String(sheets[i].href || "").indexOf("app.css") >= 0) return true;
         }
         return false;
       } catch (e) { return true; }
@@ -49,6 +53,8 @@
     };
     var styled = cssLoaded;
     var reload = function () { try { location.reload(); } catch (e) {} };
+    /* 给自检用：从「启动脚本开始跑」到首屏就绪花了多久（真机排查「首次打开慢」时有据可查） */
+    window.__dlBootT0 = Date.now();
     var reTheme = function () {
       try {
         if (window.UI && UI.applyTheme) UI.applyTheme(document.body.getAttribute("data-theme") || "graphite", document.body.getAttribute("data-mode") || "dark");
@@ -73,15 +79,30 @@
       var finish = function () {
         if (done) return;
         done = true;
-        if (cssLoaded()) clearTries(); else reload();
+        if (cssLoaded()) { clearTries(); return; }
+        /* 重插一次仍没挂上：**不再整页重载**。
+           重载的代价是用户又看一遍启动动画、白屏时间翻倍，而收益只有「再试一次加载」；
+           首次启动 IO 忙时，正是这条把正常情况当成了故障。 */
+        if (tries() < 3) setTimeout(recover, 1200);
       };
       reCss(finish);
       setTimeout(finish, 5000);
     };
     if (document.readyState === "complete") setTimeout(recover, 1200);
     else window.addEventListener("load", function () { setTimeout(recover, 1500); });
-    /* 主脚本很久没就绪（15 秒，给首次大量数据迁移留余量）才刷新；启动页一律在 3.2 秒撤掉 */
-    setTimeout(function () { if (window.__deeplinkReady) clearTries(); else if (tries() < 2) { setTries(tries() + 1); reload(); } }, 15000);
+    /* 主脚本很久没就绪才刷新；启动页一律在 3.2 秒撤掉。
+       阈值从 15 秒放宽到 25 秒：首次装新版要迁移图片 / 解密记忆，真机上可能十几秒，
+       原来会在「其实还正常」的时候误判成没就绪 → 白白重载一次（用户看到「又走了一遍启动动画」）。 */
+    setTimeout(function () {
+      if (window.__deeplinkReady) { clearTries(); return; }
+      /* 只要界面上已经有东西（会话列表 / 消息列表有子节点），就绝不重载 ——
+         用户看得见内容，重载的唯一效果就是「又走一遍启动动画」。
+         真该重载的是「脚本彻底没跑起来、页面一片空」那种。 */
+      var a = document.getElementById("sessionList");
+      var b = document.getElementById("messages");
+      if ((a && a.children.length) || (b && b.children.length)) { clearTries(); return; }
+      if (tries() < 2) { setTries(tries() + 1); reload(); }
+    }, 25000);
     var killSplash = function () {
       var s = document.getElementById("splash");
       if (!s) return;
@@ -101,11 +122,74 @@
       /* app.js 已在收尾（加了 .hide、正走 0.6s 淡出）→ 交给它，别抢那一下淡出 */
       if (s.className.indexOf("hide") >= 0) return;
       var elapsed = Date.now() - bootT0;
-      if (force || (window.__deeplinkReady && elapsed >= 3200)) { killSplash(); return; }
+      /* 启动动画里的图片还在加载（或在后台重试）→ 不放行，等它渲染完。
+         只有 force（15 秒硬兜底）时才无视，免得图一直拉不到就把人卡在启动页。 */
+      var assetsReady = !window.__splashAssetPending;
+      if (force || (window.__deeplinkReady && assetsReady && elapsed >= 3200)) { killSplash(); return; }
       setTimeout(function () { tryKill(false); }, 150);
     };
+    /* ── 启动动画：套系 / 文字 / 图片 / 角色头像（读设置；读不到就用默认）────────
+       图片加载失败会**后台自动重试**（最多 3 次，间隔递增），并在重试期间把
+       「未渲染完毕」置位 —— tryKill 会因此不放行，等它渲染完再退出。 */
+    window.__splashAssetPending = 0;
+    (function applySplash() {
+      var el = document.getElementById("splash");
+      if (!el) return;
+      var s = {};
+      try { s = JSON.parse(localStorage.getItem("aicode.settings.v1") || "{}") || {}; } catch (e) { s = {}; }
+      var anim = String(s.splashAnim == null ? "1" : s.splashAnim);
+      if (!/^[1-5]$/.test(anim)) anim = "1";
+      el.setAttribute("data-anim", anim);
+      /* 文字：自定义就整串放第一行、藏掉第二行；没自定义保持 Deep/Link */
+      var txt = String(s.splashText == null ? "" : s.splashText).replace(/^\s+|\s+$/g, "");
+      var w1 = document.getElementById("splashW1");
+      var w2 = document.getElementById("splashW2");
+      if (txt) {
+        if (w1) w1.textContent = txt;
+        if (w2) w2.style.display = "none";
+      }
+      var cr = document.getElementById("splashCredit");
+      var sub = String(s.splashSub == null ? "" : s.splashSub).replace(/^\s+|\s+$/g, "");
+      if (cr && sub) cr.textContent = sub;
+      /* 图片 / 角色头像：二选一，图片优先 */
+      var stage = document.getElementById("splashStage");
+      if (!stage) return;
+      var src = String(s.splashImage || "").replace(/^\s+|\s+$/g, "");
+      if (!src && s.splashAvatar) {
+        try {
+          var chars = JSON.parse(localStorage.getItem("aicode.characters.v1") || "[]") || [];
+          for (var i = 0; i < chars.length; i++) {
+            if (chars[i] && chars[i].id === s.splashAvatar) { src = chars[i].avatar || ""; break; }
+          }
+        } catch (e) { /* 读不到就当没设 */ }
+      }
+      if (!src) return;
+      var img = document.createElement("img");
+      img.className = "splash-pic";
+      img.alt = "";
+      var tries = 0;
+      window.__splashAssetPending++;
+      var done = function (okFlag) {
+        if (done.called) return;
+        done.called = true;
+        window.__splashAssetPending--;
+        if (!okFlag) { img.style.display = "none"; }   /* 重试到底也不行就不显示，不挡启动 */
+      };
+      img.onload = function () { done(true); };
+      img.onerror = function () {
+        tries++;
+        if (tries > 3) { done(false); return; }
+        /* 后台自动重新渲染：等一会儿换个时间戳再拉一次，绕开半截缓存 */
+        setTimeout(function () {
+          img.src = src + (src.indexOf("?") >= 0 ? "&" : "?") + "r=" + tries;
+        }, 300 * tries);
+      };
+      img.src = src;
+      stage.appendChild(img);
+    })();
+
     setTimeout(function () { tryKill(false); }, 3200);
-    setTimeout(function () { tryKill(true); }, 9000);
+    setTimeout(function () { tryKill(true); }, 15000);
     document.addEventListener("visibilitychange", function () { if (!document.hidden) setTimeout(function () { tryKill(false); }, 150); });
     window.addEventListener("pageshow", function () { setTimeout(function () { tryKill(false); }, 150); });
   } catch (e) { /* 自愈脚本自身出错也不能影响页面 */ }
@@ -119,24 +203,43 @@
       <div class="side-actions">
         <button id="newChatBtn" class="btn primary block" type="button"><span data-icon="plus"></span>新对话</button>
         <button id="openSearchBtn" class="btn ghost icon-only" type="button" aria-label="搜索历史" title="搜索历史"><span data-icon="magnify"></span></button>
+        <button id="newGroupBtn" class="btn ghost icon-only" type="button" aria-label="新建群聊" title="新建群聊"><span data-icon="account-group"></span></button>
       </div>
     </div>
-    <div id="charBar" class="char-bar" hidden></div>
-    <div id="sessionList" class="session-list"></div>
+    <!-- 侧栏三栏（10-16 用户要求）：助手 / 现实扮演角色 / 手机角色。
+         「现实扮演角色」那一栏沿用原来的 charBar + sessionList（id 不变，老逻辑全兼容）。 -->
+    <div id="sideTabs" class="side-tabs">
+      <button class="side-tab" data-side="assistant" type="button"><span data-icon="creation"></span><span>助手</span><span id="reminderDot" class="dot" hidden></span></button>
+      <button class="side-tab" data-side="role" type="button"><span data-icon="account"></span><span>现实扮演角色</span></button>
+      <button class="side-tab" data-side="phone" type="button"><span data-icon="cellphone"></span><span>手机角色</span></button>
+    </div>
+    <div id="sidePaneAsst" class="side-pane" hidden>
+      <div id="sessionListAsst" class="session-list"></div>
+    </div>
+    <div id="sidePaneRole" class="side-pane">
+      <div id="charBar" class="char-bar" hidden></div>
+      <div id="sessionList" class="session-list"></div>
+    </div>
+    <div id="sidePanePhone" class="side-pane" hidden>
+      <div id="phoneCharList" class="char-list-side"></div>
+    </div>
     <div class="side-foot">
-      <button id="openThemesBtn" class="btn ghost" type="button"><span data-icon="palette-outline"></span>主题</button>
-      <button id="openSettingsBtn" class="btn ghost" type="button"><span data-icon="cog-outline"></span>设置</button>
+      <button id="phoneBtn" class="btn ghost" type="button" aria-label="切换手机" title="切换手机"><span data-icon="cellphone"></span></button>
+      <button id="openThemesBtn" class="btn ghost" type="button" aria-label="主题" title="主题"><span data-icon="palette-outline"></span></button>
+      <button id="openSettingsBtn" class="btn ghost" type="button" aria-label="设置" title="设置"><span data-icon="cog-outline"></span></button>
     </div>
   </aside>
   <div id="scrim" class="scrim"></div>
 
   <main id="main">
+    <div id="chatBg" class="chat-bg" hidden></div>
     <header class="topbar">
       <button id="menuBtn" class="icon-btn" type="button" aria-label="菜单"><span data-icon="menu"></span></button>
       <div class="topbar-title" id="chatTitle">新对话</div>
       <button class="pill model-pill" id="modelSwitchBtn" type="button" aria-label="切换主模型" title="切换主模型"><span id="modelBadge">deepseek-flash</span><span class="pill-caret" data-icon="chevron-down"></span></button>
-      <button id="sessionBtn" class="icon-btn" type="button" aria-label="对话设置"><span data-icon="message-text-outline"></span></button>
+      <button id="sessionBtn" class="icon-btn head-clock" type="button" aria-label="对话设置" title="对话设置"><span data-icon="message-text-outline"></span><span id="sessionClockText" class="hc-text"></span></button>
       <button id="characterBtn" class="icon-btn" type="button" aria-label="角色扮演"><span data-icon="account-group"></span></button>
+      <button id="phoneTopBtn" class="icon-btn" type="button" aria-label="手机"><span data-icon="cellphone"></span></button>
       <button id="modeBtn" class="icon-btn" type="button" aria-label="切换日间/夜间"><span data-icon="white-balance-sunny"></span></button>
     </header>
 
@@ -156,8 +259,8 @@
     <div class="composer">
       <div id="attachmentBar" class="attachment-bar"></div>
       <div class="composer-row">
-        <button id="attachBtn" class="icon-btn" type="button" aria-label="上传文件"><span data-icon="paperclip"></span></button>
-        <button id="cameraBtn" class="icon-btn" type="button" aria-label="拍照"><span data-icon="camera-outline"></span></button>
+        <button id="plusBtn" class="icon-btn plus-btn" type="button" aria-label="拍照或上传文件" title="拍照 / 上传文件"><span data-icon="plus"></span></button>
+        <button id="quickBtn" class="icon-btn quick-btn" type="button" aria-label="快捷回复" title="快捷回复"><span data-icon="message-dots-outline"></span></button>
         <button id="micBtn" class="icon-btn mic-btn" type="button" hidden aria-label="语音输入"><span data-icon="microphone"></span></button>
         <input id="fileInput" type="file" multiple hidden>
         <input id="audioInput" type="file" accept="audio/*" hidden>
@@ -178,6 +281,15 @@
         </label>
         <label class="chip" id="imgChip" hidden><input type="checkbox" id="imgToggle"><span data-icon="image-outline"></span><span>画图</span></label>
       </div>
+      <div id="quickPanel" class="quick-panel" hidden>
+        <div class="qp-head">
+          <span class="qp-title"><span data-icon="message-dots-outline"></span>快捷回复</span>
+          <span class="qp-count" id="qpCount"></span>
+          <button id="qpRefresh" class="btn ghost mini" type="button"><span data-icon="refresh"></span>换一批</button>
+          <button id="qpClose" class="icon-btn tiny" type="button" aria-label="收起"><span data-icon="close"></span></button>
+        </div>
+        <div id="qpList" class="qp-list"></div>
+      </div>
     </div>
   </main>
 </div>
@@ -190,10 +302,20 @@
 <div id="settingsModal" class="modal" aria-hidden="true">
   <div class="modal-sheet">
     <div class="modal-head">
-      <h2>设置</h2>
+      <button id="settingsBack" class="icon-btn" type="button" aria-label="返回"><span data-icon="arrow-left"></span></button>
+      <h2 id="settingsTitle">设置</h2>
       <button class="icon-btn" data-close="settingsModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
     </div>
-    <div class="modal-body">
+    <div class="modal-body" id="settingsBody">
+      <div id="settingsHome" class="sg-home">
+        <button class="sg-item" data-sg="basic" type="button"><span class="sg-ic" data-icon="settings-outline"></span><span class="sg-tx"><b>基本配置</b><i>主模型 · 生成参数 · 头像 · 背景 · 采用格式 · 启动动画</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="advanced" type="button"><span class="sg-ic" data-icon="lightbulb-on-outline"></span><span class="sg-tx"><b>高级功能</b><i>记忆压缩 · 功能开关 · 听觉朗读 · 文生图 · 视觉 · live2D · 后台通知 · 加密</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="persona" type="button"><span class="sg-ic" data-icon="account"></span><span class="sg-tx"><b>我的人设</b><i>关于「你」的设定，最多 10 套，可随时切换</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="usage" type="button"><span class="sg-ic" data-icon="chart-box-outline"></span><span class="sg-tx"><b>用量统计</b><i>按类型 / 会话 / 角色看用量与花费</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="io" type="button"><span class="sg-ic" data-icon="content-copy"></span><span class="sg-tx"><b>导入导出</b><i>备份、换机、导出角色 / 会话</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="storage" type="button"><span class="sg-ic" data-icon="cog-outline"></span><span class="sg-tx"><b>储存占用</b><i>各类型数据占比与 App 对硬盘的占用</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="about" type="button"><span class="sg-ic" data-icon="information-outline"></span><span class="sg-tx"><b>关于应用</b><i>版本、免责声明、使用指南</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+      </div>
       <div class="settings-section">
         <h3 class="sec-head">主模型<button class="btn ghost mini" type="button" data-reset="main">重置本区</button></h3>
         <p class="hint" id="providerNowLine">当前主模型：—</p>
@@ -242,6 +364,9 @@
         </label>
         <p class="hint">数值越低回答越稳、越高越发散。DeepSeek 官方说明：Temperature 在思考模式下不生效；Top-p 反之只在思考模式下生效（下限 0.95）。</p>
       </div>
+
+      <!-- 这几栏原来散在「生成参数」外面（不属于任何 section），设置页分区后会被漏掉 —— 补个组容器（缩进未重排，内容一字未改） -->
+      <div class="settings-section" data-group="basic">
       <label class="field">
         <span>系统提示词</span>
         <textarea id="setSystemPrompt" rows="5"></textarea>
@@ -249,11 +374,13 @@
       <div class="field">
         <span>联网搜索数据源</span>
         <select id="setSearchProvider">
-          <option value="auto">自动（免 Key 优先）</option>
+          <option value="auto">自动（DeepSeek 优先，失败退免 Key 源）</option>
+          <option value="deepseek">只用 DeepSeek 搜索（用主模型的 Key，每次约 0.005 元）</option>
           <option value="tavily">Tavily（需 Key）</option>
           <option value="custom">自定义接口</option>
           <option value="off">关闭</option>
         </select>
+        <small>「自动」会先看主模型：主模型是 DeepSeek 时优先用它自家的搜索（每条结果自带 600~800 字的长摘要，每次约 0.005 元，<b>只有拿到结果才计费</b>）；没结果再退到免 Key 源，最后退 Tavily。</small>
       </div>
       <label class="field" id="tavilyField">
         <span>Tavily API Key</span>
@@ -271,6 +398,7 @@
       </div>
       <div class="row-actions" style="justify-content:flex-start">
         <button class="btn ghost mini" type="button" data-reset="prompt">重置提示词与搜索</button>
+      </div>
       </div>
 
       <div class="settings-section">
@@ -304,7 +432,66 @@
           <button class="btn ghost mini" data-add="img" type="button"><span data-icon="plus"></span>添加配置</button>
         </div>
         <label class="field"><span>尺寸</span><input id="setImgSize" type="text" placeholder="1024x1024"></label>
-        <p class="hint">接口地址 / API Key 留空则沿用主模型那套配置；模型名留空则直接嫁接到主模型（仅当主模型自己就具备画图能力时才这么用）。本区最多 6 套配置。</p>
+        <label class="check-field"><input type="checkbox" id="setImgToImg"><span>用图生图保持角色形象一致（有旧图时拿它当参考，失败自动回落文生图）</span></label>
+        <label class="check-field"><input type="checkbox" id="setPhoneShareImg"><span>手机里允许角色主动分享图片（需先开「自动发信息」并把发送位置设成手机）</span></label>
+        <p class="hint">接口地址 / API Key 留空则沿用主模型那套配置；模型名留空则直接嫁接到主模型（仅当主模型自己就具备画图能力时才这么用）。本区最多 6 套配置。<br>
+          「手机里允许角色主动分享图片」打开后，角色在手机里主动找你时可能顺带发一张图；画风由它按场景自选（自拍走写实、梗图走二次元…），
+          和角色本人相关的图会存进这个角色的个人图库，下次生成前先比对，形象不会前后对不上。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">视频生成<button class="btn ghost mini" type="button" data-reset="video">重置本区</button></h3>
+        <label class="check-field"><input type="checkbox" id="setVideoEnabled"><span>启用视频生成</span></label>
+        <label class="field"><span>接口地址</span><input id="setVideoBaseUrl" type="text" placeholder="https://api.example.com/v1（留空沿用主模型）"></label>
+        <label class="field"><span>API Key</span><input id="setVideoKey" type="password" placeholder="留空沿用主模型"></label>
+        <label class="field"><span>模型名</span><input id="setVideoModel" type="text" placeholder="veo-3 / kling-v2 / wan2.1 / sora-2 …"></label>
+        <label class="field"><span>模式</span><select id="setVideoMode">
+          <option value="t2v">文生视频（只给文字）</option>
+          <option value="i2v">图生视频（用一张图当首帧）</option>
+          <option value="auto">自动（有图走图生，没图走文生）</option>
+        </select></label>
+        <label class="field"><span>画幅</span><select id="setVideoRatio">
+          <option value="16:9">16:9 横屏</option>
+          <option value="9:16">9:16 竖屏</option>
+          <option value="1:1">1:1 方形</option>
+          <option value="4:3">4:3</option>
+          <option value="3:4">3:4</option>
+          <option value="21:9">21:9 宽银幕</option>
+        </select></label>
+        <label class="field"><span>分辨率</span><input id="setVideoSize" type="text" placeholder="1280x720"></label>
+        <label class="field"><span>时长（秒）</span><input id="setVideoDuration" type="number" min="1" max="60" step="1" placeholder="5"></label>
+        <label class="field"><span>帧率</span><input id="setVideoFps" type="number" min="8" max="60" step="1" placeholder="24"></label>
+        <label class="field"><span>创建任务路径</span><input id="setVideoCreatePath" type="text" placeholder="/videos"></label>
+        <label class="field"><span>查询任务路径</span><input id="setVideoStatusPath" type="text" placeholder="/videos/{id}（{id} 替换成任务号）"></label>
+        <label class="field"><span>结果地址字段</span><input id="setVideoResultField" type="text" placeholder="data.0.url（用 . 表示层级，数字表示数组下标）"></label>
+        <label class="field"><span>轮询间隔（毫秒）</span><input id="setVideoPollMs" type="number" min="500" step="500" placeholder="3000"></label>
+        <label class="field"><span>最多轮询次数</span><input id="setVideoPollMax" type="number" min="1" step="1" placeholder="120"></label>
+        <label class="field"><span>自定义请求模板（可选）</span><textarea id="setVideoTemplate" rows="3" placeholder='非标接口才需要。可用占位符：{{model}} {{prompt}} {{ratio}} {{duration}} {{size}} {{fps}} {{image}}'></textarea></label>
+        <p class="hint">各家视频接口差别很大，所以这里既给了通用字段、也留了模板。通用字段按「创建任务 → 轮询查询 → 从返回里取地址」这套流程走，覆盖大多数 OpenAI 兼容风格的平台；<b>接口不是这个形状就把模板填上</b>，请求体会用模板替换占位符后原样发出。<br>
+          留空接口地址 / Key 则沿用主模型那套。全部留空 = 不启用，任何地方都不会出现视频入口。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">音乐生成<button class="btn ghost mini" type="button" data-reset="music">重置本区</button></h3>
+        <label class="check-field"><input type="checkbox" id="setMusicEnabled"><span>启用音乐生成</span></label>
+        <label class="field"><span>接口地址</span><input id="setMusicBaseUrl" type="text" placeholder="https://api.example.com/v1（留空沿用主模型）"></label>
+        <label class="field"><span>API Key</span><input id="setMusicKey" type="password" placeholder="留空沿用主模型"></label>
+        <label class="field"><span>模型名</span><input id="setMusicModel" type="text" placeholder="suno-v4 / ace-step / musicgen …"></label>
+        <label class="field"><span>时长（秒）</span><input id="setMusicDuration" type="number" min="5" max="300" step="5" placeholder="30"></label>
+        <label class="field"><span>输出格式</span><select id="setMusicFormat">
+          <option value="mp3">mp3</option>
+          <option value="wav">wav</option>
+          <option value="flac">flac</option>
+          <option value="m4a">m4a</option>
+        </select></label>
+        <label class="check-field"><input type="checkbox" id="setMusicWithLyrics"><span>连同歌词一起生成（接口支持才勾）</span></label>
+        <label class="field"><span>创建任务路径</span><input id="setMusicCreatePath" type="text" placeholder="/music/generate"></label>
+        <label class="field"><span>查询任务路径</span><input id="setMusicStatusPath" type="text" placeholder="/music/{id}"></label>
+        <label class="field"><span>结果地址字段</span><input id="setMusicResultField" type="text" placeholder="data.0.url"></label>
+        <label class="field"><span>轮询间隔（毫秒）</span><input id="setMusicPollMs" type="number" min="500" step="500" placeholder="3000"></label>
+        <label class="field"><span>最多轮询次数</span><input id="setMusicPollMax" type="number" min="1" step="1" placeholder="120"></label>
+        <label class="field"><span>自定义请求模板（可选）</span><textarea id="setMusicTemplate" rows="3" placeholder='可用占位符：{{model}} {{prompt}} {{duration}} {{format}} {{lyrics}}'></textarea></label>
+        <p class="hint">和视频那一区同一套思路：通用字段够覆盖「提交任务 → 轮询 → 取地址」，形状不一样就填模板。<b>全部留空 = 不启用。</b></p>
       </div>
 
       <div class="settings-section">
@@ -330,7 +517,7 @@
         <h3 class="sec-head">角色扮演 · 记忆压缩<button class="btn ghost mini" type="button" data-reset="memory">重置本区</button></h3>
         <label class="check-field"><input type="checkbox" id="setRoleplayEnabled"><span>启用角色扮演模式（侧栏出现角色切换）</span></label>
         <p class="hint">全局「我的设定」：角色里留空时用这里的值。</p>
-        <label class="field"><span>我的名称</span><input id="setMyName" type="text"></label>
+        <label class="field"><span>我的昵称（也叫这个名字；酒馆卡里的 <code>{{user}}</code> 也替换成它）</span><input id="setMyName" type="text" placeholder="留空则显示为「你」"></label>
         <label class="field"><span>我的性格</span><textarea id="setMyPersona" rows="2"></textarea></label>
         <label class="field"><span>我的外貌</span><textarea id="setMyAppearance" rows="2"></textarea></label>
         <label class="field"><span>我的背景</span><textarea id="setMyBackground" rows="2"></textarea></label>
@@ -343,9 +530,106 @@
       </div>
 
       <div class="settings-section">
+        <h3 class="sec-head">功能开关 · 日更<button class="btn ghost mini" type="button" data-reset="feats">重置本区</button></h3>
+        <label class="check-field"><input type="checkbox" id="setDailyUpdate"><span>日更：场景 / 共同经历 / 关系 每天各更新一次（默认开）</span></label>
+        <label class="check-field"><input type="checkbox" id="setWorldGen"><span>世界生成：久未上线后生成三段剧情解释角色这段时间做了什么（可关）</span></label>
+        <label class="check-field"><input type="checkbox" id="setStatusQuant"><span>状态量化：气泡下方显示害羞 / 愤怒 / 开心等数值（可关）</span></label>
+        <label class="check-field"><input type="checkbox" id="setAutoMessage"><span>自动发信息：应用在后台时角色按性格主动联系你（默认关；且该对话要开着「时间系统」才会发）</span></label>
+        <label class="field"><span>自动发信息间隔（分钟，默认 30）</span><input id="setAutoMessageMin" type="number" min="5" step="5" inputmode="numeric"></label>
+        <label class="check-field"><input type="checkbox" id="setAutoMessagePhone"><span>自动发信息投到手机（手机模式）：主动发的是手机消息，而不是主对话</span></label>
+        <p class="hint">日更 / 世界生成 / 状态量化都会消耗 token；「助手总结」只在你主动问时才调用。</p>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button id="openReasonBtn" class="btn ghost mini" type="button"><span data-icon="clock-outline"></span>默认离线原因（可添加多条）</button>
+        </div>
+        <p class="hint">离线原因：你离开应用时挑一条，世界生成 / 角色主动找你时会按它来写。会话里那份只能在这里选，不能改。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">采用格式（全局默认）<button class="btn ghost mini" type="button" data-reset="format">重置本区</button></h3>
+        <label class="field"><span>角色回复采用的格式（留空则不限制）</span><textarea id="setAdoptFormat" rows="4" placeholder="例：每条回复先一句动作描写（用括号），再是对白；不要旁白式自我介绍。"></textarea></label>
+        <p class="hint">会话可在「对话设置 → 采用格式」里单独覆盖；留空则跟随这里。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>自定义聊天背景（全局默认）</h3>
+        <div class="avatar-field">
+          <div class="avatar-preview bg-preview" id="setBgPreview"></div>
+          <div class="avatar-btns">
+            <button class="btn" id="setBgPick" type="button">选择图片</button>
+            <button class="btn ghost" id="setBgAi" type="button">AI 生成</button>
+            <button class="btn ghost" id="setBgClear" type="button">清除</button>
+          </div>
+        </div>
+        <input type="file" id="bgInput" accept="image/*" hidden>
+        <label class="range-field"><span>模糊 <b id="setBgBlurVal">0</b></span><input type="range" id="setBgBlur" min="0" max="30" step="1" value="0"></label>
+        <label class="range-field"><span>亮度 <b id="setBgBrightVal">100</b></span><input type="range" id="setBgBright" min="20" max="140" step="1" value="100"></label>
+        <p class="hint">大图走外置文件存储，不塞进本地存储。会话可在「对话设置」里单独换背景；全局默认对所有会话生效。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>手机背景（手机聊天页单独用）</h3>
+        <div class="avatar-field">
+          <div class="avatar-preview bg-preview" id="setPhoneBgPreview"></div>
+          <div class="avatar-btns">
+            <button class="btn" id="setPhoneBgPick" type="button">选择图片</button>
+            <button class="btn ghost" id="setPhoneBgClear" type="button">清除</button>
+          </div>
+        </div>
+        <label class="range-field"><span>模糊 <b id="setPhoneBgBlurVal">0</b></span><input type="range" id="setPhoneBgBlur" min="0" max="30" step="1" value="0"></label>
+        <label class="range-field"><span>亮度 <b id="setPhoneBgBrightVal">100</b></span><input type="range" id="setPhoneBgBright" min="20" max="140" step="1" value="100"></label>
+        <p class="hint">只影响手机聊天页，与上面的聊天背景互不干扰；留空则手机页用默认底色。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="sec-head">用量花费<button class="btn ghost mini" type="button" data-reset="usageprice">重置本区</button></h3>
+        <label class="field"><span>估算方式</span>
+          <select id="setUsagePriceMode">
+            <option value="fuzzy">模糊估算（按输入 / 输出两档粗算）</option>
+            <option value="fixed">固定计费标准（按三档单价精确算）</option>
+          </select>
+        </label>
+        <label class="field"><span>输入 · 缓存命中（元 / 百万 tokens）</span><input id="setUsagePriceHit" type="text" inputmode="decimal" placeholder="0.2"></label>
+        <label class="field"><span>输入 · 未命中（元 / 百万 tokens）</span><input id="setUsagePriceIn" type="text" inputmode="decimal" placeholder="2"></label>
+        <label class="field"><span>输出（元 / 百万 tokens）</span><input id="setUsagePriceOut" type="text" inputmode="decimal" placeholder="8"></label>
+        <label class="field"><span>手机花费预警（元，0 = 不预警）</span><input id="setPhoneWarn" type="text" inputmode="decimal" placeholder="0"></label>
+        <div class="row-actions" style="justify-content:flex-start"><button id="resetUsageBtn" class="btn ghost mini" type="button">清零用量统计</button></div>
+        <p class="hint">默认单价只是量级参考，请按你实际用的模型价目改。改完点右上角「保存」。</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>live2D 视频通话</h3>
+        <label class="check-field"><input type="checkbox" id="setLive2dEnabled"><span>在手机「视频通话」里用 live2D 动态形象（关掉或没配好时，退回首帧静态图通话）</span></label>
+        <label class="field"><span>模型 JSON 路径（相对本应用根目录）</span><input id="setLive2dModel" type="text" placeholder="live2d/model/shizuku.model.json"></label>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button id="live2dUploadBtn" class="btn ghost mini" type="button"><span data-icon="arrow-up"></span>上传模型文件夹</button>
+          <button id="live2dTestBtn" class="btn ghost mini" type="button">测试模型</button>
+        </div>
+        <input type="file" id="live2dFolderInput" webkitdirectory directory multiple hidden>
+        <div id="live2dUploadState" class="hint"></div>
+        <p id="live2dTestOut" class="hint"></p>
+        <p class="hint">默认自带一个官方免费示例模型（Shizuku）。换模型：把 Cubism 2.1 的 .model.json + .moc + 贴图 放进 live2d/model/ 下，改这里路径即可。</p>
+      </div>
+
+      <div class="settings-section">
         <h3>角色记忆总览</h3>
         <p class="hint">每个角色「主线 + 各条支线」的记忆都在这里，点标题展开，不用一个个角色切过去看。</p>
         <div id="setMemoryList" class="memory-list"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>启动动画</h3>
+        <label class="field"><span>动画</span><select id="setSplashAnim">
+          <option value="1">经典 · 文字浮起 + 下划线</option>
+          <option value="2">星点 · 中心光晕散开</option>
+          <option value="3">纸页 · 整块滑入</option>
+          <option value="4">呼吸 · 缓慢起落的环</option>
+          <option value="5">头像 · 先出图再出字</option>
+        </select></label>
+        <label class="field"><span>主文字（留空＝DeepLink）</span><input id="setSplashText" type="text" placeholder="DeepLink"></label>
+        <label class="field"><span>底部小字（留空＝默认署名）</span><input id="setSplashSub" type="text" placeholder="耄耋老登/DS共同制作"></label>
+        <label class="field"><span>启动图片（可留空；填 avatars/xxx.png 或图片地址）</span><input id="setSplashImage" type="text" placeholder="avatars/shenyan.png"></label>
+        <label class="field"><span>或选一个角色头像</span><select id="setSplashAvatar"></select></label>
+        <p class="hint">图片优先于角色头像。改完<b>下次启动</b>生效。图片要是加载失败，会在后台自动重试，重试期间启动页不会提前退出。</p>
       </div>
 
       <div class="settings-section">
@@ -366,10 +650,31 @@
       </div>
 
       <div class="settings-section">
-        <h3>数据</h3>
+        <h3>我的人设</h3>
+        <p class="hint">这里存的是「<b>你</b>」的设定，最多 10 套、随时切换，只存本机。角色卡里填了的<b>以角色卡为准</b>，没填的用这里的补上（所以换角色不用重写一遍你）。</p>
+        <label class="field"><span>当前使用（<b id="personaCount">0</b> / 10 套）</span><select id="personaPick"></select></label>
+        <div id="personaFields"></div>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button id="personaNewBtn" class="btn ghost mini" type="button">新建一套</button>
+          <button id="personaDelBtn" class="btn ghost mini" type="button">删除这套</button>
+          <button id="personaApplyBtn" class="btn ghost mini" type="button">套用到当前角色卡</button>
+        </div>
+        <label class="field"><span>写一段关于你自己的话，交给 AI 拆进上面几栏</span><textarea id="personaSplitInput" rows="3" placeholder="例：16 岁，高二，性格有点闷、熟了话多，喜欢编程和听歌…"></textarea></label>
+        <div class="char-actions">
+          <button id="personaSplitRun" class="btn primary" type="button">AI 拆分</button>
+          <button id="personaSplitAgain" class="btn ghost" type="button">再次拆分</button>
+        </div>
+        <div id="personaSplitState" class="hint"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>存储</h3>
+        <div id="storageSum" class="storage-sum">正在统计…</div>
+        <div id="storageBars" class="storage-bars"></div>
         <div class="row-actions"><button id="openDataBtn" class="btn" type="button"><span data-icon="content-copy"></span>导入 / 导出</button></div>
         <div class="row-actions" style="justify-content:flex-start"><button id="clearCacheBtn" class="btn ghost mini" type="button">清理页面缓存</button></div>
         <div id="dataUsageLine" class="hint"></div>
+        <p class="hint">统计口径：键值类数据（对话 / 角色 / 设置…）按字符估算，1 字符≈2 字节；图片按原生读到的真实文件大小；只算 App 自己写入的数据，不含安装包本体与系统缓存。</p>
       </div>
 
       <div class="settings-section">
@@ -377,12 +682,12 @@
         <div class="row-actions"><button id="openAboutBtn" class="btn" type="button"><span data-icon="information-outline"></span>关于该应用</button></div>
       </div>
 
-      <div class="row-actions">
+      <div class="row-actions" id="settingsFoot">
         <button id="resetSettingsBtn" class="btn ghost" type="button">恢复默认设置</button>
-        <button id="selfTestBtn" class="btn" type="button">连接自检</button>
         <button id="saveSettingsBtn" class="btn primary" type="button">保存</button>
       </div>
       <div id="selfTestOut" class="selftest-out" hidden></div>
+      <button id="selfTestBtn" class="btn ghost mini selftest-fab" type="button"><span data-icon="link-variant"></span>连接自检</button>
     </div>
   </div>
 </div>
@@ -413,6 +718,8 @@
         <label class="field"><span>共同经历（本对话专属，随记忆自动更新）</span><textarea id="setSessionShared" rows="4" placeholder="两人共同经历的关键事件与约定…"></textarea></label>
         <label class="field"><span>当前场景（本对话专属，随对话自动更新）</span><textarea id="setSessionScene" rows="3" placeholder="此刻在哪、发生什么、什么氛围…"></textarea></label>
         <label class="field"><span>场景自动更新间隔（轮，默认 10）</span><input id="setSessionSceneEvery" type="number" min="1" step="1" inputmode="numeric"></label>
+        <label class="field"><span>采用格式（本会话，留空则跟随全局）</span><textarea id="setSessionFormat" rows="3" placeholder="留空则用「设置」里的全局格式"></textarea></label>
+        <label class="field"><span>本线音色（留空则跟随全局）</span><input id="setSessionTtsVoice" type="text" placeholder="例：FunAudioLLM/CosyVoice2-0.5B:alex"></label>
         <label class="field"><span>对我的认知（本对话专属，可手改）</span><textarea id="setSessionCognition" rows="5"></textarea></label>
         <div class="mem-title">记忆（本对话，只读）</div>
         <div id="sessionMemoryBox" class="memory-box"></div>
@@ -435,6 +742,54 @@
           <button id="sessionRestoreBackup" class="btn ghost" type="button">从备份恢复</button>
         </div>
         <div id="sessionBackupLine" class="hint"></div>
+
+        <div class="mem-title">主动发消息</div>
+        <label class="field"><span>本条对话允不允许角色主动找你（前提：这条对话要开着「时间系统」——没设故事时间就不会主动发）</span>
+          <select id="setSessionAutoMsg">
+            <option value="">跟随全局设置</option>
+            <option value="on">允许（AI 会先看场景：你俩在一块儿就不发）</option>
+            <option value="off">不允许</option>
+          </select>
+        </label>
+        <p class="hint">全局开关在「设置 → 功能」里的「自动发信息」。选「允许」后，AI 每次主动找你之前会先读「当前场景」——你俩此刻正在一起，它就不会发这条。</p>
+
+        <div class="mem-title">时间</div>
+        <label class="field"><span>对话开始时间（故事里的时间，可精确到秒）</span><input id="setSessionTime" type="text" readonly data-wheel="datetime" placeholder="点这里选时间"></label>
+        <label class="check-field"><input type="checkbox" id="setSessionTimeSync"><span>与现实时间同步（勾上 = 故事时间就是此刻）</span></label>
+        <div class="char-actions">
+          <button id="sessionTimeApply" class="btn ghost" type="button">应用时间</button>
+          <button id="sessionTimeNow" class="btn ghost" type="button">设为此刻</button>
+          <button id="sessionTimeClear" class="btn ghost" type="button">关掉时间系统</button>
+        </div>
+        <div id="sessionTimeLine" class="hint"></div>
+        <p class="hint">设好之后，故事时间就按 1:1 跟着现实走。也可以在聊天框里直接写「（第二天）」「（到了约定时间）」把它推过去。
+          合法时段由角色的<b>出生日期 + 当前年龄</b>算出来（例：2011-02-01 出生、写着他 12 岁 → 只能落在 2023-02-01 ~ 2024-02-01 之间）；越界会被拒绝。</p>
+
+        <div class="mem-title">离线原因（前提：开着时间系统）</div>
+        <label class="field"><span>离开应用时按这条来写（只能选，想加去 设置 → 高级功能）</span><select id="setSessionReason"></select></label>
+        <label class="check-field"><input type="checkbox" id="setReasonLock"><span>锁定：以后不管怎么离线都按这条算（防止手滑清后台）</span></label>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button id="sessionReasonExit" class="btn ghost mini" type="button"><span data-icon="open-in-new"></span>按此退出应用</button>
+        </div>
+        <p class="hint">点「按此退出应用」会先把离线原因和毫秒级的离开时间写进本机、<b>回读核对无误</b>才真的退出。</p>
+
+        <div class="mem-title">状态量化</div>
+        <label class="check-field"><input type="checkbox" id="setSessionStatusQuant"><span>在本对话显示角色状态（开心 / 低落 / 生气 / 害羞 等，折叠在气泡下方）</span></label>
+
+        <div class="mem-title">情绪日记</div>
+        <label class="field"><span>写给自己看的一两句（写下后角色会朝这个方向靠；不写就不生效）</span><textarea id="setSessionDiary" rows="3" placeholder="例：最近有点累，希望他别太闹。"></textarea></label>
+        <div class="char-actions">
+          <button id="sessionDiarySave" class="btn ghost" type="button">记下今天</button>
+          <button id="sessionDiaryClear" class="btn ghost" type="button">清空日记</button>
+        </div>
+        <div id="sessionDiaryList" class="hint"></div>
+
+        <div class="mem-title">助手总结</div>
+        <p class="hint">让助手读一遍这条线的记忆，写一份关系剖析。只在你要的时候才跑，不会自动花钱。</p>
+        <div class="char-actions">
+          <button id="sessionSummaryRun" class="btn ghost" type="button">生成关系剖析</button>
+        </div>
+        <div id="sessionSummaryOut" class="summary-box"></div>
       </div>
       <div class="settings-section">
         <h3>头像</h3>
@@ -459,6 +814,36 @@
             </div>
           </div>
         </div>
+      </div>
+      <!-- 群聊专用：对彼此的认知 + 同步到各自线（10-18）。非群聊时整块隐藏 -->
+      <div class="settings-section" id="groupCogSection" hidden>
+        <h3>对彼此的认知（群聊）</h3>
+        <label class="check-field"><input type="checkbox" id="setPeerCogOn"><span>把这些认知带进对话（关掉只是不告诉 AI，内容仍保留）</span></label>
+        <div id="peerCogList" class="peer-cog-list"></div>
+        <div class="peer-cog-ops">
+          <button class="btn ghost mini" id="peerCogUpdate" type="button">更新认知</button>
+          <span id="peerCogState" class="hint"></span>
+        </div>
+        <h3 class="peer-cog-h3">同步到各自线</h3>
+        <p class="hint">把群聊里发生的事、以及每位成员对别人的印象，分别写进该角色名下那条线的记忆（会跟着那条线一起压缩）。</p>
+        <div class="peer-cog-ops">
+          <button class="btn ghost mini" id="groupSyncBtn" type="button">同步到各自线</button>
+          <span id="groupSyncState" class="hint"></span>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>聊天背景（本对话）</h3>
+        <div class="avatar-field">
+          <div class="avatar-preview bg-preview" id="setSessionBgPreview"></div>
+          <div class="avatar-btns">
+            <button class="btn" id="setSessionBgPick" type="button">选择图片</button>
+            <button class="btn ghost" id="setSessionBgAi" type="button">AI 生成</button>
+            <button class="btn ghost" id="setSessionBgClear" type="button">清除</button>
+          </div>
+        </div>
+        <label class="check-field"><input type="checkbox" id="setSessionBgFollow" checked><span>跟随全局背景（取消勾选则用本对话单独设置；模糊 / 亮度沿用全局）</span></label>
+        <p class="hint">本对话单独设置后，只影响这条对话。</p>
       </div>
       <div class="settings-section">
         <h3>生成参数</h3>
@@ -497,9 +882,21 @@
     </div>
     <div class="modal-body">
       <div id="charList" class="char-list"></div>
-      <div class="row-actions" style="justify-content:flex-start"><button id="charNewBtn" class="btn" type="button"><span data-icon="plus"></span>新建角色</button></div>
+      <div class="row-actions" style="justify-content:flex-start">
+        <button id="charNewBtn" class="btn" type="button"><span data-icon="plus"></span>新建角色</button>
+        <button id="charPresetBtn" class="btn ghost" type="button"><span data-icon="creation"></span>预设角色</button>
+        <button id="charImportBtn" class="btn ghost" type="button"><span data-icon="file-document-outline"></span>导入酒馆角色卡</button>
+      </div>
+      <input type="file" id="charImportInput" accept=".png,.json,image/png,application/json" hidden>
+      <label class="check-field"><input type="checkbox" id="charImportAI"><span>导入后用 AI 拆分（酒馆卡里常夹 HTML / 代码，交给 AI 一起理解成设定；需先填好 API Key，卡大时会慢一些）</span></label>
+      <label class="check-field"><input type="checkbox" id="charImportUser" checked><span>把卡里的 <code>{{user}}</code> 换成「我的人设」里填的名字（没填就用「你」；不勾就原样留着）</span></label>
+      <p class="hint">支持酒馆（SillyTavern）角色卡：PNG（内嵌 chara / ccv3）或 JSON。<b>导入只是把卡填进表单，点「保存设定」才真的存下来</b>；想反悔直接切走就行。</p>
       <div id="charEmpty" class="hint">选择一个角色后填写「当前设定」；「助手」没有角色卡，不参与角色扮演。</div>
       <div id="charTools">
+        <div id="charReadyHint" class="hint"></div>
+        <div id="charUpgradeRow" class="row-actions" style="justify-content:flex-start" hidden>
+          <button id="charUpgradeBtn" class="btn ghost mini" type="button"><span data-icon="arrow-up"></span>升级为完整角色</button>
+        </div>
         <label class="field"><span>角色名（用于列表显示）</span><input id="charName" type="text" placeholder="如：小满"></label>
         <div class="char-split">
           <div class="char-split-head">
@@ -509,10 +906,13 @@
           <p id="charSplitHint" class="hint char-split-hint" hidden>懒得拆分？AI 一键细分！</p>
           <div id="charSplitPanel" class="char-split-panel" hidden>
             <label class="field"><span>把你想到的都写进来（想到什么写什么，不用管格式）</span><textarea id="charSplitInput" rows="5" placeholder="例：我是阿哲，25 岁，在上海做设计，性格闷骚、嘴硬心软；她叫小满，是我大学同学，说话软软的带点方言，喜欢喝凉茶……"></textarea></label>
+            <label class="check-field"><input type="checkbox" id="charSplitRoleOnly"><span>只拆角色相关的字段（「我」的那几栏原样保留，不填、也不覆盖）</span></label>
             <div class="char-actions">
               <button id="charSplitCancel" class="btn ghost" type="button">收起</button>
               <button id="charSplitRun" class="btn primary" type="button">AI 拆分</button>
+              <button id="charSplitAgain" class="btn ghost" type="button">再次拆分</button>
             </div>
+            <p class="hint">「<b>再次拆分</b>」不用再写输入框 —— 直接拿上面各字段里<b>现在的内容</b>重新整理、重新归位一遍。这次的内容和原有冲突时，以这次的为准。</p>
             <div id="charSplitState" class="hint"></div>
           </div>
         </div>
@@ -554,14 +954,40 @@
 <div id="usageModal" class="modal" aria-hidden="true">
   <div class="modal-sheet">
     <div class="modal-head">
+      <button class="icon-btn sg-back" data-close="usageModal" type="button" aria-label="返回"><span data-icon="arrow-left"></span></button>
       <h2>用量统计</h2>
       <button class="icon-btn" data-close="usageModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
     </div>
     <div class="modal-body">
       <div id="usageGlobal" class="usage-list"></div>
+      <div class="settings-section"><h3>按类型</h3><p class="hint">除对话外的一切 AI 消耗（记忆压缩 / 认知、日更、世界生成、状态量化、群聊、动态筛选、助手总结、情绪日记、手机、自动发信息、快捷回复等）都在这儿。</p><div id="usageCats" class="usage-list"></div></div>
       <div class="settings-section"><h3>按会话</h3><div id="usageSessions" class="usage-list"></div></div>
       <div class="settings-section"><h3>按角色</h3><div id="usageChars" class="usage-list"></div></div>
-      <p class="hint">缓存命中率 = 命中 tokens ÷ 输入 tokens（DeepSeek 自动上下文缓存）。</p>
+      <p class="hint">缓存命中率 = 命中 tokens ÷ 输入 tokens（DeepSeek 自动上下文缓存）。花费为估算值，可在「设置 → 用量花费」里调整计费标准。</p>
+    </div>
+  </div>
+</div>
+
+<div id="reminderModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>备忘录</h2>
+      <button class="icon-btn" data-close="reminderModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <label class="field"><span>记一条</span>
+        <input id="reminderText" type="text" placeholder="例：今晚八点提醒他吃药">
+      </label>
+      <label class="check-field"><input type="checkbox" id="reminderAsTime"><span>这是个约定，到点提醒我（按当前对话的故事时间算）</span></label>
+      <label class="field" id="reminderTimeField" hidden><span>约定时间</span>
+        <input id="reminderAt" type="text" readonly data-wheel="datetime" placeholder="点这里选时间">
+      </label>
+      <div class="row-actions" style="justify-content:flex-start">
+        <button id="reminderAddBtn" class="btn" type="button">加进去</button>
+      </div>
+      <div class="mem-title">清单</div>
+      <div id="reminderList" class="reminder-list"></div>
+      <p class="hint">约定型备忘按<b>当前这条对话</b>的故事时间算；没开时间系统的对话只会当成普通备忘列着，不会到点提醒。</p>
     </div>
   </div>
 </div>
@@ -580,6 +1006,63 @@
       <div class="about-menu">
         <!-- 开源版：已移除作者联系方式与捐赠入口，APK 发行版中保留 -->
         <div class="about-row"><span>当前版本</span><b id="aboutVersion">v—</b></div>
+        <div class="about-row"><span>检查更新</span><button class="btn ghost mini" id="updateCheckBtn" type="button">检查</button></div>
+        <p class="hint" id="updateState">启动时会每天自动查一次；有新版本才提示。</p>
+        <details class="about-item">
+          <summary><span>用户协议与免责声明</span><span class="about-caret" data-icon="chevron-right"></span></summary>
+          <div class="about-body">
+            <p class="hint">最后更新：2026-10-18　　继续使用本软件即表示你已阅读并同意以下条款。</p>
+
+            <p><b>一、软件性质</b><br>
+            DeepLink 是一个<b>纯粹的本地客户端</b>：它不提供任何人工智能服务，不运营模型，也不设服务器。
+            对话内容由你<b>自行配置的第三方模型接口</b>生成，全部数据（对话、角色卡、设置、记忆）只保存在你自己的设备上。
+            作者既不接收、也不存储、也不审核你与本软件之间产生的任何内容。</p>
+
+            <p><b>二、与生成式人工智能服务的关系</b><br>
+            依据《生成式人工智能服务管理暂行办法》第九条，提供生成式人工智能服务的一方承担网络信息内容生产者责任。
+            本软件<b>不向公众提供生成式人工智能服务</b>，仅作为访问第三方接口的工具，因此该类义务由你选择的模型服务提供方承担；
+            你与其之间的权利义务，以你与该服务方的协议为准。</p>
+
+            <p><b>三、你的责任</b><br>
+            1. 你是本软件所产生全部内容的唯一责任人。不得用它制作、传播违反法律法规的信息
+            （《网络安全法》第四十七条、《生成式人工智能服务管理暂行办法》第四条所列情形）。
+            生成内容的真实性、准确性、合法性由你自行判断并承担后果。<br>
+            2. 你须自行确保所使用的第三方接口<b>合法、已获授权、且符合其服务条款</b>；因违规调用导致的封号、欠费、纠纷由你承担。<br>
+            3. 上传的角色卡、图片、文本等素材，你须确保拥有相应权利；因侵犯他人著作权、肖像权、名誉权等引发的争议由你承担。<br>
+            4. 若你未满十八周岁，应在<b>监护人知情并同意</b>的前提下使用（《民法典》第十九条：八周岁以上的未成年人为限制民事行为能力人）。</p>
+
+            <p><b>四、免责</b><br>
+            1. 本软件按<b>「现状」</b>提供，不附带任何明示或默示的担保，包括但不限于适销性、特定用途适用性与不侵权担保。
+            作者不保证它不中断、无错误、或与你的设备、模型服务完全兼容。<br>
+            2. 模型输出具有随机性，<b>可能不准确、不完整或令你不适</b>，作者无法预先控制，也不对其负责。<br>
+            3. <b>数据风险由你自负</b>：卸载、覆盖安装、清除应用数据、设备损坏、系统清理均可能导致本地数据永久丢失。
+            请自行定期用内置的「导出 / 自动备份」功能备份。<br>
+            4. 在法律允许的最大范围内，作者不对任何间接、附带、特殊或惩罚性损害（含利润损失、数据丢失、名誉损害）承担责任。
+            依《民法典》第五百零六条，因<b>故意或重大过失</b>造成你财产损失、或造成人身损害的，本条不适用。</p>
+
+            <p><b>五、个人信息</b><br>
+            本软件不收集个人信息，也不向作者回传任何数据（《个人信息保护法》第十三条所规范的处理行为在本软件中不发生）。
+            唯一的外发是你主动发起、发往你自己配置的模型接口的请求内容，其处理规则适用该服务方的隐私政策。</p>
+
+            <p><b>六、知识产权</b><br>
+            软件代码与界面归作者所有；界面图标来自 Material Design Icons（Apache License 2.0 / MIT，见「图标来源与授权」）；
+            你创作的角色卡、对话与图片归你所有。本软件所用示例模型（Shizuku）版权归其原作者，仅作演示，商用请自行取得授权。</p>
+
+            <p><b>七、条款变更与法律适用</b><br>
+            作者可能随版本更新调整本协议，更新后会在本页标注日期；继续使用视为接受。
+            本协议适用<b>中华人民共和国法律</b>（不含港澳台地区法律）。发生争议先协商；协商不成，提交作者住所地有管辖权的人民法院。
+            本协议部分条款被认定无效的，不影响其余条款的效力。</p>
+          </div>
+        </details>
+        <details class="about-item">
+          <summary><span>图标来源与授权</span><span class="about-caret" data-icon="chevron-right"></span></summary>
+          <div class="about-body">
+            <p class="hint">界面图标取自 <b>Material Design Icons</b>（MDI，社区版，Pictogrammers）。
+              授权为 <b>Apache License 2.0</b>（图标与字体）与 <b>MIT</b>（代码）：可自由用于商用或开源项目、GPL 友好，
+              也没有强制署名要求；只有「品牌 / Logo」那一类不在此授权范围内，本项目一个都没用。
+              项目主页 Templarian/MaterialDesign。</p>
+          </div>
+        </details>
         <details class="about-item">
           <summary><span>创作初衷</span><span class="about-caret" data-icon="chevron-right"></span></summary>
           <div class="about-body">对话不应总是冷冰冰，我想有一个有温度、符合自己喜欢的性格的 AI，同时也想花更少的钱狠狠地角色扮演。</div>
@@ -623,15 +1106,21 @@
                 <li>回答完不会再把你强行拽到底部：你翻上去看旧消息，它就停在那儿；你本来就贴着底部，它才继续跟。</li>
                 <li>要最新消息：开「联网搜索」，它会先查再答（可在设置里换搜索源）。</li>
                 <li>生成中点「停止」可随时中断。</li>
+                <li><b>快捷回复</b>：输入框<b>左边</b>、加号右边那个<b>没有边框的气泡按钮</b>（键盘图标那个）。点它会收起键盘、在键盘原来的位置弹出一个面板，AI 站在<b>你的立场</b>给你 <b>4 条</b>「这时可以怎么回」——它读的是角色的设定、你们的记忆，以及<b>你自己</b>的性格设定，所以不会 OOC、前后也接得住。不满意点「<b>换一批</b>」，一次最多 <b>5 批</b>。每句<b>左边有个铅笔</b>：点一下这句就填进输入框、键盘跟着弹回来，你改完再发。面板开着时点输入框，会自动收起面板、唤回键盘。</li>
+                <li><b>继续说</b>：角色最后一条消息<b>的操作栏里</b>（和修改、复制、删除同一排）多了个「继续说」按钮，点一下让角色<b>接着往下说</b>（不会重复已说过的，也不会从头开始）。它只在最后一条是角色消息时出现。</li>
+                <li><b>故事时间</b>：开了时间系统后，顶栏的「对话设置」按钮上会直接显示故事里的时:分（点它就是下面说的那个浮窗）。也可以直接在聊天框里写「<b>（第二天）</b>」「<b>（到了约定时间）</b>」「<b>（20:30）</b>」把时间推过去 —— 越出角色设定的合法时段会被拒绝并说明。设置见「对话设置 → 时间」。</li>
+                <li><b>对话设置</b>：点顶栏那个「💬 ＋ 时间」的按钮，会在它下面弹一张小卡，两栏 —— 上面一栏进<b>对话设置</b>（记忆 / 参数 / 时间 / 日记都在这儿），下面一栏是<b>实时显示的故事时间</b>。</li>
               </ul>
             </div>
             <div class="guide-sec">
               <h4>三、发文件 / 图片 / 拍照 / 语音</h4>
               <ul>
-                <li><b>回形针</b>：上传文件或图片。文件（txt / md / 代码等）直接读成文字附在消息里；<b>图片走的是「先转文字再喂给模型」</b>——默认由「视觉模型」把图写成一段描述，再把描述发给主模型（因为绝大多数文字模型看不了图）。<b>只有</b>你确认主模型本身能看图、并在设置里勾了「<b>模型兼容</b>」时，原图才会直接发给主模型。见第十四节。</li>
-                <li><b>相机</b>：拍照或选图，拍完可裁剪、旋转、画笔、箭头、加文字，再选“附带在消息上”或“直接发送”。</li>
+                <li><b>加号（＋）</b>：拍照和上传文件合并成了一个入口。点输入框左边的「＋」，会在它右上方弹出一张小卡，两项：<b>拍照上传</b> / <b>上传文件</b>。</li>
+                <li><b>上传文件</b>：文件（txt / md / 代码等）直接读成文字附在消息里；<b>图片走的是「先转文字再喂给模型」</b>——默认由「视觉模型」把图写成一段描述，再把描述发给主模型（因为绝大多数文字模型看不了图）。<b>只有</b>你确认主模型本身能看图、并在设置里勾了「<b>模型兼容</b>」时，原图才会直接发给主模型。见第十四节。</li>
+                <li><b>拍照上传</b>：拍照或选图，拍完可裁剪、旋转、画笔、箭头、加文字，再选“附带在消息上”或“直接发送”。</li>
                 <li><b>麦克风</b>：语音输入（需在设置里配好「听觉模型」，硅基流动的 <code>FunAudioLLM/SenseVoiceSmall</code> 免费）。</li>
                 <li>打开<b>「画图」</b>开关后，可让 AI 生成图片（需配好「文生图」模型）。</li>
+                <li>在「设置 → 文生图」里开「<b>手机里允许角色主动分享图片</b>」，角色在手机里主动找你时就能顺带发图：<b>画风按场景自选</b>（自拍走写实、梗图走二次元、随手画走手绘…）；和角色本人相关的图会存进它的<b>个人图库</b>，下次生成前先比对，长相 / 发型 / 衣着不会前后对不上。想要更稳，再开「<b>用图生图保持角色形象一致</b>」（要平台支持 <code>/images/edits</code>，不支持会自动回落，不影响出图）。</li>
               </ul>
             </div>
             <div class="guide-sec">
@@ -667,7 +1156,7 @@
                 <li>开法：设置 → 打开「启用角色扮演模式」；侧栏顶部会出现角色切换条。</li>
                 <li>新建角色：点侧栏「+新角色」，或顶栏人形图标 →「新建角色」。</li>
                 <li>懒得逐项填？用「<b>AI 自动拆分</b>」（旁边 ? 有说明）：把想到的<b>一股脑写进</b>输入框，点「AI 拆分」——它按字段拆开；没提到的会依据现有文本推断补全，填好后还能改，最后点「保存设定」。</li>
-                <li>「当前设定」共 17 项：我的名称、你对我的称呼、你的名称、当前年龄、我的性格/外貌/背景/喜好、你的性格/外貌/背景/喜好、你的说话风格、世界观、共同经历（初始）、当前关系（初始）、AI 指令。填得越细，越像。</li>
+                <li>「当前设定」共 18 项：我的名称、你对我的称呼、你的名称、当前年龄、出生日期、我的性格/外貌/背景/喜好、你的性格/外貌/背景/喜好、你的说话风格、世界观、共同经历（初始）、当前关系（初始）、AI 指令。填得越细，越像。</li>
                 <li>“我的名称/性格/外貌/背景/喜好”留空会自动沿用「设置」里的全局「我的设定」。</li>
                 <li>每个角色一套对话：第一条是<b>主线</b>，之后新建的算<b>支线</b>；在「对话设置」里可以把任意一条设为<b>主线</b>。</li>
                 <li><b>当前关系 / 共同经历 / 当前场景 / 对我的认知 / 记忆压缩</b>都是<b>按对话分开记</b>：主线与每条支线各一套，互不影响；都在那条对话的「对话设置」里。</li>
@@ -731,9 +1220,10 @@
             <div class="guide-sec">
               <h4>十三、数据与隐私</h4>
               <ul>
-                <li>本机<b>加密存放</b>的内容包括：每段对话的<b>记忆 + 对我的认知</b>、<b>当前关系 / 共同经历 / 当前场景</b>，以及<b>整个角色卡</b>（名称·年龄·性格外貌背景喜好·世界观·共同经历·当前关系·AI 指令等 17 项）。做法是双层 AES（内层随机密钥，外层口令 MDLDDS），直接翻存储看不到明文。</li>
+                <li>本机<b>加密存放</b>的内容包括：每段对话的<b>记忆 + 对我的认知</b>、<b>当前关系 / 共同经历 / 当前场景</b>，以及<b>整个角色卡</b>（名称·年龄·出生日期·性格外貌背景喜好·世界观·共同经历·当前关系·AI 指令等 18 项）。做法是双层 AES（内层随机密钥，外层口令 MDLDDS），直接翻存储看不到明文。</li>
                 <li>自动备份的快照走<b>同一套裁剪规则</b>：备份里也只有密文，不会把明文另存一份。</li>
                 <li>「导出」时会让你<b>自己设一个口令</b>：导出文件用它加密，<b>口令不会存进 App</b>，导回时得输同一个——只有你能打开。忘了就永久解不开。</li>
+                <li>AI 生成的<b>角色个人图库</b>会跟着它所属的角色 / 会话一起导出、备份：导出时图片内联进文件（换机才带得走），会话备份只带<b>最近 3 张</b>以控制体积。</li>
                 <li><b>说清楚边界</b>：上面这层加密的密钥材料（设备标识 + 盐）都在这台机器上，它挡的是「拿到文件直接翻看」，<b>挡不住有备而来、能动手提取数据的人</b>。想再严一档只能靠「口令派生」（每次开机输口令、忘了就彻底没了），当前版本没做这个取舍。</li>
                 <li>数据都存在本机：<b>打包后的 App 用原生存储</b>（没有浏览器那 5 MB 的限制）；在网页/预览里打开时会退回浏览器存储。卸载 App 会连同数据一起删，请定期导出备份。</li>
               </ul>
@@ -777,6 +1267,56 @@
               <p><b>也可以用别家</b>：只要它「兼容 OpenAI 接口」就行——阿里云百炼的兼容模式地址 <code>https://dashscope.aliyuncs.com/compatible-mode/v1</code>，智谱 <code>https://open.bigmodel.cn/api/paas/v4</code>，OpenAI 官方 <code>https://api.openai.com/v1</code>（但要外网和境外支付，不方便）。<b>地址一定要带到带版本号的那一层</b>，模型名照平台文档抄。</p>
               <p><b>顺带一提：联网搜索源</b>（设置里「联网搜索」那节）默认用内置的几个免费实例，不稳时可以填 <a class="ext-link" href="https://tavily.com">tavily.com</a> 申请的 Key（每月有免费额度），或自填一个搜索接口地址加密钥。</p>
             </div>
+            <div class="guide-sec">
+              <h4>十五、6.0 新功能速览</h4>
+              <p>6.0 加了「手机」「群聊」和一批可开关的玩法。下面按模块说，开关基本都在<b>「设置 → 功能」</b>里。</p>
+              <p><b>手机（类微信）</b></p>
+              <ul>
+                <li><b>怎么进</b>：侧栏点「<b>切换手机</b>」进角色列表（一个角色有多条线时先选线）；或在某个会话顶栏点<b>手机图标</b>，直接进当前角色当前会话的手机界面。</li>
+                <li><b>能干什么</b>：发消息、转账（金额和备注随便填）、发位置（示意地图）、发图片（相机 / 相册，走视觉模型）、发语音（听觉 / 朗读）。</li>
+                <li><b>长回复自动拆成几条</b>：角色一次说得长，会像真人那样<b>拆成好几条</b>发出来（按行拆，单行太长再按句末切，最多 6 条）——不再闷头塞一大段。</li>
+                <li><b>和主对话共用记忆</b>：手机里聊的内容照样进「场景 / 关系 / 共同经历」三层记忆，日更也算数。</li>
+                <li><b>单独算钱</b>：手机消耗单记一类，走「手机花费预警」，不跟主对话混在一起。</li>
+              </ul>
+              <p><b>伪电话</b>：点手机里的「电话」→ <b>拨号、等角色「接通」→ 自动开始语音转文字</b>。你说的话实时变成文字喂给角色，它的回复再朗读出来；通话中随时可<b>静音</b>（不用再按住说话）。</p>
+              <p><b>视频通话（live2D）</b>：通话界面点「视频」，会加载 <b>live2D 形象</b>；没配模型、或设备不支持 WebGL，会自动退回<b>静态头像图</b>通话，不会白屏报错。模型在设置里配，旁边有「测试」按钮。</p>
+              <p><b>发布动态（挂在手机里）</b>：纯文字或带图发一条；可用「<b>AI 自动筛选</b>」——输入一条标准（如「和我一起看过电影的」），它会模糊检索相关对话，再大致总结「那天看了什么、发生了什么」供你选。</p>
+              <p><b>手机里的时间</b>：和主对话共用同一套「故事时间」。相邻两条消息<b>隔了 3 分钟以上</b>（自己发的、对方发的都算）就会插一条<b>居中的时分</b>，像微信那样。</p>
+              <p><b>群聊</b>：可建「手机群聊」或「普通群聊」，<b>不建就是零消耗</b>。多角色在同一会话里，AI 按各自性格动态决定谁发言、说几句；可从某条已有线<b>导入同步记忆</b>。建群时每位成员要绑一条线，群聊里还有「<b>对彼此的认知</b>」和「<b>同步到各自线</b>」——细节在<b>第十六节</b>。</p>
+              <p><b>世界生成（可关）</b>：离线一段时间再上线，可让 AI <b>按天</b>生成剧情，交代角色这段时间每天（早 / 午 / 晚）做了什么；能换一批、也能跳过。
+                剧情<b>一天一个框</b>，不合意直接改，改完再「采纳」——采纳的是你框里的内容。
+                采纳后<b>不会变成谁说的话</b>，而是在聊天流里浮出一张居中的<b>剧情卡</b>；点它<b>铺满全屏</b>看全文，左上角返回，再点开时会<b>接着上次读到的位置</b>。</p>
+              <p><b>每条对话单独决定要不要主动发消息</b>：对话设置里有「本条对话允不允许角色主动找你」——跟随全局 / 允许 / 不允许。
+                选「允许」后，AI 每次主动找你之前会<b>先读「当前场景」</b>：你俩此刻正在一块儿，它就不发这条。<br>
+                <b>前提</b>：这条对话要开着「<b>时间系统</b>」（对话设置 → 时间，也就是设过故事时间）。没有时间轴就不知道「隔了多久、现在是几点」，
+                主动发来的消息会没头没尾 —— 所以<b>没设故事时间的对话不会主动发消息</b>。</p>
+              <p><b>故事时间（时间系统）</b>：给角色填上<b>出生日期</b>（角色页里有这个选择栏）和<b>当前年龄</b>，系统就算出他可能处在的合法时段 ——
+                例：2011-02-01 出生、写着他 12 岁，那就只能落在 <b>2023-02-01 ~ 2024-02-01</b> 这一年内（写 2011 那时还没出生、写 2027 那时已经 14 岁了，都会被拒绝）。
+                在「对话设置 → 时间」里设一个起点（精确到秒），之后故事时间就<b>按 1:1 跟着现实走</b>；也可以直接勾「与现实时间同步」。
+                设的时间如果不在角色的合法时段里，会提示你去改年龄或出生日期。主对话、手机、世界生成、记忆摘要读的都是这套时间；
+                聊天框里还能用「（第二天）」「（到了约定时间）」临时把时间推过去。</p>
+              <p><b>状态量化（可关）</b>：把角色的害羞 / 愤怒 / 开心等数值做成<b>折叠框</b>显示在气泡下方，一眼看到情绪走向。</p>
+              <p><b>自动发信息（默认关）</b>：后台没被杀掉时，角色会按性格<b>主动找你说话</b>；默认关闭，开了才按设定间隔触发。
+                勾上「<b>投到手机（手机模式）</b>」，主动消息就发进<b>手机聊天</b>而不是主对话；配合文生图那栏的「手机里允许角色主动分享图片」，它还会按性格<b>顺手发张图</b>。</p>
+              <p><b>助手总结</b>：不会自动跑，<b>你主动问才出</b>——给一份关系剖析报告。</p>
+              <p><b>情绪日记</b>：你<b>主动写</b>才生效；AI 会参考日记，把角色的发言往你期望的方向引导。</p>
+              <p><b>其它小改</b>：自定义聊天背景（全局默认 + 单会话覆盖）· 酒馆角色卡导入（PNG / JSON）· 「采用格式」输入框 · 场景 / 共同经历 / 关系的<b>日更</b>（默认开）· 用量新增<b>花费估算</b>。</p>
+            </div>
+            <div class="guide-sec">
+              <h4>十六、群聊：成员绑线、彼此的认知、同步到各自线</h4>
+              <p><b>建群时必须给每位成员选一条线</b>（弹窗里每个人右边那个下拉，默认是他的主线）。这条绑定不是摆设：<b>同步到各自线</b>靠它，删线时也靠它判断该解散哪个群。没有线的角色<b>勾不了</b>，整行会变淡，先给他建一条线再来。</p>
+              <p><b>对彼此的认知</b>：群聊的「对话设置」里，一个角色一条折叠条（右边写着「2 / 3」这种已填条数）；点开是他对<b>每一个</b>其他成员的看法，再点一层看具体内容。点「<b>更新认知</b>」才会更新——AI 读最近 30 条对话整理一次，<b>不做自动更新</b>，也不会偷偷花 token。上面那个开关决定要不要把这份认知带进对话（<b>默认关</b>，关着内容也留着）。</p>
+              <p><b>为什么它不会把谁是谁搞混</b>：每条认知在喂给模型时都写成「「小明」眼中的「小红」：…」，并且明写「这不是事实、不能互换主语」。所以它不会把「小明觉得小红话少」说成「小红觉得自己话少」。</p>
+              <p><b>同步到各自线</b>：同一处点一下，把群聊里发生的事、共同经历、当前情境，再加上每位成员对别人的印象，分别写进<b>该角色名下那条线</b>的<b>当天记忆</b>里。写的是记忆摘要而不是一个孤立字段，所以它会跟着那条线一起参与周 / 月压缩。</p>
+              <p><b>删线会解散群</b>：如果这条线被某个群当成成员线，删除时会弹警告、点名列出会被解散的群，<b>确认按钮 10 秒后才可点</b>。删掉就一起没了，先把要留的东西导出。</p>
+            </div>
+            <div class="guide-sec">
+              <h4>十七、检查更新与外链</h4>
+              <p><b>检查更新</b>：「设置 → 关于」里有一行「检查更新」，点一下会读一次更新清单，告诉你有没有新版本、这一版改了什么、下载地址在哪。另外<b>启动时自动查一次，一天只查一次</b>，发现新版本才弹窗，不打扰。</p>
+              <p><b>装新版本前先导出备份</b>：只有签名一致的安装包才能直接覆盖安装；签名变了就装不上，只能卸载重装，而卸载会把本机数据一起删掉。所以更新提示里专门写了这一句，别忽略。</p>
+              <p><b>「跳过这个版本」</b>：更新弹窗里点「取消」= 这个版本先不提醒了（自动检查不再弹它），但<b>手动点「检查更新」仍会提示</b>。</p>
+              <p><b>外链为什么不会在应用里打开</b>：指南里的 DeepSeek 开放平台、硅基流动、Tavily 这些链接，点了是<b>交给系统浏览器</b>打开，不会把应用界面顶掉。万一封装工具没提供「打开链接」的原生接口，会退回复制链接并提示你粘到浏览器——无论如何都不会在应用内跳走。</p>
+            </div>
           </div>
         </details>
         <div class="row-actions" style="justify-content:flex-start;margin-top:12px">
@@ -790,6 +1330,7 @@
 <div id="dataModal" class="modal" aria-hidden="true">
   <div class="modal-sheet">
     <div class="modal-head">
+      <button class="icon-btn sg-back" data-close="dataModal" type="button" aria-label="返回"><span data-icon="arrow-left"></span></button>
       <h2>数据导入 / 导出</h2>
       <button class="icon-btn" data-close="dataModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
     </div>
@@ -854,7 +1395,7 @@
         </div>
         <div class="intro-page" hidden>
           <div class="intro-h">省心小功能</div>
-          <p class="intro-p">· 记忆压缩 / 再压缩 / 上下文筛选：让长对话不越聊越贵。<br>· 图片（自己发的 / AI 画的）会在若干轮后删原图、只留「<b>视觉模型</b>」写的文字描述，省空间也省 token。<br>· 对话很长时只先渲染<b>最近 20 条</b>、往上滑再加载，不会越拉越卡。<br>· 对话和角色都能<b>置顶、排序</b>（长按即可）。<br>· 记忆栏能看记忆，记错了可用「<b>记忆纠偏</b>」让 AI 纠正（勿滥用）。<br>· 消息「重新说」存了多版本时，记忆与认知以你<b>当前选定的版本</b>为准。<br>· 用量统计与预警：随时看花了多少。<br>· 导入导出与自动备份：换机、防丢。</p>
+          <p class="intro-p">· <b>快捷回复</b>：输入框<b>左边</b>（加号右边）那个无边框按钮，AI 站在你的立场给几条「这时可以怎么回」，可以换批、点铅笔填进输入框；<b>继续说</b>在角色最后一条消息的操作栏里。<br>· <b>故事时间</b>：给角色填上出生日期和年龄，就能锁定他的合法时段；顶栏「对话设置」按钮上直接显示故事里的时:分。<br>· <b>剧情卡</b>：世界生成采纳后浮一张居中的卡，点开铺满全屏看全文。<br>· 记忆压缩 / 再压缩 / 上下文筛选：让长对话不越聊越贵。<br>· 图片（自己发的 / AI 画的）会在若干轮后删原图、只留「<b>视觉模型</b>」写的文字描述，省空间也省 token。<br>· 对话很长时只先渲染<b>最近 20 条</b>、往上滑再加载，不会越拉越卡。<br>· 对话和角色都能<b>置顶、排序</b>（长按即可）。<br>· 记忆栏能看记忆，记错了可用「<b>记忆纠偏</b>」让 AI 纠正（勿滥用）。<br>· 消息「重新说」存了多版本时，记忆与认知以你<b>当前选定的版本</b>为准。<br>· 用量统计与预警：随时看花了多少。<br>· 导入导出与自动备份：换机、防丢。<br>· <b>群聊</b>：建群时每位成员绑一条线；「对话设置」里能看<b>对彼此的认知</b>（一人一条折叠条，可开关、手动更新），也能一键<b>同步到各自线</b>。<br>· <b>检查更新</b>：设置 → 关于，启动时每天自动查一次，有新版本才提示；装之前记得先导出备份。</p>
           <p class="intro-p">更多在「设置 → 关于 → 使用指南」。</p>
         </div>
       </div>
@@ -895,6 +1436,54 @@
   </div>
 </div>
 
+<!-- 退出前问「要不要冻结时间」（10-16 用户要求）。故意不给关闭按钮：必须选一个。 -->
+<div id="freezeAskModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet small">
+    <div class="modal-head"><h2>退出前：要不要冻结时间？</h2></div>
+    <div class="modal-body">
+      <p class="hint">冻结后，你离开的这段时间<b>不算进故事里</b> —— 回来时故事时间还停在现在，角色不会觉得你消失了很久。</p>
+      <label class="check-field"><input type="checkbox" id="freezeAskOn" checked><span>这次冻结时间</span></label>
+      <label class="check-field"><input type="checkbox" id="freezeAskNever"><span>不再弹出（以后退出都不问）</span></label>
+      <div class="row-actions">
+        <button id="freezeAskStay" class="btn ghost" type="button">留在应用</button>
+        <button id="freezeAskGo" class="btn primary" type="button">退出</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 纯手机角色升级为完整角色（10-17 用户要求：升级时写见面背景，手机消息不搬） -->
+<div id="upgradeModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet small">
+    <div class="modal-head"><h2>升级为完整角色</h2></div>
+    <div class="modal-body">
+      <p class="hint">升级后它会从「手机角色」挪到「现实扮演角色」，可以开主对话、参与日更与世界生成。<b>手机里已有的消息保持不动</b>（不会搬进主对话）。</p>
+      <label class="field"><span>见面背景（你们怎么认识的 / 在什么场合见的面）</span><textarea id="upgradeMeet" rows="3" placeholder="例：常去的那家书店老板，第一次去就聊了两句。"></textarea></label>
+      <div class="row-actions">
+        <button id="upgradeCancel" class="btn ghost" type="button">取消</button>
+        <button id="upgradeOk" class="btn primary" type="button">升级</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 离线原因：抽屉式管理（设置 → 高级功能 里打开。可无限添加；会话里只能选不能改） -->
+<div id="reasonDrawer" class="drawer" hidden>
+  <div class="drawer-mask" id="reasonMask"></div>
+  <div class="drawer-panel">
+    <div class="drawer-head">
+      <h2>默认离线原因</h2>
+      <button id="reasonClose" class="icon-btn" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <p class="hint">你离开应用时挑一条，世界生成 / 角色主动找你就会按它来写。可无限添加，会话里的那份只能从这里选。</p>
+    <div id="reasonList" class="reason-list"></div>
+    <div class="reason-add">
+      <input id="reasonNewInput" type="text" placeholder="如：去上班了 / 睡着了 / 手机没电">
+      <button id="reasonAddBtn" class="btn primary" type="button">添加</button>
+    </div>
+  </div>
+</div>
+
 <div id="passModal" class="modal" aria-hidden="true">
   <div class="modal-sheet small">
     <div class="modal-head"><h2 id="passTitle">口令</h2></div>
@@ -925,6 +1514,82 @@
     <div class="modal-head"><h2>消息操作</h2></div>
     <div class="modal-body">
       <div id="msgMenuList" class="menu-grid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 加号浮窗：拍照 / 上传文件（位置由 app.js 按加号按钮算，贴在它上方） -->
+<div id="plusMenu" class="popover" hidden>
+  <button id="plusCamera" class="po-item" type="button"><span data-icon="camera-outline"></span><span>拍照上传</span></button>
+  <button id="plusFile" class="po-item" type="button"><span data-icon="paperclip"></span><span>上传文件</span></button>
+</div>
+
+<!-- 顶层「对话设置」按钮的浮窗（同款）：进设置 / 看实时故事时间 -->
+<div id="headMenu" class="popover" hidden>
+  <button id="headMenuSet" class="po-item" type="button"><span data-icon="settings-outline"></span><span>对话设置</span></button>
+  <div class="po-item readonly"><span data-icon="clock-outline"></span><span id="sessionClockLive">—</span></div>
+</div>
+
+<!-- 剧情卡的全屏查看：铺满屏幕，左上角返回键退出。
+     这里显示的正文就是**灌给 AI 的那一份**，一个字都不截。 -->
+<div id="worldView" class="world-view">
+  <div class="wv-head">
+    <button id="worldViewBack" class="icon-btn wv-back" type="button" aria-label="返回"><span data-icon="arrow-left"></span></button>
+    <div class="wv-title">选择的剧情</div>
+  </div>
+  <div id="worldViewBody" class="wv-body"></div>
+</div>
+
+<!-- 世界生成：离线一阵子后，替角色补一段「这段时间他做了什么」，可采纳 / 换一批 / 跳过 -->
+<div id="worldModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>他这段时间在做什么</h2>
+      <button class="icon-btn" data-close="worldModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <p class="hint">你好一阵子没来了。要不要让 AI 补一段剧情，说说角色这些时间经历了什么？<b>下面每一段都可以直接改</b>，改完再点「采纳」。采纳后<b>不会变成谁说的话</b>，而是在对话里浮一张居中的卡片，写着「选择的剧情」；点它铺满全屏看全文（左上角返回），这段文本同时也是喂给 AI 的那一份。</p>
+      <div id="worldText" class="summary-box world-edit"></div>
+      <div class="row-actions">
+        <button id="worldSkip" class="btn ghost" type="button">跳过</button>
+        <button id="worldRegen" class="btn ghost" type="button">换一批</button>
+        <button id="worldAdopt" class="btn primary" type="button">采纳</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新建群聊：多选角色当成员；可选从某条已有的线把记忆同步过来 -->
+<div id="groupModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>新建群聊</h2>
+      <button class="icon-btn" data-close="groupModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <label class="field"><span>群名称（可留空，默认用成员名）</span><input id="groupName" type="text" placeholder="例：周末小队"></label>
+      <div class="field"><span>选成员（至少两个）</span><div id="groupMembers" class="group-members"></div></div>
+      <label class="field"><span>导入某条线的记忆（可留空）</span><select id="groupImport"></select></label>
+      <p class="hint">群里每次由 AI 按各自性格决定谁说话、说几句（可以有人不说话）。<br>
+        导入<b>某条线的记忆</b>：那条线里属于该角色的认知 / 情境 / 经历会归到<b>这位成员自己</b>名下（别人看不到）；
+        选<b>多人群</b>时，还会从那条线里挑出「大家都参与过」的事，<b>追加</b>到本群的共同经历。</p>
+      <div class="row-actions">
+        <button id="groupCancel" class="btn ghost" type="button">取消</button>
+        <button id="groupOk" class="btn primary" type="button">创建</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="presetModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>预设角色</h2>
+      <button class="icon-btn" data-close="presetModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <p class="hint">点一个就直接建号。人设、头像都已填好；你自己那半边（名称 / 性格 / 外貌 / 背景 / 喜好）在「当前设定」里补。</p>
+      <div id="presetList" class="preset-list"></div>
     </div>
   </div>
 </div>
@@ -986,9 +1651,9 @@
       <div class="field" id="histTimeField">
         <span>时间范围</span>
         <div class="date-row">
-          <input id="histFrom" type="date">
+          <input id="histFrom" type="text" readonly data-wheel="date" placeholder="开始日期">
           <span class="date-sep">至</span>
-          <input id="histTo" type="date">
+          <input id="histTo" type="text" readonly data-wheel="date" placeholder="结束日期">
         </div>
       </div>
       <div class="row-actions">
@@ -1055,6 +1720,112 @@
       <button id="camAttach" class="cam-btn-text" type="button" aria-label="附带在消息上"><span data-icon="paperclip"></span>附带</button>
       <button id="camSend" class="cam-btn-text primary" type="button"><span data-icon="arrow-up"></span>直接发送</button>
     </div>
+  </div>
+</div>
+
+<!-- ── 手机（类微信）：和角色用手机聊天 / 转账 / 位置 / 图片 / 语音 / 伪电话 ──
+     故意【不用 .modal】：它是独立全屏的一层（和相机层同一套路），返回键由 app.js
+     直接问 window.DL.phone，才能在「通话中 → 聊天 → 关闭」之间逐级退。 -->
+<div id="phoneModal" class="phone-layer" hidden>
+  <div class="phone-shell">
+    <div class="phone-bar">
+      <span id="phoneClock" class="phone-clock">--:--</span>
+      <span class="phone-notch"></span>
+    </div>
+
+    <div id="phoneListView" class="phone-view">
+      <div class="phone-head">
+        <button id="phoneCloseBtn" class="icon-btn" type="button" aria-label="返回"><span data-icon="arrow-left"></span></button>
+        <div class="phone-head-title">手机</div>
+        <button id="phoneAddBtn" class="icon-btn" type="button" aria-label="新建"><span data-icon="plus"></span></button>
+      </div>
+      <div id="phoneList" class="phone-list"></div>
+    </div>
+
+    <!-- 右上角加号 → 浮窗：发布动态 / 新建联系人（纯手机角色） -->
+    <div id="phoneAddSheet" class="phone-sheet" hidden>
+      <div class="phone-sheet-card">
+        <button id="phAddMoment" class="ph-add-item" type="button">
+          <span class="ph-add-ic" data-icon="creation"></span>
+          <span class="ph-add-tx"><b>发布动态</b><i>纯文字或带图发一条；可用 AI 自动筛选相关经过</i></span>
+        </button>
+        <button id="phAddContact" class="ph-add-item" type="button">
+          <span class="ph-add-ic" data-icon="account-group"></span>
+          <span class="ph-add-tx"><b>新建联系人</b><i>纯手机角色：只活在手机里，不参与主对话</i></span>
+        </button>
+        <button id="phoneAddCancel" class="btn ghost" type="button">取消</button>
+      </div>
+    </div>
+
+    <div id="phoneChatView" class="phone-view" hidden>
+      <div id="phoneBg" class="phone-bg" hidden></div>
+      <div class="phone-head">
+        <button id="phoneBack" class="icon-btn" type="button" aria-label="返回"><span data-icon="chevron-left"></span></button>
+        <div class="phone-head-title" id="phoneTitle">聊天</div>
+        <button id="phoneCloseBtn2" class="icon-btn" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+      </div>
+      <div id="phoneTypingBar" class="phone-typing-bar" hidden>对方正在输入…</div>
+      <div id="phoneMsgs" class="phone-msgs"></div>
+      <div class="phone-actions" hidden>
+        <button id="phoneActCall" class="phone-act" type="button"><span data-icon="phone-outline"></span><span>电话</span></button>
+        <button id="phoneActTransfer" class="phone-act" type="button"><span data-icon="cash"></span><span>转账</span></button>
+        <button id="phoneActLoc" class="phone-act" type="button"><span data-icon="map-marker-outline"></span><span>位置</span></button>
+        <button id="phoneActImg" class="phone-act" type="button"><span data-icon="image-outline"></span><span>图片</span></button>
+        <button id="phoneActVoice" class="phone-act" type="button"><span data-icon="microphone"></span><span id="phoneActVoiceLabel">语音</span></button>
+        <button id="phoneActVideo" class="phone-act" type="button"><span data-icon="video-outline"></span><span>视频</span></button>
+        <button id="phoneActAvatar" class="phone-act" type="button"><span data-icon="account"></span><span>这条线</span></button>
+      </div>
+      <div class="phone-composer">
+        <button id="phoneSetBtn" class="icon-btn" type="button" aria-label="手机设置"><span data-icon="cog-outline"></span></button>
+        <button id="phoneMore" class="icon-btn" type="button" aria-label="更多功能"><span data-icon="plus"></span></button>
+        <input id="phoneInput" class="phone-input" type="text" placeholder="发消息…">
+        <button id="phoneSend" class="phone-send" type="button">发送</button>
+      </div>
+    </div>
+
+    <div id="phoneMomentsView" class="phone-view" hidden>
+      <div class="phone-head">
+        <button id="phoneMomentsBack" class="icon-btn" type="button" aria-label="返回"><span data-icon="chevron-left"></span></button>
+        <div class="phone-head-title">动态</div>
+        <button id="phoneMomentsPost" class="icon-btn" type="button" aria-label="发布动态"><span data-icon="plus"></span></button>
+        <button id="phoneMomentsClose" class="icon-btn" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+      </div>
+      <div id="phoneMoments" class="phone-moments"></div>
+    </div>
+
+    <div id="phoneSheet" class="phone-sheet" hidden>
+      <div class="phone-sheet-card">
+        <div class="phone-sheet-title" id="phoneSheetTitle">标题</div>
+        <div class="phone-sheet-body" id="phoneSheetBody"></div>
+        <div class="phone-sheet-actions">
+          <button id="phoneSheetCancel" class="btn ghost" type="button">取消</button>
+          <button id="phoneSheetOk" class="btn primary" type="button">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="phoneCall" class="phone-call" hidden>
+      <div id="phoneCallStage" class="phone-call-stage" hidden>
+        <div id="phoneCallBg" class="phone-call-bg" aria-hidden="true"></div>
+        <canvas id="phoneCallCanvas" class="phone-call-canvas"></canvas>
+        <div id="phoneCallFallback" class="phone-call-fallback"></div>
+      </div>
+      <div class="phone-call-info">
+        <div class="phone-call-avatar" id="phoneCallAvatar"></div>
+        <div class="phone-call-name" id="phoneCallName">—</div>
+        <div class="phone-call-state" id="phoneCallState">正在呼叫…</div>
+        <div class="phone-call-timer" id="phoneCallTimer">00:00</div>
+      </div>
+      <div class="phone-call-said" id="phoneCallSaid"></div>
+      <div class="phone-call-actions">
+        <button id="phoneCallTalk" class="phone-call-btn" type="button"><span data-icon="microphone"></span><span id="phoneCallTalkLabel">静音</span></button>
+        <button id="phoneCallCam" class="phone-call-btn" type="button"><span data-icon="video-outline"></span><span id="phoneCallCamLabel">视频</span></button>
+        <button id="phoneCallHang" class="phone-call-btn danger" type="button"><span data-icon="phone-hangup"></span><span>挂断</span></button>
+      </div>
+    </div>
+
+    <input id="phoneImgInput" type="file" accept="image/*" hidden>
+    <input id="phoneMomentImg" type="file" accept="image/*" hidden>
   </div>
 </div>
 
@@ -1146,11 +1917,14 @@
 <script src="media.js"></script>
 <script src="ui.js"></script>
 <script src="memory.js"></script>
-<script src="probe.js"></script>
 <script src="app.js"></script>
 <script src="chat.js"></script>
 <script src="roleplay.js"></script>
 <script src="settings.js"></script>
+<script src="phone.js"></script>
+<script src="picker.js"></script>
+<script src="reminder.js"></script>
+<script src="live2d.js"></script>
 <script src="camera.js"></script>
 <script src="activity.js"></script>
 </body>

@@ -3,6 +3,8 @@
   const MAX_TOOL_ROUNDS = 4;
   /* 有些 OpenAI 兼容端点不认 stream_options（含用量统计），报 400 时自动去掉重试 */
   let streamUsageSupported = true;
+  /* 有些 OpenAI 兼容端点不认 thinking / reasoning_effort，会直接 400 —— 去掉重试一次并记住 */
+  let thinkingSupported = true;
 
   const SEARCH_TOOL = {
     type: "function",
@@ -30,6 +32,11 @@
     };
   }
 
+  /* 错误详情里可能带中转端点回显的密钥 / 内部信息 —— 抹掉再抛给界面（详情只留前 300 字） */
+  function sanitizeDetail(s) {
+    return String(s || "").replace(/sk-[A-Za-z0-9_\-]{6,}/g, "sk-***").slice(0, 300);
+  }
+
   function buildBody(settings, messages, opts) {
     const body = {
       model: settings.model || "deepseek-flash",
@@ -40,11 +47,13 @@
     if (typeof settings.temperature === "number") body.temperature = settings.temperature;
     if (typeof settings.topP === "number") body.top_p = settings.topP;
 
-    if (opts.thinking) {
-      body.thinking = { type: "enabled" };
-      body.reasoning_effort = opts.effort || "high";
-    } else {
-      body.thinking = { type: "disabled" };
+    if (thinkingSupported) {
+      if (opts.thinking) {
+        body.thinking = { type: "enabled" };
+        body.reasoning_effort = opts.effort || "high";
+      } else {
+        body.thinking = { type: "disabled" };
+      }
     }
 
     if (opts.tools && opts.tools.length) {
@@ -129,7 +138,13 @@
         streamUsageSupported = false;
         return streamOnce(settings, messages, opts, cb, signal);
       }
-      const err = new Error("请求失败 HTTP " + res.status + (detail ? "：" + detail : ""));
+      /* 有些 OpenAI 兼容端点不认 thinking / reasoning_effort，也会直接 400 ——
+         去掉它重试一次，并记住（thinkingSupported），免得后续每次请求都先失败一遍。 */
+      if (res.status === 400 && thinkingSupported && opts.thinking && /thinking|reasoning_effort/i.test(detail)) {
+        thinkingSupported = false;
+        return streamOnce(settings, messages, opts, cb, signal);
+      }
+      const err = new Error("请求失败 HTTP " + res.status + (detail ? "：" + sanitizeDetail(detail) : ""));
       err.status = res.status;
       throw err;
     }
@@ -228,7 +243,7 @@
       if (!res.ok) {
         let detail = "";
         try { detail = (await res.text()).slice(0, 500); } catch (e) { /* ignore */ }
-        const err = new Error("请求失败 HTTP " + res.status + (detail ? "：" + detail : ""));
+        const err = new Error("请求失败 HTTP " + res.status + (detail ? "：" + sanitizeDetail(detail) : ""));
         err.status = res.status;
         throw err;
       }
@@ -260,7 +275,7 @@
       if (!res.ok) {
         let detail = "";
         try { detail = (await res.text()).slice(0, 300); } catch (e) { /* ignore */ }
-        const err = new Error("请求失败 HTTP " + res.status + (detail ? "：" + detail : ""));
+        const err = new Error("请求失败 HTTP " + res.status + (detail ? "：" + sanitizeDetail(detail) : ""));
         err.status = res.status;
         throw err;
       }

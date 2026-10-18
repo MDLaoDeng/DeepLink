@@ -12,9 +12,12 @@
 (function () {
   /* 打包工具不一定按 index.html 的顺序执行脚本：app.js 可能晚于本文件。
      那时 window.DL 还不存在 —— 等它就绪后再初始化一次。返回 false = 还没就绪。 */
+  var booted = false;  /* boot 幂等：DOMContentLoaded 与补拍 retry 各会调一次，别重复绑事件 / 分裂状态 */
   function boot() {
+    if (booted) return true;
   var D = window.DL;
   if (!D) return false;
+  booted = true;   /* 已真正初始化过，后续再被调用直接返回 */
 
   /* 共享件解构（名字与 app.js 内保持一致，保证搬来的代码不用改一个字） */
   var $ = D.$, $v = D.$v, state = D.state, setText = D.setText;
@@ -120,14 +123,59 @@
     return o;
   }
 
+  /* 「不含密钥」导出的文件里，7 个密钥字段是**空串**（不是没有这个键）。
+     导入时若原样 saveSettings（Object.assign），空串会把本机已经填好的 Key 覆盖成空。
+     所以导入前先把空出来的密钥字段整个删掉 —— 保留本机值，也保留导入文件里的非空值。 */
+  function stripEmptyKeys(s) {
+    if (!s || typeof s !== "object") return s;
+    const o = Object.assign({}, s);
+    KEY_FIELDS.forEach((k) => { if (!o[k]) delete o[k]; });
+    if (o.modelSets && typeof o.modelSets === "object") {
+      const sets = {};
+      Object.keys(o.modelSets).forEach((kind) => {
+        const list = o.modelSets[kind];
+        sets[kind] = Array.isArray(list)
+          ? list.map((p) => { const q = Object.assign({}, p); if (!q.apiKey) delete q.apiKey; return q; })
+          : list;
+      });
+      o.modelSets = sets;
+    }
+    return o;
+  }
+
+  /* 角色个人图库要跟「它所属的角色 / 会话」一起走（用户口径）。
+     导出对象是**副本**（Object.assign），绝不往实时数据上挂 __charImages，
+     否则下一次 saveCharacters 就把它当角色字段存进本机了。 */
+  function withCharImages(list, drop) {
+    return (list || []).map(function (c) {
+      if (!c || !c.id) return c;
+      const copy = Object.assign({}, c);
+      const dump = Store.dumpCharImages([c.id], drop);
+      if (dump[c.id] && dump[c.id].length) copy.__charImages = dump[c.id];
+      return copy;
+    });
+  }
+
   function buildExportData(scope, withKeys) {
+    const noImg = checkedOf("#exportNoImg");
     if (scope === "full") {
-      return { settings: withKeys ? Store.getSettings() : stripKeys(Store.getSettings()), characters: Store.getCharacters(), sessions: sessionsForExport() };
+      return {
+        settings: withKeys ? Store.getSettings() : stripKeys(Store.getSettings()),
+        characters: withCharImages(Store.getCharacters(), noImg),
+        sessions: sessionsForExport(),
+        charImages: Store.dumpCharImages(null, noImg)
+      };
     }
     if (scope === "settings") return withKeys ? Store.getSettings() : stripKeys(Store.getSettings());
-    if (scope === "characters") return Store.getCharacters();
-    if (scope === "character") return Store.getCharacters().find((c) => c.id === $v("#exportCharSel")) || null;
-    if (scope === "session") return sessionsForExport().find((s) => s.id === $v("#exportSessionSel")) || null;
+    if (scope === "characters") return withCharImages(Store.getCharacters(), noImg);
+    if (scope === "character") return withCharImages(Store.getCharacters().filter((c) => c.id === $v("#exportCharSel")), noImg)[0] || null;
+    if (scope === "session") {
+      const s = sessionsForExport().find((x) => x.id === $v("#exportSessionSel"));
+      if (!s) return null;
+      const dump = Store.dumpCharImages([s.characterId], noImg);
+      if (s.characterId && dump[s.characterId] && dump[s.characterId].length) s.__charImages = dump[s.characterId];
+      return s;
+    }
     return null;
   }
 
@@ -137,26 +185,35 @@
      勾了「不含原图」就把图片整个丢掉（只留 name/kind/desc），文件更小、更适合分享。
      注意：sessionsForExport 给的是【浅拷贝】（messages 与实时数据同一份），
      所以这里必须再复制一层附件，绝不能就地改 —— 否则会把正在用的数据改坏。 */
+  function inlineAttachList(msgs, drop) {
+    return (msgs || []).map((m) => {
+      if (!m || !m.attachments || !m.attachments.length) return m;
+      const c = Object.assign({}, m);
+      c.attachments = m.attachments.map((a) => {
+        if (!a || a.kind !== "image") return a;
+        const b = Object.assign({}, a);
+        if (drop) { delete b.imgRef; delete b.dataUrl; return b; }
+        /* 只要带了本机引用，就一律换成内联数据；解不出来就只剩描述
+           （导入后显示「已过期」）。绝不能让本机路径进导出文件 —— 换了机器必然指不到。 */
+        if (b.imgRef) {
+          if (!b.dataUrl) { const u = Store.imageURL(a); if (u) b.dataUrl = u; }
+          delete b.imgRef;
+        }
+        return b;
+      });
+      return c;
+    });
+  }
   function inlineExportImages(list, drop) {
     (list || []).forEach((s) => {
       if (!s) return;
-      s.messages = (s.messages || []).map((m) => {
-        if (!m || !m.attachments || !m.attachments.length) return m;
-        const c = Object.assign({}, m);
-        c.attachments = m.attachments.map((a) => {
-          if (!a || a.kind !== "image") return a;
-          const b = Object.assign({}, a);
-          if (drop) { delete b.imgRef; delete b.dataUrl; return b; }
-          /* 只要带了本机引用，就一律换成内联数据；解不出来就只剩描述
-             （导入后显示「已过期」）。绝不能让本机路径进导出文件 —— 换了机器必然指不到。 */
-          if (b.imgRef) {
-            if (!b.dataUrl) { const u = Store.imageURL(a); if (u) b.dataUrl = u; }
-            delete b.imgRef;
-          }
-          return b;
-        });
-        return c;
-      });
+      s.messages = inlineAttachList(s.messages, drop);
+      /* 手机消息（session.phone.msgs）里的图同样要内联，否则换机后手机聊天里的图全变「已过期」。
+         s.phone 在浅拷贝里与实时数据是同一个对象引用，必须先复制一层再替换 msgs，
+         绝不能就地改 —— 那会把正在用的数据改坏。 */
+      if (s.phone && s.phone.msgs) {
+        s.phone = Object.assign({}, s.phone, { msgs: inlineAttachList(s.phone.msgs, drop) });
+      }
     });
     return list;
   }
@@ -300,6 +357,10 @@
   async function importCharacters(arr) {
     const valid = (arr || []).filter((c) => c && c.id && typeof c === "object");
     if (!valid.length) { UI.toast("没有有效的角色数据", true); return false; }
+    /* 角色个人图库随角色一起进来（先摘掉 __charImages，别让它变成角色字段存进本机） */
+    const imgs = {};
+    valid.forEach((c) => { if (c.__charImages) { imgs[c.id] = c.__charImages; delete c.__charImages; } });
+    if (Object.keys(imgs).length && Store.restoreCharImages) Store.restoreCharImages(imgs);
     const list = Store.getCharacters();
     const collide = valid.filter((c) => list.some((x) => x.id === c.id));
     if (collide.length) {
@@ -307,13 +368,22 @@
       if (!ok) return false;
     }
     valid.forEach((c) => { const i = list.findIndex((x) => x.id === c.id); if (i >= 0) list[i] = c; else list.push(c); });
-    Store.saveCharacters(list);
+    /* 落盘被拒（存储只读 / 读失败锁定）时要如实报失败，别报「导入完成」骗人 */
+    if (Store.saveCharacters(list) === false) { UI.toast("导入未写入：存储只读或被锁定", true); return false; }
     return true;
   }
 
   async function importSessions(arr) {
     const valid = (arr || []).filter((s) => s && s.id && Array.isArray(s.messages));
     if (!valid.length) { UI.toast("没有有效的会话数据", true); return false; }
+    /* 会话里可能带着它那条角色线的图库（导出时挂在 __charImages 上），同样先摘出来 */
+    const imgs = {};
+    valid.forEach((s) => {
+      if (!s.__charImages) return;
+      if (s.characterId) imgs[s.characterId] = s.__charImages;
+      delete s.__charImages;
+    });
+    if (Object.keys(imgs).length && Store.restoreCharImages) Store.restoreCharImages(imgs);
     for (let k = 0; k < valid.length; k++) {
       const s = valid[k];
       if (s.memEnc && s.memory === undefined && s.cognition === undefined) {
@@ -328,7 +398,8 @@
       if (!ok) return false;
     }
     valid.forEach((s) => { const i = list.findIndex((x) => x.id === s.id); if (i >= 0) list[i] = s; else list.unshift(s); });
-    Store.saveSessions(list);
+    /* 同上：落盘被拒要如实报失败 */
+    if (Store.saveSessions(list) === false) { UI.toast("导入未写入：存储只读或被锁定", true); return false; }
     return true;
   }
 
@@ -345,17 +416,20 @@
     }
     if (kind === "settings") {
       if (!data || typeof data !== "object") { UI.toast("数据为空", true); return false; }
-      state.settings = Store.saveSettings(data);
+      state.settings = Store.saveSettings(stripEmptyKeys(data));
       return true;
     }
     if (kind === "character") return importCharacters([data]);
     if (kind === "characters") return importCharacters(data);
     if (kind === "session") return importSessions([data]);
     if (kind === "full") {
-      if (data && data.settings) state.settings = Store.saveSettings(data.settings);
-      if (data && Array.isArray(data.characters)) await importCharacters(data.characters);
-      if (data && Array.isArray(data.sessions)) await importSessions(data.sessions);
-      return true;
+      if (data && data.settings) state.settings = Store.saveSettings(stripEmptyKeys(data.settings));
+      let ok = true;
+      if (data && Array.isArray(data.characters)) ok = (await importCharacters(data.characters)) && ok;
+      if (data && Array.isArray(data.sessions)) ok = (await importSessions(data.sessions)) && ok;
+      /* 全量导出时图库是单独一块（charImages: {角色id: [...]}） */
+      if (data && data.charImages && Store.restoreCharImages) Store.restoreCharImages(data.charImages);
+      return ok;
     }
     UI.toast("无法识别的导出类型：" + kind, true);
     return false;
@@ -437,6 +511,93 @@
     const bytes = chars * 2;   /* 按 UTF-16 估算，1 字符≈2 字节 */
     const txt = bytes < 1048576 ? Math.round(bytes / 1024) + " KB" : (bytes / 1048576).toFixed(2) + " MB";
     el.textContent = "本机数据约 " + txt + "（" + keys + " 项，存于" + (native ? "App 原生存储" : "浏览器 localStorage") + "）。" + (native ? "" : "浏览器上限通常 5 MB 左右，接近了就导出或清理。");
+    renderStoragePanel();
+  }
+
+  /* ── 「存储」区（用户要求：把原「数据」模块并进来，并按类型显示占比）──
+     口径（界面下方也写了一份，免得看数字犯迷糊）：
+     ① 键值类数据按字符估算，1 字符 ≈ 2 字节；
+     ② 图片是外置文件，用原生的「获取文件大小」读真实字节；
+     ③ 只统计 App 自己写的数据，不含安装包本体与 WebView 缓存。 */
+
+  /* 外置图片文件（对话图 dl_img_ / 角色图 dl_cimg_）的真实占用。
+     「获取目录排列」返回的是用 \ 分段的字符串，这里只认我们自己那两个前缀，
+     顺带把「不属于本 App 的文件」全过滤掉。无桥环境直接返回 0。 */
+  function imageFileBytes() {
+    const out = { bytes: 0, count: 0 };
+    if (!Store.hasBridge("获取目录排列") || !Store.hasBridge("获取文件大小")) return out;
+    let dir = "";
+    try { dir = String(Store.callBridge("获取内部文件目录") || ""); } catch (e) { dir = ""; }
+    if (!dir) return out;
+    let list = "";
+    try { list = String(Store.callBridge("获取目录排列", dir + "/") || ""); } catch (e) { list = ""; }
+    list.split("\\").forEach(function (raw) {
+      const name = String(raw).replace(/\/+$/, "").trim();
+      if (name.indexOf("dl_img_") !== 0 && name.indexOf("dl_cimg_") !== 0) return;
+      let sz = 0;
+      try { sz = Number(Store.callBridge("获取文件大小", dir + "/" + name)) || 0; } catch (e) { sz = 0; }
+      out.count++;
+      out.bytes += sz;
+    });
+    return out;
+  }
+
+  function renderStoragePanel() {
+    const box = $("#storageBars");
+    if (!box) return;
+    const fmt = function (n) {
+      const b = Number(n) || 0;
+      if (b < 1024) return b + " B";
+      if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+      return (b / 1048576).toFixed(2) + " MB";
+    };
+    const groups = [
+      { name: "对话消息", keys: ["aicode.sessions.v1"] },
+      { name: "角色卡", keys: ["aicode.characters.v1"] },
+      { name: "记忆与用量", keys: ["aicode.assistantmem.v1", "aicode.usage.v1", "aicode.usagecat.v1", "aicode.devsalt.v1"] },
+      { name: "动态", keys: ["aicode.moments.v1"] },
+      { name: "备份快照", keys: ["aicode.backups.v1"] },
+      { name: "图库索引", keys: ["aicode.charimg.v1"] },
+      { name: "设置", keys: ["aicode.settings.v1", "aicode.current.v1"] }
+    ];
+    const native = Store.storageBackend() === "native";
+    const rows = [];
+    groups.forEach(function (g) {
+      let b = 0;
+      g.keys.forEach(function (k) {
+        try {
+          const v = native ? Store.callBridge("获取指定文本", k, "") : localStorage.getItem(k);
+          if (v) b += (String(k).length + String(v).length) * 2;
+        } catch (e) { /* 某一项读不出来就跳过，别让整块统计挂掉 */ }
+      });
+      if (b > 0) rows.push({ name: g.name, size: b, extra: "" });
+    });
+    const im = imageFileBytes();
+    if (im.count) rows.push({ name: "图片文件", size: im.bytes, extra: im.count + " 张" });
+    let total = 0;
+    rows.forEach(function (r) { total += r.size; });
+    const sum = $("#storageSum");
+    if (sum) sum.textContent = total ? ("本机共占约 " + fmt(total) + " · " + rows.length + " 类") : "暂时没有可统计的数据";
+    box.innerHTML = "";
+    rows.sort(function (a, b) { return b.size - a.size; });
+    rows.forEach(function (r) {
+      const line = document.createElement("div");
+      line.className = "st-row";
+      const nm = document.createElement("span");
+      nm.className = "st-name";
+      nm.textContent = r.name;
+      const bar = document.createElement("span");
+      bar.className = "st-bar";
+      const fill = document.createElement("i");
+      fill.className = "st-fill";
+      fill.style.width = (total ? Math.max(3, Math.round(r.size / total * 100)) : 0) + "%";
+      bar.appendChild(fill);
+      const val = document.createElement("span");
+      val.className = "st-val";
+      val.textContent = fmt(r.size) + (r.extra ? " · " + r.extra : "");
+      line.appendChild(nm); line.appendChild(bar); line.appendChild(val);
+      box.appendChild(line);
+    });
   }
 
   function openData() {
@@ -491,6 +652,13 @@
     /* 落地只留密文（memEnc）。裁剪规则跟会话落盘【共用】store.js 的 strippedCopy ——
        记忆之外的场景/关系/经历也是明文，必须一起清；解不开（没密文）时原样留着更安全。 */
     sess = Store.strippedCopy(sess);
+    /* 图库跟着这条会话（即它的角色线）一起备份进来。
+       只带**最近 3 张**：备份每会话留 2 份，把 12 张全内联进去会把存储撑得很难看；
+       「以前画过什么」靠文字摘要就能保住人物一致性，图多一张少一张影响不大。 */
+    if (s.characterId && Store.dumpCharImages) {
+      const dump = Store.dumpCharImages([s.characterId], false, 3);
+      if (dump[s.characterId] && dump[s.characterId].length) sess.__charImages = dump[s.characterId];
+    }
     return { at: Date.now(), sess: sess };
   }
 
@@ -545,6 +713,15 @@
     const ok = await UI.confirmDialog("恢复备份", "将用备份（" + fmtTime(snap.at) + "）覆盖对话「" + ((snap.sess && snap.sess.title) || s.title || "") + "」的全部消息，确定？");
     if (!ok) return;
     const restored = Object.assign({}, snap.sess);
+    /* 备份里的图库也装回去（同 id 的会跳过，反复恢复不会翻倍） */
+    if (restored.__charImages) {
+      if (restored.characterId && Store.restoreCharImages) {
+        const im = {};
+        im[restored.characterId] = restored.__charImages;
+        Store.restoreCharImages(im);
+      }
+      delete restored.__charImages;
+    }
     /* 快照落盘时经 Store.strippedCopy 把「记忆 + 场景/关系/经历」一起清成空、只留密文(memEnc)。
        恢复必须【对称】地把它们全部解回来 —— 少解一项，紧跟的 saveSessions 就会把它按空写回，
        表现为「恢复备份后 当前场景/当前关系/共同经历 被静默清空」。 */
@@ -594,12 +771,59 @@
     return "输入 " + fmtNum(u.prompt) + " · 输出 " + fmtNum(u.completion) + " · 总计 " + fmtNum(u.total) + " · 缓存命中 " + cacheRate(u) + "%";
   }
 
+  /* 消耗类型（用量统计里按类型看花费）。除对话外的每一项也都在这里显示，
+     不会因为「不是聊天」就不计账。 */
+  const USAGE_CATS = [
+    { id: "chat", name: "对话" },
+    { id: "memory", name: "记忆压缩 / 认知" },
+    { id: "daily", name: "日更（场景 / 关系 / 经历）" },
+    { id: "world", name: "世界生成" },
+    { id: "status", name: "状态量化" },
+    { id: "group", name: "群聊" },
+    { id: "moment", name: "发布动态筛选" },
+    { id: "summary", name: "助手总结" },
+    { id: "diary", name: "情绪日记" },
+    { id: "phone", name: "手机" },
+    { id: "auto", name: "自动发信息" },
+    { id: "quickreply", name: "快捷回复" },
+    { id: "other", name: "其它" }
+  ];
+  function catName(id) { const c = USAGE_CATS.filter((x) => x.id === id)[0]; return c ? c.name : id; }
+
+  /* 估算花费（元）。单位都是「元 / 百万 tokens」。
+     fuzzy（默认）：不分命中/未命中，按输入 / 输出两档粗算 —— 够用且不必较真。
+     fixed：按你填的三档单价（缓存命中 / 未命中 / 输出）精确算。
+     【为什么是估算】价目会变、缓存命中由服务端定，这里只是给你一个量级参考。 */
+  function usageCost(u) {
+    u = u || {};
+    const s = state.settings || {};
+    const pHit = Number(s.usagePriceHit); const pIn = Number(s.usagePriceIn); const pOut = Number(s.usagePriceOut);
+    const hit = u.cacheHit || 0;
+    const miss = (typeof u.cacheMiss === "number") ? u.cacheMiss : Math.max(0, (u.prompt || 0) - hit);
+    const comp = u.completion || 0;
+    const inRate = pIn > 0 ? pIn : 2;
+    const outRate = pOut > 0 ? pOut : 8;
+    const hitRate = pHit > 0 ? pHit : 0.2;
+    const cost = ((s.usagePriceMode || "fuzzy") === "fixed")
+      ? (hit * hitRate + miss * inRate + comp * outRate) / 1e6
+      : ((u.prompt || 0) * inRate + comp * outRate) / 1e6;
+    return cost;
+  }
+  function fmtYuan(v) {
+    v = v || 0;
+    if (v <= 0) return "¥0";
+    if (v < 0.01) return "¥" + v.toFixed(4);
+    if (v < 1) return "¥" + v.toFixed(3);
+    return "¥" + v.toFixed(2);
+  }
+
   function usageCells(u) {
     u = u || {};
     return "<span class='u-cell'>输入 " + fmtNum(u.prompt) + "</span>" +
       "<span class='u-cell'>输出 " + fmtNum(u.completion) + "</span>" +
       "<span class='u-cell'>总计 " + fmtNum(u.total) + "</span>" +
-      "<span class='u-cell'>缓存命中 " + cacheRate(u) + "%</span>";
+      "<span class='u-cell'>缓存命中 " + cacheRate(u) + "%</span>" +
+      "<span class='u-cell u-cost'>约 " + fmtYuan(usageCost(u)) + "</span>";
   }
 
   function renderCharUsage(ch) {
@@ -607,9 +831,14 @@
     if (el) el.textContent = ch ? ("本角色累计：" + usageText(ch.usage)) : "";
   }
 
-  /* 记一次用量：会话 / 角色 / 全局，并做预警 */
-  function recordUsage(sid, u, characterId) {
+  /* 手机花费预警只报一次（同一次运行内），免得每次记账都弹 */
+  let phoneWarned = false;
+
+  /* 记一次用量：会话 / 角色 / 全局 / 按类型，并做预警。
+     cat = 消耗类型（见 USAGE_CATS）。不传时：有会话 → 对话，无会话 → 记忆类后台任务。 */
+  function recordUsage(sid, u, characterId, cat) {
     if (!u) return;
+    if (!cat) cat = sid ? "chat" : "memory";
     if (sid) {
       const list = Store.getSessions();
       const i = list.findIndex((x) => x.id === sid);
@@ -621,14 +850,49 @@
       if (j >= 0) { cs[j].usage = Api.sumUsage(cs[j].usage, u); cs[j].updatedAt = Date.now(); Store.saveCharacters(cs); }
     }
     Store.saveUsage(Api.sumUsage(Store.getUsage(), u));
+    /* 按类型累计：**除对话外的一切消耗也都记在这里**，用量统计里才看得到 */
+    try {
+      const cats = Store.getUsageCats();
+      cats[cat] = Api.sumUsage(cats[cat], u);
+      Store.saveUsageCats(cats);
+    } catch (e) { /* ignore */ }
     if (u.prompt > (state.settings.tokenWarnThreshold || 30000)) {
       UI.toast("上下文已达 " + u.prompt + " tokens，花费可能偏高；可用「当前设定」里的「再压缩」提纯", true);
     }
+    /* 手机单独一条花费预警（你在 D1 里选的口径：给手机这条线单开预警，并可细分） */
+    try {
+      const lim = Number(state.settings.phoneWarnYuan) || 0;
+      if (lim > 0 && cat === "phone" && !phoneWarned) {
+        const pu = Store.getUsageCats().phone || null;
+        if (pu && usageCost(pu) >= lim) {
+          phoneWarned = true;
+          UI.toast("手机用量花费已达 " + fmtYuan(usageCost(pu)) + "，超过设定的 " + fmtYuan(lim) + "；在「用量统计 · 按类型」里看细分", true);
+        }
+      }
+    } catch (e) { /* ignore */ }
   }
 
   function renderUsageStats() {
     const gEl = $("#usageGlobal");
-    if (gEl) gEl.innerHTML = "<div class='usage-row'><span class='u-name'>合计</span>" + usageCells(Store.getUsage()) + "</div>";
+    if (gEl) {
+      const mode = (state.settings.usagePriceMode || "fuzzy") === "fixed" ? "固定计费标准" : "模糊估算";
+      gEl.innerHTML = "<div class='usage-row'><span class='u-name'>合计</span>" + usageCells(Store.getUsage()) + "</div>" +
+        "<p class='hint'>花费为估算值（当前按「" + mode + "」）。要更准可在「设置 → 用量花费」里填你自己的计费单价；要归零可在「设置 → 用量花费」里点「清零用量」。</p>";
+    }
+    /* 按类型：**除对话外的一切 AI 消耗**都在这里 */
+    const catEl = $("#usageCats");
+    if (catEl) {
+      catEl.innerHTML = "";
+      const cats = Store.getUsageCats();
+      const ids = USAGE_CATS.map((c) => c.id).filter((id) => cats[id] && (cats[id].total || cats[id].prompt || cats[id].completion));
+      if (!ids.length) catEl.innerHTML = "<div class='usage-empty'>暂无分类用量</div>";
+      ids.forEach((id) => {
+        const d = document.createElement("div");
+        d.className = "usage-row";
+        d.innerHTML = "<span class='u-name'>" + UI.escapeHtml(catName(id)) + "</span>" + usageCells(cats[id]);
+        catEl.appendChild(d);
+      });
+    }
     const sEl = $("#usageSessions");
     if (sEl) {
       sEl.innerHTML = "";
@@ -703,10 +967,19 @@
     gen: ["temperature", "topP"],
     prompt: ["systemPrompt", "searchProvider", "searxngInstances", "customSearchUrl"],
     imgstore: ["imgToText", "imgExpireTurns"],
-    memory: ["roleplayEnabled", "myName", "myPersona", "myAppearance", "myBackground", "myLikes", "assistantCompress", "compressModel", "tokenWarnThreshold", "notifyTasks"]
+    memory: ["roleplayEnabled", "myName", "myPersona", "myAppearance", "myBackground", "myLikes", "assistantCompress", "compressModel", "tokenWarnThreshold", "notifyTasks"],
+    feats: ["dailyUpdate", "worldGen", "statusQuant", "autoMessage", "autoMessageMin", "autoMessagePhone"],
+    format: ["adoptFormat"],
+    video: ["videoEnabled", "videoBaseUrl", "videoKey", "videoModel", "videoMode", "videoRatio", "videoSize",
+      "videoDuration", "videoFps", "videoCreatePath", "videoStatusPath", "videoResultField",
+      "videoPollMs", "videoPollMax", "videoTemplate"],
+    music: ["musicEnabled", "musicBaseUrl", "musicKey", "musicModel", "musicDuration", "musicFormat",
+      "musicWithLyrics", "musicCreatePath", "musicStatusPath", "musicResultField",
+      "musicPollMs", "musicPollMax", "musicTemplate"],
+    usageprice: ["usagePriceMode", "usagePriceHit", "usagePriceIn", "usagePriceOut", "phoneWarnYuan"]
   };
 
-  const RESET_LABELS = { gen: "生成参数", prompt: "提示词与联网搜索", main: "主模型", asr: "听觉模型", tts: "朗读模型", img: "画图模型", vision: "视觉模型", imgstore: "图片存储", memory: "角色扮演与记忆压缩" };
+  const RESET_LABELS = { gen: "生成参数", prompt: "提示词与联网搜索", main: "主模型", asr: "听觉模型", tts: "朗读模型", img: "画图模型", vision: "视觉模型", imgstore: "图片存储", memory: "角色扮演与记忆压缩", feats: "功能开关", format: "采用格式", usageprice: "用量花费", video: "视频生成", music: "音乐生成" };
 
   /* 「恢复默认设置」不动这些：密钥、API 地址、头像、主题、内部标记、顶栏开关、
      后台常驻（它牵着系统权限，重置不该悄悄把权限设置也改掉） */
@@ -749,7 +1022,12 @@
       if (key === "main") { patch.mainCompat = !!def.mainCompat; }
       if (key === "asr") { patch.asrEnabled = !!def.asrEnabled; patch.asrLang = def.asrLang; }
       if (key === "tts") { patch.ttsEnabled = !!def.ttsEnabled; patch.ttsVoice = def.ttsVoice; patch.ttsAutoRead = !!def.ttsAutoRead; }
-      if (key === "img") { patch.imgEnabled = !!def.imgEnabled; patch.imgSize = def.imgSize; }
+      if (key === "img") {
+        patch.imgEnabled = !!def.imgEnabled;
+        patch.imgSize = def.imgSize;
+        patch.imgToImg = !!def.imgToImg;
+        patch.phoneShareImg = !!def.phoneShareImg;
+      }
       if (key === "vision") { patch.visionEnabled = !!def.visionEnabled; }
       const sets = Object.assign({}, state.settings.modelSets);
       sets[key] = [{ name: "配置一", baseUrl: patch[f.base], apiKey: patch[f.key], models: patch[f.model] }];
@@ -820,8 +1098,41 @@
 
     setChecked("#setImgEnabled", !!s.imgEnabled);
     setVal("#setImgSize", s.imgSize || "");
+    setChecked("#setImgToImg", !!s.imgToImg);
+    setChecked("#setPhoneShareImg", !!s.phoneShareImg);
 
     setChecked("#setVisionEnabled", !!s.visionEnabled);
+
+    /* 视频 / 音乐 */
+    setChecked("#setVideoEnabled", !!s.videoEnabled);
+    setVal("#setVideoBaseUrl", s.videoBaseUrl || "");
+    setVal("#setVideoKey", s.videoKey || "");
+    setVal("#setVideoModel", s.videoModel || "");
+    setVal("#setVideoMode", s.videoMode || "t2v");
+    setVal("#setVideoRatio", s.videoRatio || "16:9");
+    setVal("#setVideoSize", s.videoSize || "");
+    setVal("#setVideoDuration", s.videoDuration == null ? "" : String(s.videoDuration));
+    setVal("#setVideoFps", s.videoFps == null ? "" : String(s.videoFps));
+    setVal("#setVideoCreatePath", s.videoCreatePath || "");
+    setVal("#setVideoStatusPath", s.videoStatusPath || "");
+    setVal("#setVideoResultField", s.videoResultField || "");
+    setVal("#setVideoPollMs", s.videoPollMs == null ? "" : String(s.videoPollMs));
+    setVal("#setVideoPollMax", s.videoPollMax == null ? "" : String(s.videoPollMax));
+    setVal("#setVideoTemplate", s.videoTemplate || "");
+
+    setChecked("#setMusicEnabled", !!s.musicEnabled);
+    setVal("#setMusicBaseUrl", s.musicBaseUrl || "");
+    setVal("#setMusicKey", s.musicKey || "");
+    setVal("#setMusicModel", s.musicModel || "");
+    setVal("#setMusicDuration", s.musicDuration == null ? "" : String(s.musicDuration));
+    setVal("#setMusicFormat", s.musicFormat || "mp3");
+    setChecked("#setMusicWithLyrics", !!s.musicWithLyrics);
+    setVal("#setMusicCreatePath", s.musicCreatePath || "");
+    setVal("#setMusicStatusPath", s.musicStatusPath || "");
+    setVal("#setMusicResultField", s.musicResultField || "");
+    setVal("#setMusicPollMs", s.musicPollMs == null ? "" : String(s.musicPollMs));
+    setVal("#setMusicPollMax", s.musicPollMax == null ? "" : String(s.musicPollMax));
+    setVal("#setMusicTemplate", s.musicTemplate || "");
 
     setChecked("#setRoleplayEnabled", !!s.roleplayEnabled);
     setVal("#setMyName", s.myName || "");
@@ -837,6 +1148,59 @@
     setVal("#setImgExpireTurns", typeof s.imgExpireTurns === "number" ? s.imgExpireTurns : 10);
     setChecked("#setNoImage", !!s.noImage);
     setChecked("#setBgKeep", !!s.bgKeep);
+
+    /* ── 6.0.0 新增：功能开关 / 采用格式 / 背景 / 用量花费 ── */
+    setChecked("#setDailyUpdate", s.dailyUpdate !== false);
+    setChecked("#setWorldGen", s.worldGen !== false);
+    setChecked("#setStatusQuant", s.statusQuant !== false);
+    setChecked("#setAutoMessage", !!s.autoMessage);
+    setVal("#setAutoMessageMin", Number(s.autoMessageMin) || 30);
+    setChecked("#setAutoMessagePhone", !!s.autoMessagePhone);
+    setVal("#setAdoptFormat", s.adoptFormat || "");
+    setVal("#setUsagePriceMode", s.usagePriceMode || "fuzzy");
+    setVal("#setUsagePriceHit", (s.usagePriceHit == null ? "" : String(s.usagePriceHit)));
+    setVal("#setUsagePriceIn", (s.usagePriceIn == null ? "" : String(s.usagePriceIn)));
+    setVal("#setUsagePriceOut", (s.usagePriceOut == null ? "" : String(s.usagePriceOut)));
+    setVal("#setPhoneWarn", (s.phoneWarnYuan == null ? "" : String(s.phoneWarnYuan)));
+    setChecked("#setLive2dEnabled", !!s.live2dEnabled);
+    setVal("#setLive2dModel", s.live2dModel || "");
+    setVal("#setBgBlur", typeof s.bgBlur === "number" ? s.bgBlur : 0);
+    setVal("#setBgBright", typeof s.bgBright === "number" ? s.bgBright : 100);
+    /* 手机页背景（独立于聊天背景） */
+    setVal("#setPhoneBgBlur", typeof s.phoneBgBlur === "number" ? s.phoneBgBlur : 0);
+    setVal("#setPhoneBgBright", typeof s.phoneBgBright === "number" ? s.phoneBgBright : 100);
+    /* 启动动画：动画套系 / 文字 / 图片 / 角色头像 */
+    setVal("#setSplashAnim", String(s.splashAnim == null ? "1" : s.splashAnim));
+    setVal("#setSplashText", s.splashText || "");
+    setVal("#setSplashSub", s.splashSub || "");
+    setVal("#setSplashImage", s.splashImage || "");
+    (function () {
+      /* 角色头像下拉：每次填表都按当前的角色列表重建，别让删掉的角色留在选项里 */
+      const sel = $("#setSplashAvatar");
+      if (!sel) return;
+      const keep = String(s.splashAvatar || "");
+      sel.innerHTML = "";
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = "（不用头像）";
+      sel.appendChild(none);
+      Store.getCharacters().forEach(function (c) {
+        const o = document.createElement("option");
+        o.value = c.id || "";
+        o.textContent = c.name || "角色";
+        sel.appendChild(o);
+      });
+      sel.value = keep;
+      /* 选项是重建的 → 刷新自绘按钮上的文字，否则按钮还显示旧的角色名 */
+      if (UI.pickRefreshAll) UI.pickRefreshAll();
+    })();
+    try {
+      if (D.bgDraft) D.bgDraft.settings = s.bgImage || "";
+      if (D.renderBgPreview) D.renderBgPreview("#setBgPreview", s.bgImage || "");
+      if (D.bgDraft) D.bgDraft.phone = s.phoneBgImage || "";
+      if (D.renderBgPreview) D.renderBgPreview("#setPhoneBgPreview", s.phoneBgImage || "");
+      if (D.syncBgLabels) D.syncBgLabels();
+    } catch (e) { /* ignore */ }
 
     /* 模型配置卡片：绑定（只需一次）+ 渲染 */
     bindModelSetEvents();
@@ -858,7 +1222,8 @@
 
   function syncProviderFields() {
     const v = $v("#setSearchProvider");
-    setDisplay("#tavilyField", v === "tavily" ? "" : "none");
+    /* auto 也显示：DeepSeek 搜索没结果时会回落到 Tavily，这个 Key 就是备用通道 */
+    setDisplay("#tavilyField", (v === "tavily" || v === "auto") ? "" : "none");
     /* #customSearchField 在 app.css 有一条【id 级】的 display:none（优先级高于 .field 的 flex）。
        内联置 "" 只是清掉内联声明，会被那条 id 规则盖回 none —— 于是选「自定义接口」时
        地址/密钥输入框永远不出现、整块功能不可用。必须显式给 flex 才盖得住。 */
@@ -1224,6 +1589,8 @@
 
       imgEnabled: checkedOf("#setImgEnabled"),
       imgSize: $v("#setImgSize").trim(),
+      imgToImg: checkedOf("#setImgToImg"),
+      phoneShareImg: checkedOf("#setPhoneShareImg"),
 
       roleplayEnabled: checkedOf("#setRoleplayEnabled"),
       myName: $v("#setMyName").trim(),
@@ -1240,6 +1607,54 @@
       noImage: checkedOf("#setNoImage"),
       bgKeep: checkedOf("#setBgKeep"),
 
+      /* ── 6.0.0：功能开关 / 采用格式 / 用量花费 ──
+         （早先只写了「回填」，没写「读取」→ 这几个开关改了保存也不生效，这里补上。） */
+      dailyUpdate: checkedOf("#setDailyUpdate"),
+      worldGen: checkedOf("#setWorldGen"),
+      statusQuant: checkedOf("#setStatusQuant"),
+      autoMessage: checkedOf("#setAutoMessage"),
+      autoMessageMin: Number($v("#setAutoMessageMin")) || 30,
+      autoMessagePhone: checkedOf("#setAutoMessagePhone"),
+      adoptFormat: $v("#setAdoptFormat"),
+      usagePriceMode: $v("#setUsagePriceMode") || "fuzzy",
+      usagePriceHit: numOr($v("#setUsagePriceHit"), state.settings.usagePriceHit, 0.2),
+      usagePriceIn: numOr($v("#setUsagePriceIn"), state.settings.usagePriceIn, 2),
+      usagePriceOut: numOr($v("#setUsagePriceOut"), state.settings.usagePriceOut, 8),
+      phoneWarnYuan: numOr($v("#setPhoneWarn"), state.settings.phoneWarnYuan, 0),
+      live2dEnabled: checkedOf("#setLive2dEnabled"),
+      live2dModel: $v("#setLive2dModel"),
+
+      /* 视频 / 音乐：字段全留空就是「不启用」，不会影响其它功能 */
+      videoEnabled: checkedOf("#setVideoEnabled"),
+      videoBaseUrl: $v("#setVideoBaseUrl"),
+      videoKey: $v("#setVideoKey"),
+      videoModel: $v("#setVideoModel"),
+      videoMode: $v("#setVideoMode") || "t2v",
+      videoRatio: $v("#setVideoRatio") || "16:9",
+      videoSize: $v("#setVideoSize"),
+      videoDuration: numOr($v("#setVideoDuration"), state.settings.videoDuration, 5),
+      videoFps: numOr($v("#setVideoFps"), state.settings.videoFps, 24),
+      videoCreatePath: $v("#setVideoCreatePath"),
+      videoStatusPath: $v("#setVideoStatusPath"),
+      videoResultField: $v("#setVideoResultField"),
+      videoPollMs: numOr($v("#setVideoPollMs"), state.settings.videoPollMs, 3000),
+      videoPollMax: numOr($v("#setVideoPollMax"), state.settings.videoPollMax, 120),
+      videoTemplate: $v("#setVideoTemplate"),
+
+      musicEnabled: checkedOf("#setMusicEnabled"),
+      musicBaseUrl: $v("#setMusicBaseUrl"),
+      musicKey: $v("#setMusicKey"),
+      musicModel: $v("#setMusicModel"),
+      musicDuration: numOr($v("#setMusicDuration"), state.settings.musicDuration, 30),
+      musicFormat: $v("#setMusicFormat") || "mp3",
+      musicWithLyrics: checkedOf("#setMusicWithLyrics"),
+      musicCreatePath: $v("#setMusicCreatePath"),
+      musicStatusPath: $v("#setMusicStatusPath"),
+      musicResultField: $v("#setMusicResultField"),
+      musicPollMs: numOr($v("#setMusicPollMs"), state.settings.musicPollMs, 3000),
+      musicPollMax: numOr($v("#setMusicPollMax"), state.settings.musicPollMax, 120),
+      musicTemplate: $v("#setMusicTemplate"),
+
       visionEnabled: checkedOf("#setVisionEnabled")
     };
     /* 模型配置最后统一写：配置库与「生效值」必须一起改，否则两份数据会打架 */
@@ -1247,6 +1662,14 @@
     const flat = flattenSets(cur.sets, cur.index);
     Object.keys(flat).forEach(function (k) { form[k] = flat[k]; });
     return form;
+  }
+
+  /* 数字输入框留空 → 用原值（空串 Number 出来是 0，会把「每百万 2 元」悄悄改成 0） */
+  function numOr(raw, fallback, dflt) {
+    const t = String(raw == null ? "" : raw).trim();
+    if (t === "") return (typeof fallback === "number" ? fallback : dflt);
+    const n = Number(t);
+    return isFinite(n) ? n : (typeof fallback === "number" ? fallback : dflt);
   }
 
   function syncChip(input) {
@@ -1291,6 +1714,72 @@
     const icon = ok === null ? "information-outline" : (ok ? "check-circle-outline" : "alert-circle-outline");
     div.innerHTML = UI.iconSvg(icon) + "<span>" + UI.escapeHtml(text) + "</span>";
     return div;
+  }
+
+  /* ── 群聊 · 对彼此的认知（10-18）────────────────────────────
+     两级折叠：一级「谁」，二级「他对谁」。数据只在群聊会话上：
+       session.peerCog  = { 角色id: { 另一角色id: "…" } }
+       session.peerCogOn = 要不要把这些认知注入对话（默认关）
+     这里只管铺界面，更新 / 同步由 chat.js 干（按钮在 app.js 绑）。 */
+  function renderGroupCog(s) {
+    const sec = document.getElementById("groupCogSection");
+    if (!sec) return;
+    const isGroup = !!(s && s.isGroup);
+    sec.hidden = !isGroup;
+    if (!isGroup) return;
+    const on = document.getElementById("setPeerCogOn");
+    if (on) on.checked = !!s.peerCogOn;
+    const box = document.getElementById("peerCogList");
+    if (!box) return;
+    box.innerHTML = "";
+    const members = (window.DL.groupMembers ? window.DL.groupMembers(s) : []) || [];
+    const cog = (window.DL.peerCogOf ? window.DL.peerCogOf(s) : {}) || {};
+    if (members.length < 2) {
+      const p = document.createElement("p");
+      p.className = "pc-none";
+      p.textContent = "这个群还没有两个以上成员，认知无从谈起。";
+      box.appendChild(p);
+      return;
+    }
+    let any = false;
+    members.forEach((a) => {
+      const row = cog[a.id] || {};
+      const d = document.createElement("details");
+      d.className = "pc-role";
+      const sm = document.createElement("summary");
+      const nm = document.createElement("span");
+      nm.textContent = a.name;
+      const cnt = document.createElement("span");
+      cnt.className = "hint";
+      let n = 0;
+      members.forEach((b) => { if (b.id !== a.id && String(row[b.id] || "").trim()) n++; });
+      cnt.textContent = n ? (n + " / " + (members.length - 1)) : "空";
+      sm.appendChild(nm);
+      sm.appendChild(cnt);
+      d.appendChild(sm);
+      members.forEach((b) => {
+        if (b.id === a.id) return;
+        const sub = document.createElement("details");
+        sub.className = "pc-sub";
+        const ss = document.createElement("summary");
+        ss.textContent = "对 " + b.name;
+        sub.appendChild(ss);
+        const body = document.createElement("div");
+        body.className = "pc-body";
+        const t = String(row[b.id] || "").trim();
+        body.textContent = t || "还没有内容。点「更新认知」，AI 会按群里最近的对话整理一份。";
+        if (t) any = true;
+        sub.appendChild(body);
+        d.appendChild(sub);
+      });
+      box.appendChild(d);
+    });
+    if (!any) {
+      const tip = document.createElement("p");
+      tip.className = "pc-none";
+      tip.textContent = "目前一条印象都没有。先聊几轮，再点「更新认知」。";
+      box.insertBefore(tip, box.firstChild);
+    }
   }
 
   async function selfTest() {
@@ -1378,6 +1867,20 @@
     const diag = [];
     diag.push("DeepLink 诊断 " + new Date().toLocaleString());
     diag.push("前端版本：" + CONFIG.APP_VERSION);
+    diag.push("上次运行版本：" + (state.settings.lastRunVersion || "（无）"));
+    /* 「更新后首次打开」专项：清缓存是本项目唯一「只在真机执行」的启动动作
+       （无桥环境 hasBridge 恒 false），这里把它与就绪耗时一起亮出来，便于真机定位。 */
+    let clearTries = "0";
+    try { clearTries = sessionStorage.getItem("deeplink.cacheClearTries") || "0"; } catch (e) { /* ignore */ }
+    diag.push("本次启动清缓存：已尝试 " + clearTries + " 次");
+    diag.push("首屏就绪耗时：" + (window.__deeplinkReady
+      ? (window.__dlBootT0 ? (Date.now() - window.__dlBootT0) + "ms" : "（无起点）")
+      : "尚未就绪"));
+    /* 启动分段：每段是「距启动起点的累计毫秒」，定位 230ms 花在哪一步用（10-18 新增） */
+    try {
+      const marks = (window.__dlBootMarks || []).map((it) => it[0] + " " + it[1] + "ms").join(" / ");
+      diag.push("启动分段：" + (marks || "（无）"));
+    } catch (e) { diag.push("启动分段：（读不出来）"); }
     diag.push("附加脚本：" + ((window.__dlScripts || []).join(" ") || "（无）"));
     diag.push("接口总数：" + allNames.length);
     diag.push("接口名单：" + (allNames.join(" ") || "（无）"));
@@ -1845,7 +2348,7 @@
         if (mt) parts.push("【长期记忆摘要】\n" + mt.slice(0, 1800));
       } catch (e) { /* ignore */ }
       try {
-        const rt = Memory.recentTranscript(s.messages || [], 0, 40);
+        const rt = Memory.recentTranscript(s.messages || [], 0, 40, s);
         if (rt) parts.push("【近期聊天原文】\n" + rt.slice(0, 2600));
       } catch (e) { /* ignore */ }
       return parts.join("\n\n");
@@ -2106,6 +2609,346 @@
 
      外面套一层只为在每次进入公开入口前重取一遍模块（syncModules）——
      打包工具若不按 index.html 顺序执行脚本，这是唯一能兜住「模块晚到」的地方。 */
+  /* ── 设置页 7 大模块（10-16 用户要求：点进模块再做具体设置）────────────
+     HTML 结构不动：按每个 section 的 h3 文本归组、打 data-group；
+     首页 #settingsHome 列 7 个入口，点进去只显示该组的 section。
+     「用量统计 / 导入导出」是打开各自弹窗，不切视图。 */
+  var SG_TITLE = { basic: "基本配置", advanced: "高级功能", persona: "我的人设", usage: "用量统计", io: "导入导出", storage: "储存占用", about: "关于应用" };
+  /* h3 文本前缀 → 组。加一个 section 只需在这里加一行（用 indexOf === 0 前缀匹配，
+     因为 h3 里可能还夹着「重置本区」按钮）。 */
+  var SEC_GROUP = [
+    ["主模型", "basic"], ["头像", "basic"], ["生成参数", "basic"], ["采用格式", "basic"],
+    ["自定义聊天背景", "basic"], ["手机背景", "basic"], ["启动动画", "basic"],
+    ["听觉模型", "advanced"], ["语音合成", "advanced"], ["文生图", "advanced"], ["视觉模型", "advanced"],
+    ["图片", "advanced"], ["角色扮演", "advanced"], ["功能开关", "advanced"], ["用量花费", "advanced"],
+    ["live2D", "advanced"], ["角色记忆总览", "advanced"], ["后台与通知", "advanced"], ["应用加密", "advanced"],
+    ["我的人设", "persona"], ["存储", "storage"], ["关于", "about"]
+  ];
+  function secGroup(title) {
+    for (var i = 0; i < SEC_GROUP.length; i++) { if (title.indexOf(SEC_GROUP[i][0]) === 0) return SEC_GROUP[i][1]; }
+    return "advanced";
+  }
+  /* h3 里可能带「重置本区」按钮 —— 只取纯文本节点，别把按钮文字算进来 */
+  function h3PlainText(h3) {
+    if (!h3) return "";
+    var t = "";
+    for (var n = h3.firstChild; n; n = n.nextSibling) { if (n.nodeType === 3) t += n.nodeValue; }
+    return t.replace(/\s+/g, "");
+  }
+  function setupSettingsHome() {
+    var body = document.getElementById("settingsBody");
+    if (!body || body.dataset.sgReady) return;
+    body.dataset.sgReady = "1";
+    var secs = body.querySelectorAll(".settings-section");
+    for (var i = 0; i < secs.length; i++) {
+      /* HTML 里已显式指定组的（那些没有 h3、按文本归不了组的容器）别覆盖 */
+      if (secs[i].getAttribute("data-group")) continue;
+      secs[i].setAttribute("data-group", secGroup(h3PlainText(secs[i].querySelector("h3"))));
+    }
+  }
+  /* 整页模式下左上角那个键是「返回上一级」：子页 → 首页；首页 → 关闭设置。
+     （设置页已改成整页，右上角的 × 被 CSS 隐藏了，所以首页也得有这个键。） */
+  function sgBack() {
+    var body = document.getElementById("settingsBody");
+    if (body && body.classList.contains("sg")) { sgHome(); return; }
+    UI.closeModal("settingsModal");
+  }
+  function sgHome() {
+    var body = document.getElementById("settingsBody");
+    if (!body) return;
+    body.classList.remove("sg");
+    body.removeAttribute("data-sg");
+    setText("#settingsTitle", "设置");
+    setHidden("#settingsBack", false);
+    body.scrollTop = 0;
+  }
+  function sgOpen(name) {
+    var body = document.getElementById("settingsBody");
+    if (!body) return;
+    setupSettingsHome();
+    /* 用量统计 / 导入导出：开一个**整页子页叠在设置之上**，不关设置页。
+       老写法是「先 closeModal(settingsModal) 再 openModal(usageModal)」，
+       于是用户按返回就直接掉回主界面，而且那两个老弹窗只有 60 层，
+       被 88 层的设置页整个盖住 → 表现成「点了没反应」。两处一起改掉。 */
+    if (name === "usage") { renderUsageStats(); UI.openModal("usageModal"); return; }
+    if (name === "io") { openData(); return; }
+    if (name === "persona") renderPersona();
+    if (name === "storage") renderStoragePanel();
+    body.classList.add("sg");
+    body.setAttribute("data-sg", name);
+    setText("#settingsTitle", SG_TITLE[name] || "设置");
+    setHidden("#settingsBack", false);
+    body.scrollTop = 0;
+  }
+  function bindSettingsHome() {
+    setupSettingsHome();
+    var home = document.getElementById("settingsHome");
+    if (home && !home.dataset.bound) {
+      home.dataset.bound = "1";
+      home.addEventListener("click", function (ev) {
+        var btn = (ev.target && ev.target.closest) ? ev.target.closest(".sg-item") : null;
+        if (btn) sgOpen(btn.getAttribute("data-sg"));
+      });
+    }
+    var back = document.getElementById("settingsBack");
+    if (back && !back.dataset.bound) { back.dataset.bound = "1"; back.addEventListener("click", sgBack); }
+    /* 每次从侧边栏进设置都回到首页（延后一拍，避开本来的打开逻辑） */
+    var open = document.getElementById("openSettingsBtn");
+    if (open && !open.dataset.sgWatch) {
+      open.dataset.sgWatch = "1";
+      open.addEventListener("click", function () { setTimeout(sgHome, 0); });
+    }
+  }
+
+  /* ── 我的人设（10-16）──────────────────────────────
+     全局存「你」的设定，最多 10 套，只存本机、随设置一起导出。
+     注入优先级（用户口径「以角色卡的为准」）：角色卡「你的*」→ 当前人设 → 旧的 settings.my*（见 memory.js 的 resolveMy）。 */
+  var PERSONA_FIELDS = [
+    ["myName", "我的名称", 0],
+    ["aiCallMe", "你对我的称呼", 0],
+    ["myPersona", "我的性格", 1],
+    ["myAppearance", "我的外貌", 1],
+    ["myBackground", "我的背景", 1],
+    ["myLikes", "我的喜好", 1]
+  ];
+  var PERSONA_MAX = 10;
+  var personaSaveTimer = null;
+  function personaList() { var s = state.settings || {}; return Array.isArray(s.personas) ? s.personas : []; }
+  function curPersona() {
+    var list = personaList();
+    if (!list.length) return null;
+    var id = (state.settings && state.settings.activePersonaId) || "";
+    for (var i = 0; i < list.length; i++) { if (list[i].id === id) return list[i]; }
+    return list[0];
+  }
+  function personaNewId() { return "p_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+  /* 输入防抖落库：人设是独立数据，改完即存（不像角色卡那样必须手点保存） */
+  function personaFlush() {
+    if (personaSaveTimer) { clearTimeout(personaSaveTimer); personaSaveTimer = null; }
+    state.settings = Store.saveSettings({ personas: personaList() });
+  }
+  function personaQueueSave() {
+    if (personaSaveTimer) clearTimeout(personaSaveTimer);
+    personaSaveTimer = setTimeout(personaFlush, 400);
+  }
+  function ensurePersona() {
+    if (personaList().length) return;
+    var p = { id: personaNewId(), name: "默认人设" };
+    state.settings = Store.saveSettings({ personas: [p], activePersonaId: p.id });
+  }
+  function renderPersona() {
+    var box = document.getElementById("personaFields");
+    if (!box) return;
+    ensurePersona();
+    var list = personaList();
+    var cur = curPersona();
+    setText("#personaCount", String(list.length));
+    var sel = document.getElementById("personaPick");
+    if (sel) {
+      sel.innerHTML = "";
+      list.forEach(function (p) {
+        var o = document.createElement("option");
+        o.value = p.id; o.textContent = p.name || "未命名";
+        sel.appendChild(o);
+      });
+      sel.value = cur ? cur.id : "";
+      if (UI.pickRefreshAll) UI.pickRefreshAll();
+    }
+    box.innerHTML = "";
+    PERSONA_FIELDS.forEach(function (f) {
+      var wrap = document.createElement("label");
+      wrap.className = "field";
+      var sp = document.createElement("span");
+      sp.textContent = f[1];
+      wrap.appendChild(sp);
+      var el = f[2] ? document.createElement("textarea") : document.createElement("input");
+      if (f[2]) el.rows = 2; else el.type = "text";
+      el.id = "pf_" + f[0];
+      el.value = (cur && cur[f[0]]) || "";
+      el.addEventListener("input", function () { personaSetField(f[0], el.value); });
+      wrap.appendChild(el);
+      box.appendChild(wrap);
+    });
+  }
+  function personaSetField(key, val) {
+    var cur = curPersona();
+    if (!cur) return;
+    cur[key] = val;
+    /* 就地改完再存 —— 回写进数组，避免只改了引用没落库 */
+    var list = personaList();
+    for (var i = 0; i < list.length; i++) { if (list[i].id === cur.id) list[i] = cur; }
+    personaQueueSave();
+  }
+  function personaPick(id) {
+    personaFlush();
+    state.settings = Store.saveSettings({ activePersonaId: id });
+    renderPersona();
+  }
+  function personaNew() {
+    var list = personaList();
+    if (list.length >= PERSONA_MAX) { UI.toast("最多 " + PERSONA_MAX + " 套，先删一套再建", true); return; }
+    personaFlush();
+    var p = { id: personaNewId(), name: "人设 " + (list.length + 1) };
+    list.push(p);
+    state.settings = Store.saveSettings({ personas: list, activePersonaId: p.id });
+    renderPersona();
+    UI.toast("已新建「" + p.name + "」");
+  }
+  function personaDel() {
+    var list = personaList();
+    if (list.length <= 1) { UI.toast("至少要留一套", true); return; }
+    var cur = curPersona();
+    if (!cur) return;
+    var i = -1;
+    for (var k = 0; k < list.length; k++) if (list[k].id === cur.id) i = k;
+    if (i < 0) return;
+    list.splice(i, 1);
+    state.settings = Store.saveSettings({ personas: list, activePersonaId: list[Math.max(0, i - 1)].id });
+    renderPersona();
+  }
+  function personaDigest() {
+    var lines = [];
+    PERSONA_FIELDS.forEach(function (f) {
+      var el = document.getElementById("pf_" + f[0]);
+      var v = el ? String(el.value || "").trim() : "";
+      if (v) lines.push(f[1] + "：" + v);
+    });
+    return lines.join("\n");
+  }
+  /* 套用到当前角色卡：只填「空着的」那几栏 —— 已填的不动（以角色卡为准） */
+  function personaApply() {
+    var cur = curPersona();
+    if (!cur) return;
+    var ch = activeCharacter();
+    if (!ch) { UI.toast("先去角色页选一个角色", true); return; }
+    var f = ch.fields || (ch.fields = {});
+    var n = 0;
+    PERSONA_FIELDS.forEach(function (x) {
+      var v = String(cur[x[0]] || "").trim();
+      if (!v) return;
+      if (String(f[x[0]] || "").trim()) return;
+      f[x[0]] = v; n++;
+    });
+    if (!n) { UI.toast("角色卡里这几栏都填过了，没动", true); return; }
+    var list = Store.getCharacters();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === ch.id) list[i] = Object.assign({}, list[i], { fields: f, updatedAt: Date.now() });
+    }
+    Store.saveCharacters(list);
+    UI.toast("已把「" + (cur.name || "人设") + "」套进角色卡（填了 " + n + " 个空栏）");
+  }
+  async function personaSplit(again) {
+    var cur = curPersona();
+    if (!cur) return;
+    var typed = String($v("#personaSplitInput") || "").trim();
+    var raw = typed;
+    if (again) { var dg = personaDigest(); raw = typed ? (typed + "\n\n" + dg) : dg; }
+    if (!raw) { UI.toast("先写一段关于你自己的话", true); return; }
+    if (!state.settings.apiKey) { UI.toast("先去设置里填 API Key", true); return; }
+    setDisabled("#personaSplitRun", true);
+    setText("#personaSplitState", "AI 正在拆分…");
+    try {
+      var fields = PERSONA_FIELDS.map(function (f) {
+        var el = document.getElementById("pf_" + f[0]);
+        return { key: f[0], label: f[1], current: el ? el.value : "" };
+      });
+      var r = await window.Memory.splitCharacterFields(state.settings, raw, fields);
+      if (r.usage) recordUsage(null, r.usage, "");
+      var n = 0;
+      PERSONA_FIELDS.forEach(function (f) {
+        var v = r.fields[f[0]];
+        if (typeof v === "string" && v.trim()) {
+          var el2 = document.getElementById("pf_" + f[0]);
+          if (el2) el2.value = v.trim();
+          cur[f[0]] = v.trim();
+          n++;
+        }
+      });
+      personaFlush();
+      setText("#personaSplitState", n ? ("已填入 " + n + " 项，已自动保存") : "没拆出可用内容，写具体一点再试");
+    } catch (e) {
+      setText("#personaSplitState", "拆分失败：" + (e && e.message ? e.message : e));
+    } finally {
+      setDisabled("#personaSplitRun", false);
+    }
+  }
+  function bindPersona() {
+    var sel = document.getElementById("personaPick");
+    if (sel && !sel.dataset.bound) { sel.dataset.bound = "1"; sel.addEventListener("change", function () { personaPick(sel.value); }); }
+    var b;
+    b = document.getElementById("personaNewBtn");    if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", personaNew); }
+    b = document.getElementById("personaDelBtn");    if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", personaDel); }
+    b = document.getElementById("personaApplyBtn");  if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", personaApply); }
+    b = document.getElementById("personaSplitRun");  if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", function () { personaSplit(false); }); }
+    b = document.getElementById("personaSplitAgain"); if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", function () { personaSplit(true); }); }
+  }
+
+  /* ── 离线原因（10-17）──────────────────────────────
+     设置里可无限添加（抽屉式浮窗）；会话里只能从这里选，不能增改。
+     存在 settings.offlineReasons；会话上的引用是 session.offlineReasonId。 */
+  function reasonList() { var s = state.settings || {}; return Array.isArray(s.offlineReasons) ? s.offlineReasons : []; }
+  function reasonText(id) {
+    var list = reasonList();
+    for (var i = 0; i < list.length; i++) { if (list[i].id === id) return String(list[i].text || ""); }
+    return "";
+  }
+  function openReasonDrawer() { renderReasonDrawer(); setHidden("#reasonDrawer", false); }
+  function closeReasonDrawer() { setHidden("#reasonDrawer", true); }
+  function renderReasonDrawer() {
+    var box = document.getElementById("reasonList");
+    if (!box) return;
+    box.innerHTML = "";
+    var list = reasonList();
+    if (!list.length) {
+      var e = document.createElement("p");
+      e.className = "hint";
+      e.textContent = "还没有。下面加一条，比如「去上班了」。";
+      box.appendChild(e);
+      return;
+    }
+    list.forEach(function (r) {
+      var item = document.createElement("div");
+      item.className = "reason-item";
+      var sp = document.createElement("span");
+      sp.textContent = r.text;
+      item.appendChild(sp);
+      var del = document.createElement("button");
+      del.className = "icon-btn r-del";
+      del.type = "button";
+      del.setAttribute("aria-label", "删除");
+      del.innerHTML = UI.iconSvg("delete-outline");
+      del.addEventListener("click", function () { delReason(r.id); });
+      item.appendChild(del);
+      box.appendChild(item);
+    });
+  }
+  function addReason() {
+    var inp = document.getElementById("reasonNewInput");
+    var t = inp ? String(inp.value || "").trim() : "";
+    if (!t) { UI.toast("先写一条理由", true); return; }
+    var list = reasonList().slice();
+    list.push({ id: "r_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), text: t });
+    state.settings = Store.saveSettings({ offlineReasons: list });
+    if (inp) inp.value = "";
+    renderReasonDrawer();
+  }
+  function delReason(id) {
+    state.settings = Store.saveSettings({ offlineReasons: reasonList().filter(function (r) { return r.id !== id; }) });
+    renderReasonDrawer();
+  }
+  function bindReason() {
+    var b;
+    b = document.getElementById("openReasonBtn"); if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", openReasonDrawer); }
+    b = document.getElementById("reasonClose");   if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", closeReasonDrawer); }
+    b = document.getElementById("reasonMask");    if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", closeReasonDrawer); }
+    b = document.getElementById("reasonAddBtn");  if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", addReason); }
+    var inp = document.getElementById("reasonNewInput");
+    if (inp && !inp.dataset.bound) {
+      inp.dataset.bound = "1";
+      inp.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); addReason(); } });
+    }
+  }
+
   var api = {
     introShow: introShow, introFinish: introFinish, introNext: introNext, introPrev: introPrev,
     openIntro: openIntro,
@@ -2113,6 +2956,7 @@
     importFromText: importFromText, importFromFile: importFromFile, syncExportScope: syncExportScope,
     openData: openData, saveImage: saveImage,
     snapshotSession: snapshotSession, sessionsForExport: sessionsForExport, saveSnapshot: saveSnapshot,
+    buildExportData: buildExportData, applyImport: applyImport,
     maybeAutoBackup: maybeAutoBackup, backupNow: backupNow, restoreBackupNow: restoreBackupNow,
     renderBackupLine: renderBackupLine, renderCharUsage: renderCharUsage, recordUsage: recordUsage,
     renderUsageStats: renderUsageStats, migrateData: migrateData,
@@ -2121,7 +2965,7 @@
     renderModelSets: renderModelSets, readAllSets: readAllSets, parseModels: splitModels,
     toggleModelPanel: toggleModelPanel, closeModelPanel: closeModelPanel, renderModelBadge: renderModelBadge,
     readSettingsForm: readSettingsForm, syncChip: syncChip, syncToggles: syncToggles,
-    selfTest: selfTest,
+    selfTest: selfTest, renderGroupCog: renderGroupCog,
 
     /* D2 应用加密（锁屏层 + 找回 + 设置页那段） */
     lockGate: lockGate, lockAppReady: lockAppReady,
@@ -2137,8 +2981,10 @@
 
   /* 脚本一跑就先决定「要不要关门」。放在这儿是为了不依赖 app.js 的执行顺序。 */
   try { lockInitialCover(); } catch (e) { console.warn("[DeepLink] 锁屏层初始化失败", e); }
+  /* 设置页 7 大模块 + 我的人设：DOM 已就绪（脚本在 body 末尾），一次绑定即可 */
+  try { bindSettingsHome(); bindPersona(); bindReason(); } catch (e) { console.warn("[DeepLink] 设置分区绑定失败", e); }
 
-  window.__dlScripts.push("settings.js");
+  (window.__dlScripts = window.__dlScripts || []).push("settings.js");
   return true;
   }
 

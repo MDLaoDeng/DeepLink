@@ -29,6 +29,17 @@
     return new Error("HTTP " + res.status + (detail ? "：" + detail : ""));
   }
 
+  /* 加一个超时：弱网下 ASR / TTS / 文生图 会让 await 长时间挂住，界面只剩「正在输入…」。
+     有 AbortController 就用它兜上限；没有（老环境）就原样请求，行为不变。 */
+  function fetchTimeout(url, init, ms) {
+    if (typeof AbortController === "undefined") return fetch(url, init);
+    const ctrl = new AbortController();
+    const timer = setTimeout(function () { try { ctrl.abort(); } catch (e) { /* ignore */ } }, ms || 60000);
+    const init2 = Object.assign({}, init, { signal: ctrl.signal });
+    return fetch(url, init2).then(function (r) { clearTimeout(timer); return r; },
+      function (e) { clearTimeout(timer); throw e; });
+  }
+
   async function transcribe(blob, s, filename) {
     const c = cfg("asr", s);
     if (!c.base || !c.key) throw new Error("未配置语音转写接口地址或密钥");
@@ -36,11 +47,11 @@
     form.append("file", blob, filename || "audio.webm");
     form.append("model", c.model);
     if (s.asrLang) form.append("language", s.asrLang);
-    const res = await fetch(c.base + "/audio/transcriptions", {
+    const res = await fetchTimeout(c.base + "/audio/transcriptions", {
       method: "POST",
       headers: { "Authorization": "Bearer " + c.key },
       body: form
-    });
+    }, 120000);
     if (!res.ok) throw await httpError(res);
     const data = await res.json();
     const text = String(data.text || (data.data && data.data.text) || "").trim();
@@ -51,11 +62,11 @@
   async function speak(text, s) {
     const c = cfg("tts", s);
     if (!c.base || !c.key) throw new Error("未配置语音合成接口地址或密钥");
-    const res = await fetch(c.base + "/audio/speech", {
+    const res = await fetchTimeout(c.base + "/audio/speech", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + c.key },
       body: JSON.stringify({ model: c.model, input: text, voice: s.ttsVoice || "FunAudioLLM/CosyVoice2-0.5B:alex" })
-    });
+    }, 120000);
     if (!res.ok) throw await httpError(res);
     const type = res.headers.get("content-type") || "";
     if (type.indexOf("json") >= 0) {
@@ -70,21 +81,67 @@
     return URL.createObjectURL(blob);
   }
 
-  async function image(prompt, s) {
-    const c = cfg("img", s);
-    if (!c.base || !c.key) throw new Error("未配置文生图接口地址或密钥");
-    const res = await fetch(c.base + "/images/generations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + c.key },
-      body: JSON.stringify({ model: c.model, prompt, n: 1, size: s.imgSize || "1024x1024" })
-    });
-    if (!res.ok) throw await httpError(res);
-    const data = await res.json();
-    const first = (data.data && data.data[0]) || (data.images && data.images[0]) || data;
+  /* 各家返回格式不完全一样，统一从响应里抠出图片地址 / base64 */
+  function pickImage(data) {
+    const first = (data && data.data && data.data[0]) || (data && data.images && data.images[0]) || data || {};
     if (typeof first === "string") return first;
     if (first.b64_json || first.b64) return "data:image/png;base64," + (first.b64_json || first.b64);
     if (first.url) return first.url;
     throw new Error("文生图返回格式无法识别（既没有 b64_json 也没有 url）");
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    const m = /^data:([^;,]*)(;base64)?,([\s\S]*)$/.exec(String(dataUrl || ""));
+    if (!m) return null;
+    const mime = m[1] || "image/png";
+    const bin = m[2]
+      ? atob(m[3] || "")
+      : decodeURIComponent(m[3] || "");
+    const len = bin.length;
+    const u8 = new Uint8Array(len);
+    for (let i = 0; i < len; i++) u8[i] = bin.charCodeAt(i);
+    return new Blob([u8], { type: mime });
+  }
+
+  /* 图生图：走 OpenAI 兼容的 /images/edits（multipart 传参考图）。
+     用于「让角色形象保持一致」——参考图来自角色个人图库（外置文件读回）。 */
+  async function imageEdit(prompt, c, size, ref) {
+    const blob = dataUrlToBlob(ref);
+    if (!blob) throw new Error("参考图不是可用的 data URL");
+    const form = new FormData();
+    form.append("prompt", prompt);
+    form.append("model", c.model);
+    form.append("n", "1");
+    form.append("size", size);
+    form.append("image", blob, "ref.png");
+    const res = await fetchTimeout(c.base + "/images/edits", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + c.key },
+      body: form
+    }, 180000);
+    if (!res.ok) throw await httpError(res);
+    return pickImage(await res.json());
+  }
+
+  /* opts.ref：参考图（data URL）。给了它、且设置里开了「图生图」，就先走 /images/edits，
+     失败**自动回落**文生图 —— 一致性是加分项，不该因为平台没有 edits 接口就出不了图。 */
+  async function image(prompt, s, opts) {
+    const c = cfg("img", s);
+    if (!c.base || !c.key) throw new Error("未配置文生图接口地址或密钥");
+    const size = s.imgSize || "1024x1024";
+    const ref = opts && opts.ref;
+    if (ref && s.imgToImg) {
+      try {
+        return await imageEdit(prompt, c, size, ref);
+      } catch (e) { /* 回落文生图 */ }
+    }
+    const res = await fetchTimeout(c.base + "/images/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + c.key },
+      body: JSON.stringify({ model: c.model, prompt, n: 1, size: size })
+    }, 180000);
+    if (!res.ok) throw await httpError(res);
+    return pickImage(await res.json());
   }
 
   /* ── 录音 ─────────────────────────────────────── */
@@ -126,6 +183,9 @@
         e.code = "UNSUPPORTED";
         throw e;
       }
+      /* 重入保护：上一次还没收拾干净就又调 start（比如权限弹窗期间被连点两次），
+         会把旧麦克风流直接覆盖掉、永不释放 → 话筒常亮。先收干净再开新的。 */
+      if (this._rec || this._stream) { try { this.cancel(); } catch (e) { /* ignore */ } }
       this._stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this._mime = pickMime();
       this._rec = this._mime

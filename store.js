@@ -90,8 +90,14 @@
   const K_CURRENT = "aicode.current.v1";
   const K_CHARS = "aicode.characters.v1";
   const K_USAGE = "aicode.usage.v1";
+  const K_USAGECAT = "aicode.usagecat.v1";
+  /* 手机「动态」：全局一条时间线。可见范围记在每条动态自己的 lines 里（会话 id 数组） */
+  const K_MOMENTS = "aicode.moments.v1";
   const K_AMEM = "aicode.assistantmem.v1";
   const K_BACKUPS = "aicode.backups.v1";
+  /* 角色个人图库索引：{ 角色id: [ {id, ref, mime, style, styleName, subject, desc, ts} ] }
+     图片文件本体走外置文件（原生桥），这里只存「谁有什么图、每张画的是什么」。 */
+  const K_CHARIMG = "aicode.charimg.v1";
 
   function safeParse(text, fallback) {
     try {
@@ -114,8 +120,12 @@
        webapp.存储指定文本(key, value) / webapp.获取指定文本(key, 默认值) / webapp.删除指定存储(key)
      容器/浏览器里没有这个对象 → 自动退回 localStorage，行为完全不变。 */
   const NATIVE_KEYS = ["aicode.settings.v1", "aicode.sessions.v1", "aicode.current.v1",
-    "aicode.characters.v1", "aicode.usage.v1", "aicode.assistantmem.v1", "aicode.backups.v1"];
+    "aicode.characters.v1", "aicode.usage.v1", "aicode.usagecat.v1", "aicode.moments.v1", "aicode.assistantmem.v1", "aicode.backups.v1", "aicode.charimg.v1"];
   let backend = null;
+  /* 迁移是否已经跑过一遍。跑过之后，原生返回空就代表「这个键真的没有」，
+     不能再回落到 localStorage —— 那是迁移时留下的旧快照，会让「清空 / 删除」读回旧值。
+     见 readRaw 的注释。 */
+  let nativeMigrated = false;
 
   function nativeKV() {
     try {
@@ -159,6 +169,9 @@
         w["存储指定文本"](k, v);
       }
     } catch (e) { /* ignore */ }
+    /* 迁移已经跑过一遍：此后原生返回空即为「这个键真的没有」，
+       readRaw 不再回落 localStorage（否则会读回这里的旧快照）。 */
+    nativeMigrated = true;
   }
   /* 统一调用原生桥：不存在或抛错都安全空转（返 undefined），保证无桥环境（浏览器/测试/预览）行为不变 */
   function callBridge(name) {
@@ -176,6 +189,11 @@
       if (pickBackend() === "native") {
         const v = nativeKV()["获取指定文本"](key, "");
         if (v !== "" && v != null) { readError = false; return String(v); }
+        /* 迁移已经跑过 → 原生返回空就是「这个键真的没有」：直接返回空，
+           绝不能回落 localStorage —— 那是迁移时留下的旧快照，会让
+           「清空 / 删除」读回旧值（例如删掉的当前会话又回来了）。
+           只有「迁移还没跑完」时才回落，那时数据确实还没搬过去。 */
+        if (nativeMigrated) { readError = false; return null; }
         /* 原生还没这个键（迁移还没跑完）→ 退回 localStorage，避免“数据像丢了” */
       }
       const out = localStorage.getItem(key);
@@ -300,17 +318,76 @@
     if (!hasBridge("保存指定文件")) return 0;
     let n = 0;
     (list || []).forEach((s) => {
-      const msgs = (s && s.messages) || [];
-      for (let i = 0; i < msgs.length; i++) {
-        const as = (msgs[i] && msgs[i].attachments) || [];
-        for (let j = 0; j < as.length; j++) {
-          const a = as[j];
-          if (!a || a.kind !== "image" || !a.dataUrl || a.imgRef) continue;
-          if (hoistOne(a)) n++;
+      /* 主聊天消息 + 手机消息都要扫：手机里的图同样是大图，不能只留在内联 */
+      const bags = [(s && s.messages) || [], (s && s.phone && s.phone.msgs) || []];
+      bags.forEach((msgs) => {
+        for (let i = 0; i < msgs.length; i++) {
+          const as = (msgs[i] && msgs[i].attachments) || [];
+          for (let j = 0; j < as.length; j++) {
+            const a = as[j];
+            if (!a || a.kind !== "image" || !a.dataUrl || a.imgRef) continue;
+            if (hoistOne(a)) n++;
+          }
         }
-      }
+      });
     });
     return n;
+  }
+
+  /* ── 角色个人图库：和「角色本人」相关的图，单独归档 ────────────────
+     用户口径：跟角色自己相关的图存进一个文件夹，每次再生成前先看一眼，
+     免得长相 / 发色 / 常穿的衣服前后对不上。
+     做法：图片文件走外置文件机制（原生桥「保存指定文件」），优先放进私有目录下的
+     charimg/ 子目录（放不成就平铺到私有目录、用 dl_cimg_ 前缀区分）；
+     图库索引（谁有什么图、每张画的是什么）另存一份小 JSON，落在原生 KV 里。
+     三条底线同 hoistOne：写成功才登记、失败保持原样、无桥自动空转。 */
+  const CIMG_PREFIX = "dl_cimg_";
+  const CIMG_MAX = 12;              /* 每个角色最多留 12 张，超了从最老的开始清（够保形象一致，也不占地方） */
+
+  function charImgAll() {
+    const raw = readRaw(K_CHARIMG);
+    if (raw === undefined) return {};
+    const v = safeParse(raw, {});
+    return (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
+  }
+  function charImgSaveAll(map) {
+    if (readError) return;
+    writeRaw(K_CHARIMG, JSON.stringify(map || {}));
+  }
+
+  /* 把一段 dataUrl 写进外置文件，返回落到哪个路径（写不成就回空串）。
+     先试子目录、再退平铺：原生实现不一定支持自动建目录，两种都试一遍最稳。 */
+  function saveExternalImage(dataUrl, prefix) {
+    if (!hasBridge("保存指定文件")) return "";
+    const dir = imgDir();
+    if (!dir) return "";
+    const sp = imgSplit(dataUrl);
+    if (!sp || !sp.b64) return "";
+    const file = (prefix || CIMG_PREFIX) + imgHash(sp.mime + ":" + sp.b64) + "." + imgExt(sp.mime);
+    const cands = [dir + "/charimg/" + file, dir + "/" + file];
+    for (let i = 0; i < cands.length; i++) {
+      const p = cands[i];
+      try {
+        const w = callBridge("保存指定文件", p, dataUrl);
+        if (w === false) continue;
+        if (hasBridge("判断指定文件")) {
+          if (callBridge("判断指定文件", p) === false) continue;
+        } else if (w === undefined) {
+          continue;   /* 没法确认写没写成 → 换下一个候选，绝不假装成功 */
+        }
+        return p;
+      } catch (e) { /* 换下一个候选 */ }
+    }
+    return "";
+  }
+  /* 从外置文件读回可直接用的 data URL */
+  function readExternalImage(path, mime) {
+    if (!path) return "";
+    try {
+      const back = String(callBridge("获取文件内容", path) || "");
+      if (!back) return "";
+      return back.slice(0, 5) === "data:" ? back : ("data:" + (mime || "image/png") + ";base64," + back);
+    } catch (e) { return ""; }
   }
 
   /* ── 记忆加密（双层：内层随机 AES-256-GCM，外层用「设备密钥」派生）─────
@@ -378,7 +455,10 @@
     try { v = String(readRaw(K_DEV_SALT) || ""); } catch (e) { v = ""; }
     if (!v && cryptoOk()) {
       v = bytesToB64(crypto.getRandomValues(new Uint8Array(16)));
-      try { writeRaw(K_DEV_SALT, v); } catch (e) { /* ignore */ }
+      /* ⚠️ 读失败时【绝不能覆盖写】：readRaw 出错会返回 undefined（readError=true），
+         此时误判成「没盐」再写一把新的，会让盘上原有的盐被换掉 —— 既有的 dl2 密文全部永久解不开。
+         读失败就只在本轮进程内用临时盐（解不开老密文，但绝不破坏盘上的盐）。 */
+      if (!readError) { try { writeRaw(K_DEV_SALT, v); } catch (e) { /* ignore */ } }
     }
     devSaltCache = v;
     return v;
@@ -653,7 +733,11 @@
     getSessions() {
       if (sessionsCache) return sessionsCache;
       const raw = readRaw(K_SESSIONS);
-      if (readError) return [];
+      /* ⚠️ 读失败时**返回上一次的结果**，绝不返回空数组。
+         空数组的语义是「一条会话都没有」，上层会照着它渲染空列表、
+         甚至顺手 newSession() 再存一遍 —— 用户看到的就是「对话历史全空了」。
+         读失败的正确语义是「这次没读到」，不是「没有」。 */
+      if (readError) return sessionsCache || [];
       if (raw === undefined) { sessionsCache = []; return sessionsCache; }
       const list = safeParse(raw, []);
       const arr = Array.isArray(list) ? list : [];
@@ -804,6 +888,9 @@
     },
     /* 这条附件还有没有图（内联或文件都算） */
     hasImage(att) { return !!(att && att.kind === "image" && (att.dataUrl || att.imgRef)); },
+    /* 单条附件外置：给手机模块用（把刚发的图立刻搬进文件，别撑 localStorage）。
+       搬家失败 / 无桥 / 没写成 → 保持内联，绝不删内容（同三条底线）。 */
+    hoistImage(att) { try { return hoistOne(att); } catch (e) { return false; } },
     /* 按轮数过期：删引用（以及没有别人再用时删文件），描述留着 */
     dropImage(att) {
       if (!att) return;
@@ -815,16 +902,183 @@
          只有当【别处都不再引用】时才真删文件，免得删掉别人还在用的图。 */
       let still = false;
       const list = this.getSessions() || [];
+      /* ⚠️ 两处都要扫：主消息 + 手机消息。手机发图同样会外置成 imgRef（见 hoistImages），
+         只扫 messages 的话，手机里那张图会被「别人还在用」的判断漏掉而被误删。 */
       for (let i = 0; i < list.length && !still; i++) {
-        const msgs = (list[i] && list[i].messages) || [];
-        for (let j = 0; j < msgs.length && !still; j++) {
-          const as = (msgs[j] && msgs[j].attachments) || [];
-          for (let k = 0; k < as.length; k++) { if (as[k] && as[k].imgRef === ref) { still = true; break; } }
+        const bags = [(list[i] && list[i].messages) || [], (list[i] && list[i].phone && list[i].phone.msgs) || []];
+        for (let b = 0; b < bags.length && !still; b++) {
+          const msgs = bags[b];
+          for (let j = 0; j < msgs.length && !still; j++) {
+            const as = (msgs[j] && msgs[j].attachments) || [];
+            for (let k = 0; k < as.length; k++) { if (as[k] && as[k].imgRef === ref) { still = true; break; } }
+          }
         }
       }
       if (still) return;
       try { callBridge("删除指定文件", ref); } catch (e) { /* ignore */ }
       imgCacheDrop(ref);
+    },
+
+    /* ── 角色个人图库：和「角色本人」相关的图，单独归档（六个入口）─────────
+       生成这类图之前先 listCharImages / charImageLatestURL 看一眼，
+       把「以前画过什么」带进提示词或当图生图参考，形象才不会前后对不上。 */
+
+    /* 登记一张「角色本人」的图。dataUrl 必须是内联图（远程链接请先转成 dataUrl）。
+       返回登记后的条目；无桥 / 写不成 → 回 null（调用方照旧把图挂在消息上即可）。 */
+    saveCharImage(charId, dataUrl, meta) {
+      if (!charId || !dataUrl) return null;
+      const ref = saveExternalImage(dataUrl, CIMG_PREFIX);
+      const m = meta || {};
+      const entry = {
+        id: "ci_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        ref: ref,
+        /* 没写进外置文件时不登记 —— 否则图库里会出现一堆「打不开」的条目 */
+        url: ref ? "" : String(m.url || ""),
+        mime: m.mime || "image/png",
+        style: String(m.style || ""),
+        styleName: String(m.styleName || ""),
+        subject: String(m.subject || ""),
+        desc: String(m.desc || ""),
+        ts: Date.now()
+      };
+      if (!entry.ref && !entry.url) return null;
+      const map = charImgAll();
+      const list = Array.isArray(map[charId]) ? map[charId] : [];
+      list.push(entry);
+      while (list.length > CIMG_MAX) {
+        const old = list.shift();
+        if (old && old.ref) { try { callBridge("删除指定文件", old.ref); } catch (e) { /* ignore */ } }
+      }
+      map[charId] = list;
+      charImgSaveAll(map);
+      return entry;
+    },
+    /* 这个角色的图库（从旧到新） */
+    listCharImages(charId) {
+      if (!charId) return [];
+      const map = charImgAll();
+      const list = map[charId];
+      return Array.isArray(list) ? list : [];
+    },
+    charImageCount(charId) { return this.listCharImages(charId).length; },
+    /* 一张图库条目 → 可直接用的地址（外置文件读回 / 直接是远程链接） */
+    charImageURL(entry) {
+      if (!entry) return "";
+      if (entry.ref) return readExternalImage(entry.ref, entry.mime);
+      return String(entry.url || "");
+    },
+    /* 最近一张「能打开」的图（图生图参考用）。返回空串 = 还没有可用参考图 */
+    charImageLatestURL(charId) {
+      const list = this.listCharImages(charId);
+      for (let i = list.length - 1; i >= 0; i--) {
+        const u = this.charImageURL(list[i]);
+        if (u) return u;
+      }
+      return "";
+    },
+    /* 图库摘要（写进提示词，让 AI 知道这个角色「以前是什么样子」）。
+       max 默认取最近 6 条；一条都没有就回空串。 */
+    charImageDigest(charId, max) {
+      const list = this.listCharImages(charId);
+      if (!list.length) return "";
+      const n = max || 6;
+      return list.slice(-n).map(function (e) {
+        const tag = e.styleName || e.style;
+        const body = e.subject || e.desc || "（未记录画面）";
+        return "- " + (tag ? "[" + tag + "] " : "") + body;
+      }).join("\n");
+    },
+    /* 删一条（文件也删）。 */
+    dropCharImage(charId, id) {
+      const map = charImgAll();
+      const list = Array.isArray(map[charId]) ? map[charId] : [];
+      const i = list.findIndex(function (e) { return e && e.id === id; });
+      if (i < 0) return false;
+      const gone = list.splice(i, 1)[0];
+      if (gone && gone.ref) { try { callBridge("删除指定文件", gone.ref); } catch (e) { /* ignore */ } }
+      map[charId] = list;
+      charImgSaveAll(map);
+      return true;
+    },
+    /* 清空某个角色的图库（文件全删） */
+    clearCharImages(charId) {
+      const map = charImgAll();
+      const list = Array.isArray(map[charId]) ? map[charId] : [];
+      list.forEach(function (e) { if (e && e.ref) { try { callBridge("删除指定文件", e.ref); } catch (err) { /* ignore */ } } });
+      map[charId] = [];
+      charImgSaveAll(map);
+    },
+
+    /* ── 导出 / 备份：图库跟着它的角色、会话一起走 ────────────────────
+       为什么必须内联：外置文件是本机路径（dl_cimg_…），换台手机必然指不到。
+       charIds 传数组就只导这几个角色；不传导全部。
+       drop=true 只带文字（画过什么还在，图不要）——给「不含原图」的导出用。
+       max>0 时每个角色只带最近 max 张（会话备份用它压体积）。 */
+    dumpCharImages(charIds, drop, max) {
+      const map = charImgAll();
+      const out = {};
+      const keys = Array.isArray(charIds) ? charIds : Object.keys(map);
+      keys.forEach(function (id) {
+        if (!id) return;
+        let list = Array.isArray(map[id]) ? map[id].slice() : [];
+        if (!list.length) return;
+        if (max > 0) list = list.slice(-max);
+        out[id] = list.map(function (e) {
+          const b = {
+            id: e.id, ts: e.ts, mime: e.mime, style: e.style, styleName: e.styleName,
+            subject: e.subject, desc: e.desc
+          };
+          if (!drop) {
+            const u = e.ref ? readExternalImage(e.ref, e.mime) : String(e.url || "");
+            if (u) b.dataUrl = u;
+          }
+          return b;
+        });
+      });
+      return out;
+    },
+    /* 把导出的图库装回本机：有图的重新写外置文件、重新登记；只剩文字的也登记
+       （这样「以前画过什么」还在，提示词里的人物一致性仍然管用）。
+       同 id 的条目跳过，重复导入不会翻倍。 */
+    restoreCharImages(map) {
+      if (!map || typeof map !== "object") return 0;
+      let n = 0;
+      const all = charImgAll();
+      Object.keys(map).forEach(function (id) {
+        if (!id || !Array.isArray(map[id])) return;
+        const list = Array.isArray(all[id]) ? all[id] : [];
+        const has = {};
+        list.forEach(function (e) { if (e && e.id) has[e.id] = true; });
+        map[id].forEach(function (e) {
+          if (!e) return;
+          const eid = String(e.id || ("ci_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)));
+          if (has[eid]) return;
+          const entry = {
+            id: eid, ref: "", url: "",
+            mime: e.mime || "image/png",
+            style: String(e.style || ""), styleName: String(e.styleName || ""),
+            subject: String(e.subject || ""), desc: String(e.desc || ""),
+            ts: e.ts || Date.now()
+          };
+          if (e.dataUrl) {
+            /* 远程 URL 形态（导出时 dumpCharImages 会把 e.url 当 dataUrl 带出来）：
+               saveExternalImage 只认 "data:" 前缀，写不成就退回直接引用这个 URL ——
+               否则这张图会丢、只剩文字。 */
+            entry.ref = saveExternalImage(e.dataUrl, CIMG_PREFIX);
+            if (!entry.ref && /^https?:\/\//i.test(e.dataUrl)) entry.url = e.dataUrl;
+          }
+          has[eid] = true;
+          list.push(entry);
+          n++;
+        });
+        while (list.length > CIMG_MAX) {
+          const old = list.shift();
+          if (old && old.ref) { try { callBridge("删除指定文件", old.ref); } catch (err) { /* ignore */ } }
+        }
+        all[id] = list;
+      });
+      charImgSaveAll(all);
+      return n;
     },
     /* 首次迁移：把历史会话里还在内联的图片搬进文件。
        saveSessions 每次也会顺带做，这里给启动时一个显式入口，并返回统计供自检显示。
@@ -839,10 +1093,10 @@
       }
       let left = 0;
       arr.forEach((s) => {
-        const msgs = (s && s.messages) || [];
-        msgs.forEach((m) => {
+        const bags = [(s && s.messages) || [], (s && s.phone && s.phone.msgs) || []];
+        bags.forEach((msgs) => msgs.forEach((m) => {
           ((m && m.attachments) || []).forEach((a) => { if (a && a.kind === "image" && a.dataUrl) left++; });
-        });
+        }));
       });
       return { ok: true, hoisted: hoisted, left: left };
     },
@@ -851,14 +1105,14 @@
       const arr = this.getSessions();
       let inline = 0, refs = 0, bytes = 0;
       arr.forEach((s) => {
-        const msgs = (s && s.messages) || [];
-        msgs.forEach((m) => {
+        const bags = [(s && s.messages) || [], (s && s.phone && s.phone.msgs) || []];
+        bags.forEach((msgs) => msgs.forEach((m) => {
           ((m && m.attachments) || []).forEach((a) => {
             if (!a || a.kind !== "image") return;
             if (a.dataUrl) { inline++; bytes += a.dataUrl.length; }
             else if (a.imgRef) refs++;
           });
-        });
+        }));
       });
       return { inline: inline, refs: refs, inlineBytes: bytes, dir: imgDir(), bridge: hasBridge("保存指定文件") };
     },
@@ -900,6 +1154,29 @@
       return writeRaw(K_USAGE, JSON.stringify(u || {}));
     },
 
+    /* 按「消耗类型」分开记的用量：对话 / 记忆 / 日更 / 世界生成 / 状态量化 /
+       群聊 / 动态筛选 / 总结 / 情绪日记 / 手机 / 其它。用于用量统计里按类型看花费。 */
+    getUsageCats() {
+      const raw = readRaw(K_USAGECAT);
+      const v = raw === undefined ? null : safeParse(raw, null);
+      return (v && typeof v === "object") ? v : {};
+    },
+    saveUsageCats(v) {
+      if (readError) return false;
+      return writeRaw(K_USAGECAT, JSON.stringify(v || {}));
+    },
+
+    /* 手机动态（朋友圈）。读失败返回 []，绝不覆盖已有数据（同「读失败拒写」的口径）。 */
+    getMoments() {
+      const raw = readRaw(K_MOMENTS);
+      const v = raw === undefined ? null : safeParse(raw, null);
+      return Array.isArray(v) ? v : [];
+    },
+    saveMoments(list) {
+      if (readError) return false;
+      return writeRaw(K_MOMENTS, JSON.stringify(Array.isArray(list) ? list : []));
+    },
+
     getAssistantMemory() {
       const raw = readRaw(K_AMEM);
       const v = raw === undefined ? null : safeParse(raw, null);
@@ -923,7 +1200,8 @@
     getCurrentId() { return readRaw(K_CURRENT) || ""; },
     setCurrentId(id) { writeRaw(K_CURRENT, id || ""); },
 
-    createSession(characterId) {
+    /* noSelect=true：建完不把它设成「当前会话」——「纯手机角色」用它（那种线不该顶掉主对话）。 */
+    createSession(characterId, noSelect) {
       const now = Date.now();
       const s = {
         id: "s_" + now.toString(36) + Math.random().toString(36).slice(2, 7),
@@ -937,6 +1215,13 @@
         topP: null,
         avatarUser: "",
         avatarAi: "",
+        /* 手机页专用头像：留空 = 用角色自己的头像（默认按角色，各线可单独设）。
+           故意和 avatarAi 分开——聊天界面换的那张图不必跟着进手机。 */
+        phoneAvatar: "",
+        /* 这条线自己的昵称（10-18 用户口径）：角色叫什么、我被叫什么。
+           都留空 = 用角色卡里的名字 / 全局「我的昵称」。 */
+        nickChar: "",
+        nickMe: "",
         usage: null,
         scene: "",
         cognition: "",
@@ -945,12 +1230,16 @@
         mainLine: false,
         pinned: false,
         ctxWash: null,
+        /* 群聊：isGroup 为真时 characterId 留空，成员都在 members（角色 id 数组）里。
+           单个角色的老会话这两项保持默认值，逻辑完全不受影响。 */
+        isGroup: false,
+        members: [],
         messages: []
       };
       const list = this.getSessions();
       list.unshift(s);
       this.saveSessions(list);
-      this.setCurrentId(s.id);
+      if (!noSelect) this.setCurrentId(s.id);
       return s;
     },
 

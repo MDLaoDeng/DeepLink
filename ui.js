@@ -5,8 +5,13 @@
   /* 头像解析由 app.js 注入（会话级 → 全局 → 内置图标） */
   let avatarResolver = null;
   function setAvatarResolver(fn) { avatarResolver = fn; }
-  function fillAvatar(box, role, sessionObj) {
-    const url = avatarResolver ? avatarResolver(role, sessionObj) : "";
+  /* 群聊里每条消息可能来自不同成员 —— 按发言人取头像（同样由 app.js 注入） */
+  let speakerResolver = null;
+  function setSpeakerResolver(fn) { speakerResolver = fn; }
+  function fillAvatar(box, role, sessionObj, msg) {
+    let url = "";
+    if (msg && msg.speaker && speakerResolver) url = speakerResolver(msg.speaker, sessionObj) || "";
+    if (!url) url = avatarResolver ? avatarResolver(role, sessionObj) : "";
     box.innerHTML = "";
     if (url) {
       const im = document.createElement("img");
@@ -30,9 +35,20 @@
   }
 
   /* ── 图标（Material Design Icons，内联 SVG） ─────── */
+  /* 图标路径取自 Material Design Icons（MDI，社区版 / Pictogrammers）。
+     授权：**Apache 2.0**（图标与字体）＋ MIT（代码），可商用、GPL 友好、无强制署名；
+     只有「品牌 / Logo」那一类不在此授权内 —— 这里一个都没用。
+     项目主页：https://github.com/Templarian/MaterialDesign　许可证全文见上方链接。
+     新增图标照抄 `d` 属性即可（24×24 视图框、单条 path）。
+     ⚠️ 这个对象里**不要夹注释** —— deep_check.py 是按「逗号开头/行首」这一套正则扫 key 的，
+     中间插一行注释会让紧跟其后的那个图标扫不到，误报「用到但 ICONS 里没有」。
+     要写说明就写在对象外面（就像这里）。 */
   const ICONS = {
     menu: "M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z",
     plus: "M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z",
+    "arrow-left": "M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z",
+    "book-outline": "M18,2A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2H18M6,4V20H18V4H6M11,6H16V13L13.5,11.75L11,13V6Z",
+    "settings-outline": "M19.43,12.98C19.47,12.66 19.5,12.34 19.5,12C19.5,11.66 19.47,11.34 19.43,11.02L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11.02C4.53,11.34 4.5,11.66 4.5,12C4.5,12.34 4.53,12.66 4.57,12.98L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.04 4.95,18.95L7.44,17.95C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.95L19.05,18.95C19.27,19.04 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.98M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5Z",
     paperclip: "M16.5,6V17.5A4,4 0 0,1 12.5,21.5A4,4 0 0,1 8.5,17.5V5A2.5,2.5 0 0,1 11,2.5A2.5,2.5 0 0,1 13.5,5V15.5A1,1 0 0,1 12.5,16.5A1,1 0 0,1 11.5,15.5V6H10V15.5A2.5,2.5 0 0,0 12.5,18A2.5,2.5 0 0,0 15,15.5V5A4,4 0 0,0 11,1A4,4 0 0,0 7,5V17.5A5.5,5.5 0 0,0 12.5,23A5.5,5.5 0 0,0 18,17.5V6H16.5Z",
     "arrow-up": "M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z",
     "arrow-down": "M11,4H13V16L18.5,10.5L19.92,11.92L12,19.84L4.08,11.92L5.5,10.5L11,16V4Z",
@@ -79,6 +95,9 @@
     "volume-off": "M12,4L9.91,6.09L12,8.18M4.27,3L3,4.27L7.73,9H3V15H7L12,20V13.27L16.25,17.53C15.58,18.04 14.83,18.46 14,18.7V20.77C15.38,20.45 16.63,19.82 17.68,18.96L19.73,21L21,19.73L12,10.73M19,12C19,12.94 18.8,13.82 18.46,14.64L19.97,16.15C20.62,14.91 21,13.5 21,12C21,7.72 18,4.14 14,3.23V5.29C16.89,6.15 19,8.83 19,12M16.5,12C16.5,10.23 15.5,8.71 14,7.97V10.18L16.45,12.63C16.5,12.43 16.5,12.21 16.5,12Z",
     "information-outline": "M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z",
     "message-text-outline": "M20,2A2,2 0 0,1 22,4V16A2,2 0 0,1 20,18H6L2,22V4C2,2.89 2.9,2 4,2H20M4,4V17.17L5.17,16H20V4H4M6,7H18V9H6V7M6,11H15V13H6V11Z",
+    "message-dots-outline": "M20,2A2,2 0 0,1 22,4V16A2,2 0 0,1 20,18H6L2,22V4C2,2.89 2.9,2 4,2H20M4,4V17.17L5.17,16H20V4H4M7,8A1.5,1.5 0 0,1 8.5,9.5A1.5,1.5 0 0,1 7,11A1.5,1.5 0 0,1 5.5,9.5A1.5,1.5 0 0,1 7,8M12,8A1.5,1.5 0 0,1 13.5,9.5A1.5,1.5 0 0,1 12,11A1.5,1.5 0 0,1 10.5,9.5A1.5,1.5 0 0,1 12,8M17,8A1.5,1.5 0 0,1 18.5,9.5A1.5,1.5 0 0,1 17,11A1.5,1.5 0 0,1 15.5,9.5A1.5,1.5 0 0,1 17,8Z",
+    "message-plus-outline": "M20,2A2,2 0 0,1 22,4V16A2,2 0 0,1 20,18H6L2,22V4C2,2.89 2.9,2 4,2H20M4,4V17.17L5.17,16H20V4H4M11,5H13V8H16V10H13V13H11V10H8V8H11V5Z",
+    "clock-outline": "M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z",
     "pencil-outline": "M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z",
     "magnify": "M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z",
     "refresh": "M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z",
@@ -88,7 +107,13 @@
     "lock-open-variant-outline": "M18 1C15.24 1 13 3.24 13 6V8H4C2.9 8 2 8.89 2 10V20C2 21.11 2.9 22 4 22H16C17.11 22 18 21.11 18 20V10C18 8.9 17.11 8 16 8H15V6C15 4.34 16.34 3 18 3C19.66 3 21 4.34 21 6V8H23V6C23 3.24 20.76 1 18 1M16 10L16 20H4V10H16M10 17C11.1 17 12 16.1 12 15C12 13.9 11.1 13 10 13C8.9 13 8 13.9 8 15C8 16.1 8.9 17 10 17Z",
     "shield-key-outline": "M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,3.18L19,6.3V11.22C19,12.92 18.5,14.65 17.65,16.17C16,17.5 13.9,18.4 12,18.75C10.1,18.4 8,17.5 6.35,16.17C5.5,14.65 5,12.92 5,11.22V6.3L12,3.18M12,9A2,2 0 0,1 14,11C14,11.74 13.6,12.37 13,12.72V16H11V12.72C10.4,12.37 10,11.74 10,11A2,2 0 0,1 12,9Z",
     "help-circle-outline": "M11,18H13V16H11V18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,6A4,4 0 0,0 8,10H10A2,2 0 0,1 12,8A2,2 0 0,1 14,10C14,12 11,11.75 11,15H13C13,12.75 16,12.5 16,10A4,4 0 0,0 12,6Z",
-    "exit-to-app": "M19,3H5C3.89,3 3,3.9 3,5V9H5V5H19V19H5V15H3V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.9 20.1,3 19,3M10.08,15.58L11.5,17L16.5,12L11.5,7L10.08,8.41L12.67,11H3V13H12.67L10.08,15.58Z"
+    "exit-to-app": "M19,3H5C3.89,3 3,3.9 3,5V9H5V5H19V19H5V15H3V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.9 20.1,3 19,3M10.08,15.58L11.5,17L16.5,12L11.5,7L10.08,8.41L12.67,11H3V13H12.67L10.08,15.58Z",
+    "cellphone": "M17,19H7V5H17M17,1H7C5.89,1 5,1.89 5,3V21A2,2 0 0,0 7,23H17A2,2 0 0,0 19,21V3A2,2 0 0,0 17,1Z",
+    "phone-outline": "M20,15.5C18.75,15.5 17.55,15.3 16.43,14.93C16.08,14.82 15.69,14.9 15.41,15.18L13.21,17.38C10.38,15.94 8.06,13.62 6.62,10.79L8.82,8.59C9.1,8.31 9.18,7.92 9.07,7.57C8.7,6.45 8.5,5.25 8.5,4A1,1 0 0,0 7.5,3H4A1,1 0 0,0 3,4A17,17 0 0,0 20,21A1,1 0 0,0 21,20V16.5A1,1 0 0,0 20,15.5Z",
+    "phone-hangup": "M12,9C10.4,9 8.85,9.25 7.4,9.72V12.82C7.4,13.22 7.17,13.56 6.84,13.72C5.86,14.21 4.97,14.84 4.17,15.59C4,15.75 3.79,15.83 3.56,15.83C3.33,15.83 3.12,15.75 2.95,15.58L0.44,13.07C0.28,12.91 0.2,12.7 0.2,12.47C0.2,12.24 0.28,12.03 0.44,11.87C3.28,9.08 7.39,7.5 12,7.5C16.61,7.5 20.72,9.08 23.56,11.87C23.72,12.03 23.8,12.24 23.8,12.47C23.8,12.7 23.72,12.91 23.56,13.07L21.05,15.58C20.88,15.75 20.67,15.83 20.44,15.83C20.21,15.83 20,15.75 19.83,15.58C19.03,14.83 18.14,14.2 17.16,13.71C16.83,13.55 16.6,13.21 16.6,12.81V9.72C15.15,9.25 13.6,9 12,9Z",
+    "cash": "M3,6H21V18H3V6M12,9A3,3 0 0,1 15,12A3,3 0 0,1 12,15A3,3 0 0,1 9,12A3,3 0 0,1 12,9M7,8A2,2 0 0,1 5,10V14A2,2 0 0,1 7,16H17A2,2 0 0,1 19,14V10A2,2 0 0,1 17,8H7Z",
+    "map-marker-outline": "M12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5M12,2A7,7 0 0,1 19,9C19,14.25 12,22 12,22C12,22 5,14.25 5,9A7,7 0 0,1 12,2M12,4A5,5 0 0,0 7,9C7,10 7,12 12,18.71C17,12 17,10 17,9A5,5 0 0,0 12,4Z",
+    "video-outline": "M15,8V16H5V8H15M16,6H4C3.45,6 3,6.45 3,7V17C3,17.55 3.45,18 4,18H16C16.55,18 17,17.55 17,17V13.5L21,17.5V6.5L17,10.5V7C17,6.45 16.55,6 16,6Z"
   };
 
   function iconSvg(name) {
@@ -120,6 +145,7 @@
       ["search", "magnify", "搜索"],
       ["copy", "content-copy", "复制"],
       ["regen", "refresh", "重新说"],
+      ["rollback", "undo-variant", "回溯到此刻"],
       ["delete", "delete-outline", "删除"]
     ],
     user: [
@@ -128,6 +154,7 @@
       ["read", "volume-high", "朗读"],
       ["search", "magnify", "搜索"],
       ["copy", "content-copy", "复制"],
+      ["rollback", "undo-variant", "回溯到此刻"],
       ["delete", "delete-outline", "删除"],
       ["multi", "select-multiple", "多选"]
     ]
@@ -326,8 +353,87 @@
       "<pre><code>" + escapeHtml(code.replace(/\n$/, "")) + "</code></pre></div>";
   }
 
+  /* ── 富文本：酒馆卡里的 HTML 在聊天气泡里渲染 ──────────────
+     用户口径（10-17）：原卡的富文本要在**聊天界面**看到渲染效果，不再被剥成纯文本。
+     做法是「白名单重建」——解析成 DOM，只保留认识的标签和属性，其余连内容一起丢。
+     绝不对原始字符串直接 innerHTML：那等于把角色卡当代码执行。
+     原卡的 CSS 也一律不带进来（只保留结构），否则会污染整个界面。 */
+  const RICH_TAGS = {
+    P: 1, BR: 1, B: 1, STRONG: 1, I: 1, EM: 1, U: 1, S: 1, DEL: 1, SUB: 1, SUP: 1,
+    H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
+    UL: 1, OL: 1, LI: 1, BLOCKQUOTE: 1, HR: 1, CODE: 1, PRE: 1,
+    TABLE: 1, THEAD: 1, TBODY: 1, TR: 1, TD: 1, TH: 1,
+    DETAILS: 1, SUMMARY: 1, SPAN: 1, DIV: 1, A: 1, IMG: 1
+  };
+  /* 这些标签整块丢掉（连里面的文字一起）——保留内容反而会把脚本源码显示出来 */
+  const RICH_DROP = {
+    SCRIPT: 1, STYLE: 1, IFRAME: 1, OBJECT: 1, EMBED: 1, LINK: 1, META: 1,
+    FORM: 1, INPUT: 1, BUTTON: 1, SELECT: 1, TEXTAREA: 1,
+    SVG: 1, VIDEO: 1, AUDIO: 1, SOURCE: 1, CANVAS: 1, TEMPLATE: 1, NOSCRIPT: 1
+  };
+
+  function sanitizeRich(html) {
+    let parsed = null;
+    try { parsed = new DOMParser().parseFromString(String(html || ""), "text/html"); }
+    catch (e) { return escapeHtml(html); }
+    const body = parsed && parsed.body;
+    if (!body) return escapeHtml(html);
+    const out = [];
+    (function walk(node) {
+      if (!node) return;
+      if (node.nodeType === 3) { out.push(escapeHtml(node.nodeValue)); return; }
+      if (node.nodeType !== 1) return;
+      const tag = String(node.tagName || "").toUpperCase();
+      if (RICH_DROP[tag]) return;                       /* 整块丢弃 */
+      if (!RICH_TAGS[tag]) {                            /* 不认识的标签：拆壳留字 */
+        const kids = node.childNodes;
+        for (let i = 0; i < kids.length; i++) walk(kids[i]);
+        return;
+      }
+      if (tag === "A") {
+        const href = safeUrl(node.getAttribute("href"));
+        out.push('<a class="dl-rich-a"');
+        if (href) out.push(' href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer"');
+        out.push(">");
+        const kids = node.childNodes;
+        for (let i = 0; i < kids.length; i++) walk(kids[i]);
+        out.push("</a>");
+        return;
+      }
+      if (tag === "IMG") {
+        const src = String(node.getAttribute("src") || "").trim();
+        /* 只放行网络图与内联图；本机路径、file:// 一律不渲染 */
+        if (/^https?:\/\//i.test(src) || /^data:image\//i.test(src)) {
+          out.push('<img class="dl-rich-img" src="' + escapeHtml(src) + '" alt="">');
+        }
+        return;
+      }
+      const lower = tag.toLowerCase();
+      out.push("<" + lower + ">");
+      const kids = node.childNodes;
+      for (let i = 0; i < kids.length; i++) walk(kids[i]);
+      out.push("</" + lower + ">");
+    })(body);
+    return out.join("");
+  }
+
+  /* 像不像一段富文本：至少两个块/强调标签才算，避免「<3」这种误判成 HTML */
+  function looksRich(src) {
+    const s = String(src || "");
+    if (s.indexOf("<") < 0) return false;
+    const m = s.match(/<\/?(p|div|h[1-6]|br|b|strong|i|em|u|ul|ol|li|blockquote|hr|table|span|details|summary)\b[^>]*>/gi);
+    return !!(m && m.length >= 2);
+  }
+
+  function renderRich(src) {
+    return '<div class="dl-rich">' + sanitizeRich(src) + "</div>";
+  }
+
   function renderMarkdown(src) {
-    const text = String(src == null ? "" : src).replace(/\r\n/g, "\n");
+    /* 富文本优先：含代码块的跳过（代码里的 HTML 不该被渲染） */
+    const raw = String(src == null ? "" : src);
+    if (raw.indexOf("```") < 0 && looksRich(raw)) return renderRich(raw);
+    const text = raw.replace(/\r\n/g, "\n");
     let out = "";
     let pos = 0;
     while (true) {
@@ -374,12 +480,49 @@
     });
   }
 
+  /* 把正文里的（…）与 (…) 染成灰色：旁白 / 动作 / 括号备注和正话要能一眼分开。
+     做法是**渲染完之后处理 DOM 文本节点**，不去动 Markdown 解析器 ——
+     否则代码块里的括号、行内代码都会被误伤。
+     只认单行内、长度 ≤ 60 的括号内容（跨行的多半是正文里的正规括号，别乱灰）。 */
+  const PAREN_RE = /[（(][^（()）\n]{1,60}[）)]/g;
+  function grayParens(root) {
+    if (!root || !root.childNodes) return;
+    const SKIP = { CODE: 1, PRE: 1, SCRIPT: 1, STYLE: 1, TEXTAREA: 1 };
+    const texts = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let n = walker.nextNode();
+    while (n) {
+      const p = n.parentNode;
+      const val = n.nodeValue || "";
+      PAREN_RE.lastIndex = 0;
+      if (p && !SKIP[p.nodeName] && !(p.className === "paren") && PAREN_RE.test(val)) texts.push(n);
+      n = walker.nextNode();
+    }
+    texts.forEach(function (t) {
+      const src = t.nodeValue;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      let m;
+      PAREN_RE.lastIndex = 0;
+      while ((m = PAREN_RE.exec(src))) {
+        if (m.index > last) frag.appendChild(document.createTextNode(src.slice(last, m.index)));
+        const sp = document.createElement("span");
+        sp.className = "paren";
+        sp.textContent = m[0];
+        frag.appendChild(sp);
+        last = m.index + m[0].length;
+      }
+      if (last < src.length) frag.appendChild(document.createTextNode(src.slice(last)));
+      if (t.parentNode) t.parentNode.replaceChild(frag, t);
+    });
+  }
+
   /* ── 消息元素 ──────────────────────────────────── */
   function attachmentHtml(list) {
     return (list || []).map((a) => {
       /* 图片可能有两种形态：还没搬家的内联 dataUrl、或搬进文件后的 imgRef。
          统一问 Store.imageURL()，它两种都认（搬进文件的会同步读一次并缓存）。 */
-      const imgUrl = a.kind === "image" ? Store.imageURL(a) : "";
+      const imgUrl = a.kind === "image" ? window.Store.imageURL(a) : "";
       if (imgUrl) {
         return '<div class="att"><img src="' + imgUrl + '" alt="' + escapeHtml(a.name) + '"><span class="a-name">' +
           escapeHtml(a.name) + '</span><button class="a-save" type="button" data-save-img="" aria-label="保存">保存</button></div>';
@@ -395,19 +538,49 @@
     }).join("");
   }
 
+  /* ── 双线：手机聊天的「线下侧写」────────────────────────
+     手机上聊的那一轮，她在现实里是什么样子。做成一段旁白而不是对话气泡：
+     不带头像、没有操作菜单、左边一条细线、斜体灰字。 */
+  function offlineEl(msg) {
+    const el = document.createElement("div");
+    el.className = "msg offline";
+    el.__msg = msg;
+    const box = document.createElement("div");
+    box.className = "offline-text";
+    box.textContent = String(msg.content || "");
+    el.appendChild(box);
+    return el;
+  }
+
   function msgEl(msg, sessionObj) {
+    /* 剧情卡（世界生成采纳的那段）：不挂在任何一方身上，居中一张卡片；
+       点一下铺满全屏看全文。渲染时不带头像、不带操作栏。 */
+    if (msg.world) return worldCardEl(msg);
+
+    /* 双线：手机里那一轮对应的「她此刻线下的样子」。不带头像、不参与操作，
+       当成一段旁白排在对话流里（样式见 .msg.offline）。 */
+    if (msg.offline) return offlineEl(msg);
+
     const el = document.createElement("div");
     el.className = "msg " + (msg.role === "user" ? "user" : "ai");
     el.__msg = msg;
 
     const avatar = document.createElement("div");
     avatar.className = "avatar";
-    fillAvatar(avatar, msg.role, sessionObj || null);
+    fillAvatar(avatar, msg.role, sessionObj || null, msg);
     el.appendChild(avatar);
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     el.appendChild(bubble);
+
+    /* 群聊：这条话是谁说的，标在气泡上方 */
+    if (msg.role !== "user" && msg.speakerName) {
+      const who = document.createElement("div");
+      who.className = "msg-speaker";
+      who.textContent = msg.speakerName;
+      bubble.appendChild(who);
+    }
 
     if (msg.role === "user") {
       if (msg.attachments && msg.attachments.length) {
@@ -419,6 +592,7 @@
       const content = document.createElement("div");
       content.className = "content";
       content.innerHTML = renderMarkdown(msg.content || "");
+      grayParens(content);   /* （…）里的旁白/动作染灰，和正话分开 */
       bubble.appendChild(content);
       if (msg.variantCount > 1) bubble.appendChild(variantsEl(msg));
       return el;
@@ -460,7 +634,11 @@
     const content = document.createElement("div");
     content.className = "content";
     content.innerHTML = msg.content ? renderMarkdown(msg.content) : "";
+    grayParens(content);
     bubble.appendChild(content);
+
+    /* 状态量化：折叠框放在气泡下方（默认收起，点开是各项数值条） */
+    if (msg.status && typeof msg.status === "object") bubble.appendChild(statusEl(msg.status));
 
     /* 只出了思考、正文是空的：常见于「思考把长度上限吃满」或「模型把话都写在思考里」。
        以前这种气泡既没有提示、也点不出操作栏（操作栏挂了 msg.content 的条件），
@@ -479,7 +657,9 @@
       bubble.appendChild(sourcesEl(msg.sources));
     }
     if (msg.variantCount > 1) bubble.appendChild(variantsEl(msg));
-    if (msg.content || noBody || msg.error) bubble.appendChild(msgActionsEl(msg));
+    /* 图片消息的 content 恒为空 —— 不加 msg.image 的话，AI 画的图就完全没有操作栏
+       （「重新说 / 复制 / 删除」对它是断的）。 */
+    if (msg.content || noBody || msg.error || msg.image) bubble.appendChild(msgActionsEl(msg));
     if (msg.error) {
       const e = document.createElement("div");
       e.className = "msg-error";
@@ -487,6 +667,56 @@
       bubble.appendChild(e);
     }
     return el;
+  }
+
+  /* 剧情卡：居中、无头像、无操作栏。点它 → 铺满全屏看全文（绑定在 chat.js）。 */
+  function worldCardEl(msg) {
+    const el = document.createElement("div");
+    el.className = "msg world-card";
+    el.__msg = msg;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "world-card-btn";
+    b.setAttribute("data-world-view", "1");
+    b.setAttribute("aria-label", "查看剧情全文");
+    b.innerHTML = '<span class="wc-ic">' + iconSvg("book-outline") + "</span>" +
+      '<span class="wc-text">选择的剧情</span>' +
+      '<span class="wc-caret">' + iconSvg("chevron-right") + "</span>";
+    el.appendChild(b);
+    return el;
+  }
+
+  /* 状态量化：气泡下方的一条可折叠状态（开心 72 · 害羞 40 …） */
+  function statusEl(st) {
+    const names = Object.keys(st || {});
+    const det = document.createElement("details");
+    det.className = "msg-status";
+    const head = names.slice(0, 3).map((k) => escapeHtml(k) + " " + st[k]).join(" · ");
+    det.innerHTML = '<summary><span class="st-ic">' + iconSvg("chart-box-outline") +
+      '</span><span class="st-label">状态' + (head ? " · " + head : "") +
+      '</span><span class="caret">' + iconSvg("chevron-right") + "</span></summary>";
+    const body = document.createElement("div");
+    body.className = "st-body";
+    names.forEach((k) => {
+      const row = document.createElement("div");
+      row.className = "st-row";
+      const nm = document.createElement("span");
+      nm.className = "st-name";
+      nm.textContent = k;
+      const bar = document.createElement("span");
+      bar.className = "st-bar";
+      const fill = document.createElement("i");
+      fill.className = "st-fill";
+      fill.style.width = Math.max(0, Math.min(100, Number(st[k]) || 0)) + "%";
+      bar.appendChild(fill);
+      const vl = document.createElement("span");
+      vl.className = "st-val";
+      vl.textContent = String(st[k]);
+      row.appendChild(nm); row.appendChild(bar); row.appendChild(vl);
+      body.appendChild(row);
+    });
+    det.appendChild(body);
+    return det;
   }
 
   function sourcesEl(sources) {
@@ -531,13 +761,31 @@
     let frame = null;
     let sources = [];
 
+    let lastPaintAt = 0;
+    let delayTimer = null;
     function paint() {
-      frame = null;
+      frame = null; delayTimer = null;
+      lastPaintAt = Date.now();
       rBody.textContent = reasoningText;
       contentBox.innerHTML = (contentText ? renderMarkdown(contentText) : "") +
         (started ? '<span class="cursor"></span>' : "");
     }
-    function schedule() { if (!frame) frame = requestAnimationFrame(paint); }
+    /* 流式期间「每帧」都整篇重跑 renderMarkdown：长回答等于 O(n²)，Chrome 83 上跑到
+       一两千字就明显掉帧、发热。改成最快约 90ms 画一次；不足 90ms 就排个定时器补上，
+       保证最后一帧一定画得出来。 */
+    function schedule() {
+      const wait = 90 - (Date.now() - lastPaintAt);
+      if (wait <= 0) {
+        if (!frame && !delayTimer) frame = requestAnimationFrame(paint);
+        return;
+      }
+      if (!delayTimer) {
+        delayTimer = setTimeout(function () {
+          delayTimer = null;
+          if (!frame) frame = requestAnimationFrame(paint);
+        }, wait);
+      }
+    }
 
     return {
       el,
@@ -570,6 +818,7 @@
       },
       finish() {
         if (frame) { cancelAnimationFrame(frame); frame = null; }
+        if (delayTimer) { clearTimeout(delayTimer); delayTimer = null; }
         /* 先把 DOM 同步落一次：以前这里只 cancel 掉那一帧，最后一段思考可能压根没写进
            rBody。万一这个节点随后被别处的重渲染搬走/重建，就会留个「半截思考」，
            或者干脆看不到 —— 都属于「思考被吞」。 */
@@ -601,21 +850,57 @@
     if (!m) return;
     m.classList.add("show");
     m.setAttribute("aria-hidden", "false");
+    /* 弹窗打开时统一刷一次自绘选择器的文字：这些 select 的选项多半是「打开前才填的」，
+       填完不会再触发 change —— 不刷的话按钮上还显示旧值。只改文字，开销可忽略。 */
+    pickRefreshAll();
   }
   function closeModal(id) {
     const m = document.getElementById(id);
     if (!m) return;
     m.classList.remove("show");
     m.setAttribute("aria-hidden", "true");
+    /* 确认框被外部（返回键）关掉时按「取消」结算，避免 promise 悬挂 + 旧回调残留 */
+    if (id === "dialogModal" && dialogSettle) {
+      const f = dialogSettle; dialogSettle = null;
+      try { f(false); } catch (e) { /* ignore */ }
+    }
   }
 
-  function confirmDialog(title, text) {
+  /* 当前挂着的确认框「结算函数」。返回键会直接 closeModal 关掉 dialogModal 而不结算，
+     若不兜底：promise 永久悬挂、旧监听器残留 → 下一次任何确认框点「确定」会同时触发旧回调，
+     把上次已取消的操作（删角色 / 删会话）也执行了。 */
+  let dialogSettle = null;
+
+  /* delayMs 可选：确认按钮延时这么多毫秒才可点（并显示倒计时）。
+     用在「不再弹出」这类要想清楚的后果警告上。 */
+  function confirmDialog(title, text, delayMs) {
     return new Promise((resolve) => {
+      /* 上一个还没结算的先按「取消」结掉，绝不叠加监听器 */
+      if (dialogSettle) { const f = dialogSettle; dialogSettle = null; try { f(false); } catch (e) { /* ignore */ } }
       $("#dialogTitle").textContent = title || "提示";
       $("#dialogText").textContent = text || "";
       const ok = $("#dialogOk");
       const cancel = $("#dialogCancel");
+      let settled = false;
+      let timer = null;
+      const okLabel = ok.textContent;
+      if (delayMs > 0) {
+        let left = Math.ceil(delayMs / 1000);
+        ok.disabled = true;
+        ok.textContent = okLabel + "（" + left + "s）";
+        timer = setInterval(() => {
+          left--;
+          if (left <= 0) { clearInterval(timer); timer = null; ok.disabled = false; ok.textContent = okLabel; return; }
+          ok.textContent = okLabel + "（" + left + "s）";
+        }, 1000);
+      }
       function cleanup(result) {
+        if (settled) return;
+        settled = true;
+        if (timer) { clearInterval(timer); timer = null; }
+        ok.disabled = false;
+        ok.textContent = okLabel;
+        if (dialogSettle === cleanup) dialogSettle = null;
         ok.removeEventListener("click", onOk);
         cancel.removeEventListener("click", onCancel);
         closeModal("dialogModal");
@@ -625,7 +910,50 @@
       function onCancel() { cleanup(false); }
       ok.addEventListener("click", onOk);
       cancel.addEventListener("click", onCancel);
+      dialogSettle = cleanup;
       openModal("dialogModal");
+    });
+  }
+
+  /* 带输入框的确认框（10-18 加）：复用 #dialogModal，只是往正文下面临时插一行输入。
+     返回 Promise<string|null> —— 确定给去空格后的文本（空串按取消算），取消给 null。
+     不新增弹窗节点、不改动了原有 confirmDialog 的返回类型，返回键 / 遮罩照旧。 */
+  function askDialog(title, hint, placeholder) {
+    return new Promise((resolve) => {
+      if (dialogSettle) { const f = dialogSettle; dialogSettle = null; try { f(false); } catch (e) { /* ignore */ } }
+      $("#dialogTitle").textContent = title || "输入";
+      const txt = $("#dialogText");
+      txt.textContent = hint || "";
+      const ok = $("#dialogOk");
+      const cancel = $("#dialogCancel");
+      const wrap = document.createElement("label");
+      wrap.className = "field ask-field";
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.placeholder = placeholder || "";
+      wrap.appendChild(inp);
+      if (txt && txt.parentNode) txt.parentNode.insertBefore(wrap, txt.nextSibling);
+      let settled = false;
+      const cleanup = (val) => {
+        if (settled) return;
+        settled = true;
+        ok.removeEventListener("click", onOk);
+        cancel.removeEventListener("click", onCancel);
+        inp.removeEventListener("keydown", onKey);
+        if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+        if (dialogSettle === cleanup) dialogSettle = null;
+        closeModal("dialogModal");
+        resolve(val);
+      };
+      const onOk = () => { const v = String(inp.value || "").trim(); cleanup(v || null); };
+      const onCancel = () => cleanup(null);
+      const onKey = (e) => { if (e.key === "Enter") { e.preventDefault(); onOk(); } };
+      ok.addEventListener("click", onOk);
+      cancel.addEventListener("click", onCancel);
+      inp.addEventListener("keydown", onKey);
+      dialogSettle = cleanup;
+      openModal("dialogModal");
+      setTimeout(() => { try { inp.focus(); } catch (e) { /* ignore */ } }, 60);
     });
   }
 
@@ -694,9 +1022,9 @@
   let themeStyleEl = null;
   /* 主题变量不写在 .css 文件里（封装工具会剥离样式表/样式块），改由 JS 运行时注入 */
   function applyTheme(id, mode) {
-    const theme = CONFIG.THEMES.find((t) => t.id === id) || CONFIG.THEMES[0];
+    const theme = window.CONFIG.THEMES.find((t) => t.id === id) || window.CONFIG.THEMES[0];
     const m = mode === "light" ? "light" : "dark";
-    const vars = (CONFIG.THEME_VARS[theme.id] || CONFIG.THEME_VARS[CONFIG.THEMES[0].id])[m];
+    const vars = (window.CONFIG.THEME_VARS[theme.id] || window.CONFIG.THEME_VARS[window.CONFIG.THEMES[0].id])[m];
     document.body.setAttribute("data-theme", theme.id);
     document.body.setAttribute("data-mode", m);
     /* 关键：color-scheme 必须始终包含 dark，否则安卓“强制深色”会把整页反色。
@@ -752,7 +1080,7 @@
   function buildModeSwitch(currentMode, onPick) {
     const box = $("#modeSwitch");
     box.innerHTML = "";
-    CONFIG.MODES.forEach((m) => {
+    window.CONFIG.MODES.forEach((m) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = m.id === currentMode ? "on" : "";
@@ -766,7 +1094,7 @@
     const grid = $("#themeGrid");
     grid.innerHTML = "";
     const m = mode === "light" ? "light" : "dark";
-    CONFIG.THEMES.forEach((t, i) => {
+    window.CONFIG.THEMES.forEach((t, i) => {
       const card = document.createElement("button");
       card.type = "button";
       card.className = "theme-card" + (t.id === currentId ? " active" : "");
@@ -780,8 +1108,11 @@
   }
 
   /* ── 会话列表 ──────────────────────────────────── */
-  function sessionListEl(sessions, currentId, handlers) {
-    const box = $("#sessionList");
+  /* box2 可选：指定渲染到哪个容器（侧栏分栏后，助手 / 角色两栏各有一个会话列表）。
+     不传就是原来的 #sessionList —— 老调用点一字不改。 */
+  function sessionListEl(sessions, currentId, handlers, box2) {
+    const box = box2 || $("#sessionList");
+    if (!box) return;
     box.innerHTML = "";
     if (!sessions.length) {
       const empty = document.createElement("div");
@@ -798,7 +1129,8 @@
 
       const sav = document.createElement("div");
       sav.className = "s-avatar";
-      fillAvatar(sav, "assistant", s);
+      if (s.isGroup) sav.innerHTML = iconSvg("account-group");
+      else fillAvatar(sav, "assistant", s);
       item.appendChild(sav);
 
       const title = document.createElement("span");
@@ -813,7 +1145,12 @@
         item.appendChild(dot);
       }
 
-      if (s.characterId) {
+      if (s.isGroup) {
+        const gb = document.createElement("span");
+        gb.className = "s-badge group";
+        gb.textContent = "群";
+        item.appendChild(gb);
+      } else if (s.characterId) {
         const badge = document.createElement("span");
         badge.className = "s-badge" + (s.mainLine ? " main" : "");
         badge.textContent = s.mainLine ? "主线" : "支线";
@@ -874,8 +1211,8 @@
   }
 
   window.UI = {
-    $, escapeHtml, renderMarkdown, msgEl, createStreamView, iconSvg, applyIcons, actionBtn, msgActionsEl, ACTIONS, setAvatarResolver, forceRepaint, themeDiagnostics,
-    toast, openModal, closeModal, confirmDialog,
+    $, escapeHtml, renderMarkdown, grayParens, msgEl, createStreamView, iconSvg, applyIcons, actionBtn, msgActionsEl, ACTIONS, setAvatarResolver, setSpeakerResolver, forceRepaint, themeDiagnostics,
+    toast, openModal, closeModal, confirmDialog, askDialog,
     pickBind, pickRefreshAll,
     applyTheme, buildModeSwitch, buildThemeGrid, sessionListEl,
     isNearBottom, scrollToBottom, copyText

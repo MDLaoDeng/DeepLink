@@ -12,9 +12,12 @@
 (function () {
   /* 打包工具不一定按 index.html 的顺序执行脚本（app.js 可能晚于本文件）。
      那时 window.DL 还不存在 —— 等它就绪后再初始化一次。返回 false = 还没就绪。 */
+  var booted = false;  /* boot 幂等：DOMContentLoaded 与补拍 retry 各会调一次，别重复绑事件 / 分裂状态 */
   function boot() {
+    if (booted) return true;
   var D = window.DL;
   if (!D) return false;   /* 尚未就绪，由文件末尾安排重试 */
+  booted = true;   /* 已真正初始化过，后续再被调用直接返回 */
 
   /* 共享件解构（名字与 app.js 内保持一致，保证搬来的代码不用改一个字） */
   var $ = D.$, $v = D.$v, state = D.state;
@@ -828,7 +831,8 @@
     on("#camTorch", "click", camToggleTorch);
     on("#camExposure", "input", (e) => { camApplyConstraint({ exposureCompensation: Number(e.target.value) }).catch(() => {}); });
     on("#camStage", "click", camFocusAt);
-    on("#cameraBtn", "click", camOpen);
+    /* 拍照入口现在是加号浮窗里的那一项，选完顺手把浮窗收掉 */
+    on("#plusCamera", "click", () => { if (window.DL && window.DL.popoverClose) window.DL.popoverClose(); camOpen(); });
     on("#camClose", "click", camClose);
     on("#camClose2", "click", camClose);
     on("#camFlip", "click", () => { cam.facing = cam.facing === "environment" ? "user" : "environment"; camStartStream(); });

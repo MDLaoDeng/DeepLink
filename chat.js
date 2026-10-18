@@ -13,9 +13,12 @@
   /* 打包工具不一定按 index.html 的顺序执行脚本：app.js 有可能晚于本文件。
      那时 window.DL 还不存在 —— 这里不直接放弃，而是等它就绪后再初始化一次。
      boot() 返回 false 表示「还没就绪」。 */
+  var booted = false;  /* boot 幂等：DOMContentLoaded 与补拍 retry 各会调一次，别重复绑事件 / 分裂状态 */
   function boot() {
+    if (booted) return true;
   var D = window.DL;
   if (!D) return false;   /* 尚未就绪，由文件末尾安排重试 */
+  booted = true;   /* 已真正初始化过，后续再被调用直接返回 */
 
   /* 共享件解构（名字与 app.js 内保持一致，保证搬来的代码不用改一个字） */
   var $ = D.$, $v = D.$v, state = D.state;
@@ -29,7 +32,7 @@
      maybeAutoWash / maybeAutoBackup / recordUsage 在这里执行时还不存在。
      一律改成惰性重取 —— 否则「生成后自动清洗 / 自动备份 / 用量记账」会静默失效
      （不报错，只是不生效，最难查）。 */
-  var maybeAutoWash, maybeAutoBackup, maybeAutoScene, recordUsage;
+  var maybeAutoWash, maybeAutoBackup, maybeAutoScene, maybeDailyRefresh, recordUsage;
   function syncModules() {
     UI = D.UI || window.UI; Store = D.Store || window.Store; Memory = D.Memory || window.Memory;
     Api = D.Api || window.Api; Files = D.Files || window.Files; Media = D.Media || window.Media;
@@ -37,6 +40,7 @@
     maybeAutoWash = D.maybeAutoWash || window.maybeAutoWash;
     maybeAutoBackup = D.maybeAutoBackup || window.maybeAutoBackup;
     maybeAutoScene = D.maybeAutoScene || window.maybeAutoScene;
+    maybeDailyRefresh = D.maybeDailyRefresh || window.maybeDailyRefresh;
     recordUsage = D.recordUsage || window.recordUsage;
   }
   syncModules();
@@ -47,6 +51,7 @@
   var renderSessionList = D.renderSessionList, renderAll = D.renderAll, setBusy = D.setBusy;
   var audioState = D.audioState;
   var setVal = D.setVal, setText = D.setText, setDisplay = D.setDisplay, checkedOf = D.checkedOf;
+  var setDisabled = D.setDisabled;
   var closeSidebar = D.closeSidebar;
 
   let audioEl = null;
@@ -67,11 +72,15 @@
     (s.messages || []).forEach((m) => {
       if (typeof m.atTurn !== "number") return;
       if (total - m.atTurn < n) return;
-      if (m.image) { delete m.image; changed = true; }
+      /* ⚠️ 只有「拿到了文字描述」才敢删原图：需求是「删原图、只留文字描述」，
+         描述还没生成 / 生成失败时若照删，这条图承载的信息就彻底没了（不可恢复）。 */
+      if (m.image && m.imageDesc) { delete m.image; changed = true; }
       if (m.attachments && m.attachments.length) {
         /* 图片可能是内联 dataUrl，也可能是文件引用（imgRef）——两种都要清，
            外置的那种还要把文件删掉（同一张图别处还在用时会自动保留，见 Store.dropImage） */
-        m.attachments.forEach((a) => { if (Store.hasImage(a)) { Store.dropImage(a); changed = true; } });
+        m.attachments.forEach((a) => {
+          if (a && a.desc && Store.hasImage(a)) { Store.dropImage(a); changed = true; }
+        });
       }
     });
     return changed;
@@ -103,13 +112,15 @@
       try {
         const out = await Api.describe(state.settings, job.url, 300);
         if (out.text && out.text.trim()) {
-          if (out.usage) recordUsage(null, out.usage, (snap.characterId || ""));
+          /* 先把描述落库、再记账：记账若抛错（跨模块未就绪）会被下面的 catch 吞掉，
+             那时描述还没写进去就白丢了。记账也补 typeof 守卫（本文件其它调用点都有）。 */
           mutateSession(sid, (msgs) => {
             const mm = msgs[job.i];
             if (!mm) return;
             if (job.img) mm.imageDesc = out.text.trim();
             else if (mm.attachments && mm.attachments[job.j]) mm.attachments[job.j].desc = out.text.trim();
           });
+          if (out.usage && typeof recordUsage === "function") recordUsage(null, out.usage, (snap.characterId || ""));
         }
       } catch (e) { /* 描述失败忽略 */ } finally { delete describing[key]; }
     }
@@ -152,12 +163,37 @@
   /* ── 消息渲染（超长会话只渲染最近 MSG_WINDOW 条，向上滑加载）── */
   const MSG_WINDOW = 20;
 
+  /* 开场白落到会话里（只做一次）：
+     酒馆卡的第一句话本来就该在聊天界面出现，而不是被当成「共同经历」的设定文本。
+     只在「这条线一句话都还没有」时插入 —— 已经有对话的线一律不碰。
+     保留原文（可能是富文本），显示时由 UI.renderMarkdown 走富文本分支渲染。 */
+  function ensureIntroMsg(s) {
+    try {
+      if (!s || !s.characterId || s.introDone) return;
+      if (s.messages && s.messages.length) return;
+      const list = (Store && Store.getCharacters) ? Store.getCharacters() : [];
+      const ch = (list || []).filter((c) => c.id === s.characterId)[0];
+      const intro = ch && ch.intro ? String(ch.intro) : "";
+      if (!intro.trim()) return;
+      const msg = { role: "assistant", content: intro, ts: Date.now(), intro: true };
+      s.messages = [msg];
+      s.introDone = true;
+      s.updatedAt = Date.now();
+      /* ⚠️ 这里用「原地改 + 落库」，不用 Store.updateSession ——
+         那个方法会 Object.assign 出一个**新对象**替换掉数组里的元素，
+         于是调用方手里持有的 s 立刻变成旧的（消息、设置全部读不到），
+         表现为「刚渲染完，紧接着的操作却按旧数据走」。 */
+      Store.saveSessions(Store.getSessions());
+    } catch (e) { /* 开场白落不下来也不能挡住聊天 */ }
+  }
+
   function renderMessages() {
     syncModules();
     const box = $("#messages");
     box.innerHTML = "";
     const s = session();
     if (!s) { state.msgWin = null; return; }
+    ensureIntroMsg(s);
     const total = s.messages.length;
     let start = Math.max(0, total - MSG_WINDOW);
     if (typeof state.msgAnchor === "number" && state.msgAnchor >= 0 && state.msgAnchor < total && state.msgAnchor < start) {
@@ -172,7 +208,34 @@
        这就是「思考被吞」的根源：生成期间任意 renderAll()（保存设置、切角色、删消息…）
        都会走到这里。重建完把流式节点原样挂回末尾。 */
     if (state.streamEl && state.streamSid === state.sessionId && state.streamEl.parentNode !== box) box.appendChild(state.streamEl);
+    /* 换了会话就把快捷回复收掉：面板里装的还是上一条会话的台词 */
+    if (quick.open && s && quick.sid && quick.sid !== s.id) quickClose();
+    syncContinueRow();
+    syncRegenRow();     /* 群聊：只有最后一条角色消息保留「重新说」 */
+    syncQuickBtn();     /* 快捷回复按钮的置灰状态跟着当前这条会话的记忆走 */
     UI.scrollToBottom();
+  }
+
+  /* 群聊里把「重新说」收到只剩最后一条（10-18 用户要求）。
+     翻旧消息时每条都挂着刷新按钮，很容易误点：那等于把那一段上下文整段重新生成一遍，
+     后面跟着的一串消息就全对不上了。所以只留最后一条。 */
+  function syncRegenRow() {
+    const box = $("#messages");
+    if (!box) return;
+    const s = session();
+    if (!s || !s.isGroup) return;
+    const msgs = s.messages || [];
+    let last = -1;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i] && msgs[i].role === "assistant") { last = i; break; }
+    }
+    const nodes = box.querySelectorAll(".msg");
+    for (let k = 0; k < nodes.length; k++) {
+      const el = nodes[k];
+      if (typeof el.__idx !== "number" || el.__idx === last) continue;
+      const btn = el.querySelector('.act-btn[data-act="regen"]');
+      if (btn && btn.parentNode) btn.parentNode.removeChild(btn);
+    }
   }
 
   function earlierEl(n) {
@@ -338,7 +401,7 @@
     btn.innerHTML = UI.iconSvg("volume-off");
     audioBtn = btn;
     try {
-      const url = await Media.speak(t, state.settings);
+      const url = await Media.speak(t, D.voiceSettingsFor ? D.voiceSettingsFor(session()) : state.settings);
       const audio = new Audio(url);
       audioEl = audio;
       audioUrl = url;
@@ -354,7 +417,24 @@
   function bubbleText(btn) {
     const box = btn.closest ? btn.closest(".bubble") : null;
     const content = box ? box.querySelector(".content") : null;
-    return content ? content.innerText.trim() : "";
+    if (!content) return "";
+    /* .code-head / .copy-btn / .a-save 这类按钮就嵌在 .content 里，直接取 innerText
+       会把「复制」「保存」也念出来。克隆一份、剔掉按钮节点再取文本。
+       注意：游离节点没有布局，innerText 会退化成 textContent（丢掉换行）——
+       所以临时挂到屏幕外的容器上再读。 */
+    const clone = content.cloneNode(true);
+    const junk = clone.querySelectorAll(".code-head, .copy-btn, .a-save, .att-expired");
+    for (let i = 0; i < junk.length; i++) if (junk[i].parentNode) junk[i].parentNode.removeChild(junk[i]);
+    const holder = document.createElement("div");
+    holder.style.position = "absolute";
+    holder.style.left = "-9999px";
+    holder.style.top = "0";
+    holder.style.whiteSpace = "pre-wrap";
+    holder.appendChild(clone);
+    document.body.appendChild(holder);
+    const txt = (clone.innerText || clone.textContent || "").trim();
+    document.body.removeChild(holder);
+    return txt;
   }
 
   function toggleRead(btn) {
@@ -372,10 +452,14 @@
     const sid = s.id;
 
     const userMsg = { role: "user", content: prompt };
-    appendMessage(sid, userMsg, s.messages.some((m) => m.role === "user") ? "" : prompt.slice(0, 20));
+    appendMessage(sid, userMsg, (s.isGroup || s.messages.some((m) => m.role === "user")) ? "" : prompt.slice(0, 20));
     setVal("#input", "");
     autoResize();
-    $("#messages").appendChild(UI.msgEl(userMsg, s));
+    /* 必须走 toView() 并补 __idx：否则这两个节点没有索引，
+       长按 / 右键 / 多选菜单（都靠 el.__idx 定位）对它们完全点不出来。 */
+    const uEl = UI.msgEl(toView(userMsg), s);
+    uEl.__idx = sessionById(sid).messages.length - 1;
+    $("#messages").appendChild(uEl);
 
     const holder = document.createElement("div");
     holder.className = "msg ai";
@@ -393,7 +477,11 @@
       /* 占位块也可能被别处的重渲染抹掉（同「思考被吞」）——那时 replaceWith 是空操作，
          重建整列兜底，别让刚生成的图凭空消失。 */
       if (sid !== state.sessionId) holder.remove();
-      else if (holder.parentNode) holder.replaceWith(UI.msgEl(msg, s));
+      else if (holder.parentNode) {
+        const aEl = UI.msgEl(toView(msg), s);
+        aEl.__idx = sessionById(sid).messages.length - 1;
+        holder.replaceWith(aEl);
+      }
       else renderMessages();
       renderSessionList();
       UI.scrollToBottom();
@@ -423,6 +511,311 @@
     return cjk >= latin;
   }
 
+  /* memory.js 有可能被排到本文件之后执行（打包工具不保证脚本顺序）。加载那一刻 window.Memory
+     还是 undefined，syncModules 取到的就是「钉死的 undefined」—— 症状是发消息时回答位置出现
+     红字「Cannot read property buildSystemText of undefined」（真机上踩过，浏览器/无头里复现不出来）。
+     真正要用记忆前再等一次（有上限）；仍拿不到就给一句能看懂的话，而不是那句没法定位的错。 */
+  async function ensureMemoryReady(ms) {
+    syncModules();
+    if (Memory && typeof Memory.buildSystemText === "function") return Memory;
+    const deadline = Date.now() + (typeof ms === "number" ? ms : 4000);
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+      syncModules();
+      if (Memory && typeof Memory.buildSystemText === "function") return Memory;
+    }
+    throw new Error("记忆模块 memory.js 没有加载成功，请重新打包（打包前先退出重进封装软件）");
+  }
+
+  /* ── 对彼此的认知（10-18 用户要求）─────────────────
+     session.peerCog = { 角色A的id: { 角色B的id: "A 眼里的 B" } }
+     session.peerCogOn = 开关（默认关：打开后才会注入对话上下文）
+     只有「写在前面的那个人」的看法，注入时逐条标主语 —— 否则 AI 会把它当全群公认，
+     甚至把「小明觉得小红话少」说成「小红觉得自己话少」。 */
+  function peerCogOf(s) {
+    const raw = (s && s.peerCog) || {};
+    return (raw && typeof raw === "object") ? raw : {};
+  }
+  function peerCogOn(s) { return !!(s && s.peerCogOn); }
+
+  function peerCogText(s) {
+    const members = groupMembers(s);
+    if (members.length < 2) return "";
+    const cog = peerCogOf(s);
+    const rows = [];
+    members.forEach((a) => {
+      const to = cog[a.id] || {};
+      members.forEach((b) => {
+        if (b.id === a.id) return;
+        const t = String(to[b.id] || "").trim();
+        if (t) rows.push("「" + a.name + "」眼中的「" + b.name + "」：" + t);
+      });
+    });
+    if (!rows.length) return "";
+    return "\n【彼此之间的认知】下面每一条都只是**写在前面的那个人**的看法，不是事实，也不能互换主语。" +
+      "提到的时候必须说清是谁觉得谁（例如「小明觉得小红话少」），不要写成全群公认，也不要替被说的人承认。\n" +
+      rows.join("\n") + "\n";
+  }
+
+  /* 从模型回包里抠出 JSON（允许前后带解释 / ```json 围栏） */
+  function parseJsonLoose(text) {
+    const t = String(text || "");
+    const a = t.indexOf("{");
+    const b = t.lastIndexOf("}");
+    if (a < 0 || b <= a) return null;
+    try { return JSON.parse(t.slice(a, b + 1)); } catch (e) { return null; }
+  }
+
+  /* 手动更新「彼此认知」：拿最近 30 条对话让模型总结，按名字映射回 id 落库。
+     只在用户点按钮时跑（用户口径：不做自动），失败只报错、不动已有内容。 */
+  async function updatePeerCog(sid) {
+    const s = sessionById(sid);
+    if (!s || !s.isGroup) return { ok: false, why: "这不是群聊" };
+    const members = groupMembers(s);
+    if (members.length < 2) return { ok: false, why: "群成员不足两个" };
+    if (!state.settings || !state.settings.apiKey) return { ok: false, why: "还没填 API Key" };
+    const msgs = (s.messages || []).slice(-30);
+    const lines = msgs.map((m) => {
+      const t = String(activeText(m) || "").replace(/\s+/g, " ").slice(0, 300);
+      if (!t) return "";
+      if (m.role === "user") return "我：" + t;
+      return (m.speakerName || "某人") + "：" + t;
+    }).filter(Boolean);
+    if (!lines.length) return { ok: false, why: "还没有可以分析的对话" };
+
+    const names = members.map((m) => m.name);
+    const sys = "你在整理一场多人群聊里「成员之间对彼此的印象」。只输出 JSON，不要解释、不要 Markdown。";
+    const ask = "群成员（严格用这些名字）：" + names.join("、") + "\n\n最近的对话：\n" + lines.join("\n") +
+      "\n\n请输出每个人对**其他每个人**的印象，格式（两层对象，键都是成员名字）：\n" +
+      '{"' + names[0] + '":{"' + (names[1] || "另一人") + '":"不超过 40 字"}}\n' +
+      "规则：\n" +
+      "1) 只写从对话里看得出来的：态度、称呼、亲疏、在意什么、有没有误会或别扭；\n" +
+      "2) 不要编造没出现过的信息，没有依据就给空字符串；\n" +
+      "3) 每一条都要站在**前面那个名字**的立场上写，不能写成客观事实；\n" +
+      "4) 不要写自己对「我（用户）」的印象，只写成员之间。";
+
+    const r = await Api.summarize(applySessionParams(state.settings, s),
+      [{ role: "system", content: sys }, { role: "user", content: ask }], { maxTokens: 900 });
+    const obj = parseJsonLoose(r && r.text);
+    if (!obj) return { ok: false, why: "模型返回的不是 JSON，没敢写进去" };
+    /* 名字 → id；只认名单里的名字，别让多出来的键混进库 */
+    const idOf = {};
+    members.forEach((m) => { idOf[m.name] = m.id; });
+    const next = {};
+    let n = 0;
+    Object.keys(obj).forEach((fromName) => {
+      const fromId = idOf[fromName];
+      if (!fromId || !obj[fromName] || typeof obj[fromName] !== "object") return;
+      const row = {};
+      Object.keys(obj[fromName]).forEach((toName) => {
+        const toId = idOf[toName];
+        if (!toId || toId === fromId) return;
+        const t = String(obj[fromName][toName] || "").trim().slice(0, 120);
+        if (t) { row[toId] = t; n++; }
+      });
+      if (Object.keys(row).length) next[fromId] = row;
+    });
+    if (!n) return { ok: false, why: "模型没给出任何有依据的印象" };
+    Store.updateSession(sid, { peerCog: next, peerCogTs: Date.now() });
+    return { ok: true, count: n };
+  }
+
+  /* 建议的「成员 → 线」：优先建群时记下的绑定，其次该角色的主线，最后是最近更新的一条线。
+     找不到返回空串（同步时跳过并汇报，绝不凭空建线）。 */
+  function lineOfMember(g, charId) {
+    const bind = (g && g.memberLine) || {};
+    if (bind[charId] && sessionById(bind[charId])) return bind[charId];
+    const list = Store.getSessions().filter((x) => !x.isGroup && (x.characterId || "") === charId);
+    if (!list.length) return "";
+    const main = list.filter((x) => x.mainLine)[0];
+    if (main) return main.id;
+    list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return list[0].id;
+  }
+
+  /* ── 同步到各自线（10-18 用户要求）──────────────
+     把「群聊自己的记忆」+「某角色对群里其他人的认知」写进那个角色名下那条线的记忆里。
+     写进 memory.days（而不是塞进 cognition 字段）：这样它跟这条线自己的日记一起
+     参与后续的周 / 月压缩，不会成为一段永远浮在外面的孤立文本。
+     每条都带主语（谁对谁），并注明来自哪个群 —— 否则压缩时会分不清是谁的经历。 */
+  async function syncGroupToLines(sid) {
+    const g = sessionById(sid);
+    if (!g || !g.isGroup) return { ok: false, why: "这不是群聊" };
+    const members = groupMembers(g);
+    if (!members.length) return { ok: false, why: "群成员是空的" };
+    const groupName = g.title || "群聊";
+    const groupMem = String((Memory.memoryText && Memory.memoryText(g.memory)) || "").trim();
+    const gShared = String(g.shared || "").trim();
+    const gScene = String(g.scene || "").trim();
+    if (!groupMem && !gShared && !gScene && !Object.keys(peerCogOf(g)).length) {
+      return { ok: false, why: "这个群还没有可同步的记忆（先聊几轮、或点一次「更新认知」）" };
+    }
+    const cog = peerCogOf(g);
+    /* 本地日期（和 memory.js 的日摘要同一个口径：YYYY-MM-DD） */
+    const nd = new Date();
+    const today = nd.getFullYear() + "-" + String(nd.getMonth() + 1).padStart(2, "0") + "-" + String(nd.getDate()).padStart(2, "0");
+    const done = [];
+    const skipped = [];
+    members.forEach((m) => {
+      const lineId = lineOfMember(g, m.id);
+      const line = lineId ? sessionById(lineId) : null;
+      if (!line) { skipped.push(m.name); return; }
+      const parts = [];
+      if (groupMem) parts.push("群聊里发生的事：" + groupMem);
+      if (gShared) parts.push("大家共同经历的：" + gShared);
+      if (gScene) parts.push("群聊的当前情境：" + gScene);
+      /* 这个角色对其它成员的看法：逐条写主语，绝不打散融成一段 */
+      const row = cog[m.id] || {};
+      const views = [];
+      members.forEach((o) => {
+        if (o.id === m.id) return;
+        const t = String(row[o.id] || "").trim();
+        if (t) views.push("他觉得「" + o.name + "」：" + t);
+      });
+      if (views.length) parts.push(m.name + "在群里的印象：" + views.join("；"));
+      if (!parts.length) { skipped.push(m.name); return; }
+      const text = "【来自群聊「" + groupName + "」的记忆】" + parts.join("\n");
+
+      const mem = line.memory ? JSON.parse(JSON.stringify(line.memory)) : { days: [], weeks: [], months: [], coveredUntil: 0 };
+      if (!Array.isArray(mem.days)) mem.days = [];
+      const hit = mem.days.find((d) => d && d.date === today);
+      if (hit) hit.summary = String(hit.summary || "") + "\n" + text;
+      else mem.days.push({ date: today, summary: text });
+      /* coveredUntil 不动：群聊这段不是这条线的原文，压低水位线会让它把原文再压一遍 */
+      Store.updateSession(line.id, { memory: mem });
+      done.push(m.name);
+    });
+    return { ok: done.length > 0, done: done, skipped: skipped };
+  }
+
+  /* ── 群聊 ─────────────────────────────────────────
+     一个会话可以是「群」：characterId 留空，成员放在 members。AI 每次回 1~3 位成员的话，
+     用「名字：内容」逐行输出，再由 splitSpeakerLines 拆成多条消息落库、分条渲染。 */
+  function groupMembers(s) {
+    const ids = (s && Array.isArray(s.members)) ? s.members : [];
+    if (!ids.length) return [];
+    const chars = Store.getCharacters();
+    const out = [];
+    ids.forEach((id) => {
+      const c = chars.find((x) => x.id === id);
+      if (c) out.push({ id: c.id, name: c.name || "角色" });
+    });
+    return out;
+  }
+
+  function buildGroupSystemText(s) {
+    const members = groupMembers(s);
+    if (!members.length) return "这是一场群聊，但还没有选成员。";
+    const chars = Store.getCharacters();
+    let t = "【群聊】你在一场多人群聊里，成员有：" + members.map((m) => m.name).join("、") + "。\n";
+    members.forEach((m) => {
+      const c = chars.find((x) => x.id === m.id);
+      const p = Memory.personaText ? Memory.personaText(c) : "";
+      t += "\n—— " + m.name + " ——\n" + (p || "（没有更多设定）") + "\n";
+    });
+    /* 各成员「自己记得的事」：建群时从某条线导进来的（见 app.js importLineMemoryToGroup）。
+       必须**分别标注、并说明只是本人知道** —— 否则 AI 会把 A 线的事当成全群共有的，
+       或者把别人的经历安到自己头上。 */
+    const mm = (s && s.memberMem) || null;
+    if (mm) {
+      const blocks = [];
+      Object.keys(mm).forEach(function (k) {
+        const rec = mm[k];
+        if (!rec) return;
+        const hit = chars.find(function (x) { return x.id === k; });
+        /* 标签优先用角色名；来源不是某个角色（助手会话 / 多人群）时改用来源线的标题 ——
+           否则会出现「助手（来自「周末局」）」这种自相矛盾的读法。 */
+        const nm = (hit && hit.name) || (rec.fromTitle || (k === "__assistant__" ? "助手" : "角色"));
+        const parts = [];
+        if (rec.relation) parts.push("和用户的关系：" + rec.relation);
+        if (rec.shared) parts.push("共同经历：" + rec.shared);
+        if (rec.scene) parts.push("最近的情境：" + rec.scene);
+        if (rec.cognition) parts.push("对用户的认知：" + rec.cognition);
+        /* 导入时还存了那条线自己的「日/周/月记忆摘要」（memberMem[k].memory）。
+           以前只注入了上面四项，摘要存下来却从没用上 —— 实测发现的（这位成员记得的
+           细节全丢了）。补进来，并按 400 字截断：多人同桌时别把 system 撑爆。 */
+        try {
+          const mt = (rec.memory && Memory.memoryText) ? String(Memory.memoryText(rec.memory) || "") : "";
+          if (mt) parts.push("还记得的细节（这条线自己的记忆摘要）：\n" + mt.slice(0, 400));
+        } catch (e) { /* 摘要读不出来不影响其它四项 */ }
+        if (parts.length) {
+          blocks.push("—— " + nm + "（来自「" + (rec.fromTitle || "另一条线") + "」）——\n" + parts.join("\n"));
+        }
+      });
+      if (blocks.length) {
+        t += "\n【各人自己记得的事】下面每一条都只是**那位成员自己**知道的私下经历，不是全群共有的；" +
+          "谁的事只能由谁提起，不要安到别人头上，也不要当成大家都经历过。\n" + blocks.join("\n") + "\n";
+      }
+    }
+    if (s && s.scene) t += "\n【当前情境】\n" + s.scene + "\n";
+    if (s && s.shared) t += "\n【共同经历】\n" + s.shared + "\n";
+    const mt = Memory.memoryText ? Memory.memoryText(s && s.memory) : "";
+    if (mt) t += "\n【群聊记忆】\n" + mt + "\n";
+    /* 彼此认知（默认关，设置里打开才注入）：逐条带主语，见 peerCogText 的注释 */
+    if (peerCogOn(s)) {
+      const pc = peerCogText(s);
+      if (pc) t += pc;
+    }
+    t += "\n【发言规则】每次回复让 1~3 位成员发言（谁说话、说几句，由你按各自性格决定，可以有人不说话）。" +
+      "每条发言单独一行、用「名字：内容」开头，例如：\n小明：在啊\n小红：刚下课。\n" +
+      "名字必须是上面列出的成员名。不要写旁白、不要括号动作、不要替用户说话、不要用 Markdown。" +
+      "\n【转述别人】要提到不在群里的人（老师、店员、路人…），**不要单独起一行写他的名字** —— " +
+      "那样我们只能当引述处理、并进后面那位成员的话里。请直接写进你自己那行，例如「小明：老师让我先安静点」。";
+    return t;
+  }
+
+  /* 把「名字：内容」拆成 [{id,name,text}]。规则（10-17 用户拍板）：
+     ① 群里完全可以只有一个人说话（提示词里明写「可以有人不说话」）。这种时候只要
+        **第一行确实写了某个成员的名字**，也照样拆 —— 否则气泡里是「阿杰：就一句」这种
+        原文，既没有说话人标签、也和其它气泡不是一个样式。
+        但第一行压根没按格式来（模型直接写了段旁白）→ 整条保持原样，
+        别把一整段硬挂到某个人头上。
+     ② 冒出不在名单里的名字（「老师：你们安静点」）当**引述**处理：它不是发言，
+        并进**后面**那位成员的话里（用户口径：引述本质上还是那个人在引述），
+        并改写成「（引述「老师」：你们安静点）」—— 带上标记，模型才不会当成他本人说的。
+        已经有人开口之后又冒出陌生名字 → 并进上一位发言人的话里，同一规则。 */
+  function quoteLine(ln, byName) {
+    const q = /^\s*[（(【\[]?\s*([^\s：:）)】\]]{1,20})\s*[：:]\s*([\s\S]+?)\s*[）)】\]]?\s*$/.exec(ln);
+    if (q && !byName[q[1]]) return "（引述「" + q[1] + "」：" + q[2] + "）";
+    return ln;   /* 没有「名字：」那种结构的普通旁白：原文留着 */
+  }
+
+  function splitSpeakerLines(text, members) {
+    if (!members || members.length < 2) return null;
+    const byName = {};
+    members.forEach((m) => { byName[m.name] = m; });
+    const lines = String(text || "").split(/\r?\n/);
+    const segs = [];
+    let cur = null;
+    let namedFirst = false;   /* 第一行是不是就写了成员名 */
+    let pre = "";             /* 还没人开口时先冒出来的引述，等下一位发言人认领 */
+
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i];
+      const m = /^\s*([^\s：:]{1,20})\s*[：:]\s*([\s\S]*)$/.exec(ln);
+      const hit = m ? byName[m[1]] : null;
+      if (hit) {
+        if (!cur) namedFirst = true;
+        else segs.push(cur);
+        cur = { id: hit.id, name: hit.name, text: m[2] };
+        /* 开场就出现的引述：并进这位发言人的话里 */
+        if (pre) { cur.text = pre + "\n" + cur.text; pre = ""; }
+      } else if (cur) {
+        cur.text += (cur.text ? "\n" : "") + quoteLine(ln, byName);
+      } else if (String(ln).trim()) {
+        pre += (pre ? "\n" : "") + quoteLine(ln, byName);
+      }
+    }
+    if (cur) segs.push(cur);
+    /* 一路都没出现任何成员名 → 整段兜底记在第一位成员名下，别把这段话弄丢 */
+    if (!cur && pre) segs.push({ id: members[0].id, name: members[0].name, text: pre });
+    segs.forEach((x) => { x.text = String(x.text || "").trim(); });
+    const kept = segs.filter((x) => x.text);
+    if (kept.length >= 2) return kept;
+    if (kept.length === 1 && namedFirst) return kept;   /* 只有一人说话：也拆，挂上说话人 */
+    return null;
+  }
+
   async function buildModelMessages(s, upto) {
     const msgs = [];
     if (s && sweepImageExpiry(s)) Store.saveSessions(Store.getSessions());
@@ -430,8 +823,16 @@
     let coveredUntil = 0;
     let systemText = "";
     let washedFrom = 0, washedUntil = 0, washedTurns = null;
-    if (ch) {
+    if (s && s.isGroup) {
+      /* 群聊：没有「单个角色」，system 由全体成员设定 + 群记忆拼出来 */
+      await ensureMemoryReady();
+      systemText = buildGroupSystemText(s);
+      const extra2 = s && typeof s.systemPrompt === "string" ? s.systemPrompt.trim() : "";
+      if (extra2) systemText += "\n\n【补充指令】\n" + extra2;
+      coveredUntil = (s && s.memory && s.memory.coveredUntil) || 0;
+    } else if (ch) {
       /* 角色扮演：角色卡 + 我的设定 + 关系/场景/认知/记忆（都按当前会话） */
+      await ensureMemoryReady();
       systemText = Memory.buildSystemText(ch, s, state.settings);
       const extra = s && typeof s.systemPrompt === "string" ? s.systemPrompt.trim() : "";
       if (extra) systemText += "\n\n【补充指令】\n" + extra;
@@ -447,11 +848,41 @@
       const own = s && typeof s.systemPrompt === "string" ? s.systemPrompt.trim() : "";
       systemText = own || state.settings.systemPrompt;
       if (state.settings.assistantCompress) {
+        await ensureMemoryReady();
         const mt = Memory.memoryText(s && s.memory);
         if (mt) systemText += "\n\n【记忆摘要】\n" + mt;
         coveredUntil = (s && s.memory && s.memory.coveredUntil) || 0;
       }
     }
+    /* 情绪日记（用户主动写过才生效）：当作「希望角色往哪儿靠」的软引导，附在设定之后。
+       只喂最近 3 条，且明确要求别把日记内容说出来。 */
+    if (ch && s && Array.isArray(s.diary) && s.diary.length) {
+      const dj = s.diary.slice(-3).map((d) => String((d && d.text) || "").trim()).filter(Boolean).join("；");
+      if (dj) systemText += "\n\n【我的情绪日记（只供你体会氛围，请自然地朝这个方向靠，别直接提起日记本身）】\n" + dj;
+    }
+
+    /* 状态量化：让模型在末尾附一行状态，本地解析出来后收进折叠框（不显示在正文里）。
+       开关关掉时一个字都不加 —— 不花多余 token。 */
+    if (ch && statusOn(s)) {
+      systemText += "\n\n【状态】在本次回复的最后单独一行输出你的状态，格式：" +
+        "〖状态 开心:72 低落:12 生气:5 害羞:40 兴奋:60〗（每项是 0~100 的整数，按此刻真实情况给，" +
+        "可增删项）。这一行会被单独解析出来、以状态条展示，请务必不要写进正文里。" +
+        "括号就用这对方头括号〖〗，别换成【】或 []；键和值之间用英文冒号，各项之间用空格。";
+    }
+
+    /* 「采用格式」：本会话单独设了就用它，否则用「设置」里的全局。追加到最后，
+       让模型把它当输出格式约束（它不是角色设定的一部分，放在末尾更醒目）。 */
+    const fmt = ((s && typeof s.adoptFormat === "string" && s.adoptFormat.trim()) || (state.settings.adoptFormat || "")).trim();
+    if (fmt) systemText += (systemText && systemText.trim() ? "\n\n" : "") + "【采用格式】\n" + fmt;
+
+    /* 这条线单独起的昵称（手机页「这条线」里设的）：告诉模型该怎么称呼用户。
+       留空就什么都不加，用角色卡里写的称呼方式。 */
+    const nickMe = (s && typeof s.nickMe === "string") ? s.nickMe.trim() : "";
+    if (nickMe) {
+      systemText += (systemText && systemText.trim() ? "\n\n" : "") +
+        "【称呼】在这条对话里，用户希望你叫他「" + nickMe + "」。";
+    }
+
     /* 用户以中文为主 → 要求思考也说中文。查「最后一条用户消息」，
        注意只用它判定语言，不改变任何已存内容。 */
     const _all = (s && s.messages) || [];
@@ -510,7 +941,11 @@
         }
       } else if (m.role === "assistant") {
         const c = (activeVariant(m) || {}).content;
-        if (c) msgs.push({ role: "assistant", content: c });
+        if (c) {
+          /* 群聊：把「谁说的」带回上下文，模型才接得住话 */
+          const sp = m.speakerName ? m.speakerName + "：" : "";
+          msgs.push({ role: "assistant", content: sp + c });
+        }
       }
     }
     return msgs;
@@ -518,6 +953,31 @@
 
   /* 「只出了思考、没出正文」时补问一次的纠正语。只加在**请求里**，不写进会话记录。 */
   const EMPTY_NUDGE = "（上一轮你只输出了思考过程，没有输出回答正文。请直接给出回答正文。）";
+
+  /* 状态量化：本会话单独设了就用它，否则跟全局（默认开）。关掉时一个 token 都不多花。 */
+  function statusOn(s) {
+    if (typeof (s && s.statusQuant) === "boolean") return s.statusQuant;
+    return state.settings.statusQuant !== false;
+  }
+  /* 从正文里抽出状态行。没写 / 解析不出来 → 原样返回。
+     容错（10-18 真机反馈「大部分时候失灵」）：模型不一定老老实实用〖〗，
+     还会写成【状态】、【状态】、[状态]、［状态］，或者干脆只在行首写「状态：」，
+     键值之间也可能用 = 而不是冒号、数值后面带 %。这几种全认。 */
+  function extractStatus(text) {
+    const src = String(text || "");
+    const m = /[〖【\[［]\s*状态\s*[：:]?\s*([^〗】\]］]*)[〗】\]］]/.exec(src)
+      || /(?:^|\n)[ \t]*状态[ \t]*[：:][ \t]*([^\n]+)/.exec(src);
+    if (!m) return { content: src, status: null };
+    const st = {};
+    m[1].split(/[\s,，;；|/、]+/).filter(Boolean).forEach((seg) => {
+      const kv = /^([^:：=]+)[:：=]\s*(-?\d+(?:\.\d+)?)\s*%?$/.exec(seg);
+      if (!kv) return;
+      st[kv[1].trim()] = Math.max(0, Math.min(100, Math.round(Number(kv[2]))));
+    });
+    if (!Object.keys(st).length) return { content: src, status: null };
+    const content = src.replace(m[0], "").replace(/\n{3,}/g, "\n\n").trim();
+    return { content: content, status: st };
+  }
 
   /* 转向 api.js 的切分（把思考里混着的正文提出来）。api.js 没就绪时退化成「不切」，
      绝不能因为一个工具函数把整条回答拖进 catch。 */
@@ -540,6 +1000,57 @@
     };
   }
 
+  /* 群聊回复拆条：把刚生成、位于末尾的那条助手消息按「名字：内容」拆成多条。
+     只处理「新生成 + 末尾」这一种，其它情况原样返回 —— 拆分不影响任何已有消息的下标。
+     返回拆完后最后一条节点（后面朗读之类要用）。 */
+  function splitGroupReply(sid, el, opts) {
+    try {
+      const s = sessionById(sid);
+      if (!s || !s.isGroup || !el) return el;
+      if (opts && typeof opts.variantIndex === "number") return el;   /* 重生成不拆，保持一条 */
+      const idx = el.__idx;
+      if (typeof idx !== "number") return el;
+      const members = groupMembers(s);
+      if (members.length < 2) return el;
+      const msg = s.messages[idx];
+      if (!msg || msg.role !== "assistant") return el;
+      const segs = splitSpeakerLines((activeVariant(msg) || {}).content, members);
+      if (!segs) return el;                                            /* 没拆出多人 → 保持一条 */
+      const list = Store.getSessions();
+      const si = list.findIndex((x) => x.id === sid);
+      if (si < 0) return el;
+      const msgs = list[si].messages;
+      if (idx !== msgs.length - 1) return el;                          /* 只拆末尾那条 */
+      const base = msg.ts || Date.now();
+      const q = opts && typeof opts.q === "number" ? opts.q : 0;
+      const repl = segs.map((sg, i) => ({
+        role: "assistant",
+        ts: base + i,
+        speaker: sg.id,
+        speakerName: sg.name,
+        content: sg.text,
+        variants: [{ content: sg.text, q: q }],
+        vi: 0
+      }));
+      msgs.splice(idx, 1);
+      for (let i = 0; i < repl.length; i++) msgs.push(repl[i]);
+      Store.saveSessions(list);
+      if (sid !== state.sessionId) { el.remove(); return null; }
+      /* 就地换掉那一条 → 变成好几条（不整列重建，避免打断别的东西） */
+      const box = $("#messages");
+      const s2 = sessionById(sid);
+      const anchor = el.nextSibling;
+      const nodes = repl.map((m, i) => {
+        const n = UI.msgEl(toView(m), s2);
+        n.__idx = idx + i;
+        return n;
+      });
+      nodes.forEach((n) => box.insertBefore(n, anchor));
+      el.remove();
+      return nodes[nodes.length - 1] || el;
+    } catch (e) { return el; }
+  }
+
   /* 生成一个 AI 回答版本。opts: { variantIndex?, upto?, q? }
      - variantIndex：新版本追加到这条助手消息上（不传则追加一条新助手消息）
      - upto：构建上下文时只取到第 upto 条（不含）
@@ -559,6 +1070,7 @@
     UI.scrollToBottom();
 
     setBusy(true);
+    syncContinueRow();          /* 生成中把「继续说」收掉，免得点第二遍 */
     state.abort = new AbortController();
     const snap = sessionById(sid);
     if (!snap) {
@@ -583,6 +1095,7 @@
           content: final.content,
           reasoning: final.reasoning,
           sources: final.sources,
+          status: final.status || null,
           q: typeof o.q === "number" ? o.q : 0
         };
         if (errorText) variant.error = errorText;
@@ -595,7 +1108,15 @@
           m.vi = m.variants.length - 1;
           idx = o.variantIndex;
         } else {
-          msgs.push({ role: "assistant", ts: Date.now(), variants: [variant], vi: 0 });
+          const nm = { role: "assistant", ts: Date.now(), variants: [variant], vi: 0 };
+          /* 指定某人继续说：直接挂到他名下，气泡才带名字标签；
+             模型多半仍按「名字：内容」输出，落库前把前缀剥掉（名字已经在 speakerName 里）。 */
+          if (o.forceSpeaker && o.forceSpeaker.name) {
+            nm.speaker = o.forceSpeaker.id || "";
+            nm.speakerName = o.forceSpeaker.name;
+            variant.content = stripSpeakerPrefix(variant.content, o.forceSpeaker.name);
+          }
+          msgs.push(nm);
           idx = msgs.length - 1;
         }
       });
@@ -628,6 +1149,13 @@
 
     try {
       const messages = await buildModelMessages(snap, o.upto);
+      /* 「继续说」：临时补一句指令，让模型接着上一句往下讲。
+         **只加在这一次请求里**，不落库 —— 历史里不会多出一条假消息。
+         群聊里带 forceSpeaker 时，指令换成「只由他一个人说」。 */
+      if (o.cont) {
+        const fs2 = o.forceSpeaker;
+        messages.push({ role: "user", content: (fs2 && fs2.name) ? continueNudgeOne(fs2.name) : CONTINUE_NUDGE });
+      }
       /* 兜底：接口模块真的没加载（打包漏了 api.js）时给一句能看懂的话，
          而不是抛出「Cannot read property 'run' of undefined」这种没法定位的错。 */
       if (!Api || typeof Api.run !== "function") {
@@ -706,8 +1234,16 @@
          生成过程中它先显示在思考框里，提交后回到正文区 —— 这才是它该待的地方。 */
       const sp = splitReasoning(fin.content, fin.reasoning);
       if (sp.split) { fin.content = sp.content; fin.reasoning = sp.reasoning; }
+      /* 状态量化：把末尾那行状态抽出来交给折叠框，正文里不留痕迹 */
+      if (statusOn(snap)) {
+        const ex = extractStatus(fin.content);
+        if (ex.status) { fin.status = ex.status; fin.content = ex.content; }
+      }
       if (finish === "length") fin.truncated = true;
-      const el = commit(fin, null);
+      let el = commit(fin, null);
+      /* 群聊：AI 一次可能让好几个人说话，拆成多条气泡（非群聊是空操作）。
+         指定某人继续说时不拆 —— 他已经挂在那个人名下了，再拆会把内容再分一遍。 */
+      if (!o.forceSpeaker) el = splitGroupReply(sid, el, o);
       if (result && result.usage && typeof recordUsage === "function") recordUsage(sid, result.usage, snap.characterId);
       const cs = sessionById(sid);
       if (cs) {
@@ -716,6 +1252,7 @@
            别让「生成完顺手做的事」把整条回答拖进 catch。 */
         if (cx && typeof maybeAutoWash === "function") maybeAutoWash(cs, cx);
         if (cx && typeof maybeAutoScene === "function") maybeAutoScene(cs, cx);
+        if (cx && typeof maybeDailyRefresh === "function") maybeDailyRefresh(cs, cx);
         if (typeof maybeAutoBackup === "function") maybeAutoBackup(cs, "gen");
       }
       if (el && state.settings.ttsAutoRead && Media.capable("tts", state.settings)) {
@@ -735,6 +1272,8 @@
       setBusy(false);
       state.abort = null;
       if (state.streamEl === view.el) { state.streamEl = null; state.streamSid = ""; }
+      syncContinueRow();        /* 生成结束，把「继续说」挂回最后一条角色消息下面 */
+      syncRegenRow();           /* 生成结束后「最后一条」变了，「重新说」跟着挪过去 */
       /* 这里**不**再滚到底：提交那一刻已经按用户的位置决定过要不要跟了 */
     }
   }
@@ -753,6 +1292,16 @@
 
     if (!text && !state.attachments.length) return;
 
+    /* 角色相关字段没填齐 → 先别发（用户口径：格式化 / 关于「我」的几栏 / AI 筛选规则 / 对话名称不参与）。
+       拦在「发消息」这一步、而不是进对话时：否则字段不全的老对话会直接打不开。 */
+    const curSes = (window.DL && window.DL.session) ? window.DL.session() : null;
+    const missF = (window.DL && window.DL.charMissingFields) ? window.DL.charMissingFields(curSes) : [];
+    if (missF.length) {
+      UI.toast("这个角色还差 " + missF.length + " 栏设定才能开始对话：" + missF.slice(0, 3).join("、") + (missF.length > 3 ? "…" : ""), true);
+      setTimeout(function () { try { UI.openModal("characterModal"); } catch (e) { /* ignore */ } }, 80);
+      return;
+    }
+
     if (!state.settings.apiKey) {
       UI.toast("请先在「设置」里填写 API Key", true);
       UI.openModal("settingsModal");
@@ -762,6 +1311,23 @@
     let s = session();
     if (!s) { newSession(); s = session(); }
     const sid = s.id;
+
+    /* 括号里的时间指令：（第二天）「（到了约定时间）」这种，先把故事时间推过去。
+       越出角色设定（出生日期 + 年龄算出的时段）就**拒绝并说清原因**，绝不悄悄设成不可能的日期。 */
+    try {
+      const jr = (Memory && Memory.tryJumpTime) ? Memory.tryJumpTime(s, characterFor(s), text) : null;
+      if (jr && jr.ok) {
+        const tl = Store.getSessions();
+        const k = tl.findIndex((x) => x.id === sid);
+        if (k >= 0) { tl[k].time = { start: jr.ms, setAt: Date.now() }; Store.saveSessions(tl); }
+        if (window.DL && window.DL.syncChatClock) window.DL.syncChatClock();
+        UI.toast("时间推进到 " + Memory.fmtStory(jr.ms) + "（" + jr.label + "）");
+      } else if (jr) {
+        UI.toast("时间没动：这会超出角色设定的时段（只能在 " +
+          Memory.fmtStory(jr.from).slice(0, 10) + " ~ " + Memory.fmtStory(jr.to).slice(0, 10) +
+          " 之间）。想改就调整角色的年龄或出生日期。", true);
+      }
+    } catch (e) { /* 时间调整失败不影响发消息 */ }
 
     const userMsg = {
       role: "user",
@@ -777,9 +1343,12 @@
       state.settings = Store.saveSettings({ imgExpireNotified: true });
       UI.toast("提示：图片会在 " + (state.settings.imgExpireTurns || 10) + " 轮后删除原图、只留文字描述（可在「设置 → 图片」里调整或关闭）");
     }
-    const title = s.messages.some((m) => m.role === "user")
+    /* 群聊不拿第一句话当标题 —— 群名是建群时定的，不能被一句消息顶掉 */
+    const title = (s && s.isGroup)
       ? ""
-      : (text || (userMsg.attachments[0] && userMsg.attachments[0].name) || "新对话").slice(0, 20);
+      : (s.messages.some((m) => m.role === "user")
+        ? ""
+        : (text || (userMsg.attachments[0] && userMsg.attachments[0].name) || "新对话").slice(0, 20));
     appendMessage(sid, userMsg, title);
     input.value = "";
     autoResize();
@@ -871,8 +1440,14 @@
       view = { role: "user", content: vs[vi], attachments: m.attachments };
     } else {
       const v = vs[vi] || {};
-      view = { role: "assistant", content: v.content, reasoning: v.reasoning, sources: v.sources, error: v.error, trunc: v.trunc, image: m.image, imageDesc: m.imageDesc };
+      view = { role: "assistant", content: v.content, reasoning: v.reasoning, sources: v.sources, error: v.error, trunc: v.trunc, image: m.image, imageDesc: m.imageDesc,
+        /* 群聊：这条是谁说的（单聊会话里恒为空，等于没加） */
+        speaker: m.speaker, speakerName: m.speakerName,
+        /* 状态量化：本条的状态数值（没开 / 没解析出来时为 null） */
+        status: v.status || null };
     }
+    view.world = !!m.world;      /* 剧情卡：渲染成居中的卡片，不当气泡 */
+    view.offline = !!m.offline;  /* 双线：手机那一轮对应的「线下侧写」，渲染成旁白 */
     view.variantCount = vs.length;
     view.variantIndex = vi;
     return view;
@@ -944,6 +1519,39 @@
     if (action === "search") { searchMessage(i); return; }
     if (action === "regen") { regenerateAt(i); return; }
     if (action === "delete") { openDeleteDialog([i]); return; }
+    if (action === "rollback") { rollbackTo(i); return; }
+  }
+
+  /* ── 回溯到该时间点（10-16 用户要求）──────────────────
+     把故事时间拨回这条消息所在的时刻，并**丢弃它之后的消息**（用户口径）。
+     同时把记忆水位线压低 —— 否则压缩会认为「这段时间已经总结过」，新内容永远进不了记忆。 */
+  async function rollbackTo(i) {
+    const s = session();
+    if (!s) return;
+    const msg = s.messages[i];
+    if (!msg) return;
+    const M = window.Memory;
+    if (!M || !M.hasTimeline(s)) { UI.toast("这条对话没开时间系统，回溯用不了", true); return; }
+    const t = s.time;
+    const offset = t.start - t.setAt;
+    const base = (typeof msg.ts === "number" && msg.ts > 0) ? msg.ts : Date.now();
+    const target = base + offset;
+    const after = s.messages.length - (i + 1);
+    const ok = await UI.confirmDialog("回溯到此刻",
+      "故事时间会回到 " + M.fmtStory(target) + "，" + (after > 0 ? ("这条之后的 " + after + " 条消息会被丢弃") : "这条已经是最后一条") + "。丢弃后不可恢复，确定吗？");
+    if (!ok) return;
+    const keep = s.messages.slice(0, i + 1);
+    let mem = s.memory;
+    if (mem && typeof mem.coveredUntil === "number" && mem.coveredUntil > target) {
+      mem = Object.assign({}, mem, { coveredUntil: target });
+    }
+    Store.updateSession(s.id, {
+      messages: keep,
+      time: { start: target, setAt: Date.now(), marker: "回溯", markerAt: Date.now() },
+      memory: mem || s.memory
+    });
+    UI.toast("已回溯到 " + M.fmtStory(target));
+    if (window.DL.renderAll) window.DL.renderAll();
   }
 
   function openMessageMenu(i) {
@@ -1040,7 +1648,12 @@
     }
     const el = msgElAt(ctx.index);
     const c = el ? el.querySelector(".content") : null;
-    if (c) c.innerHTML = UI.renderMarkdown(val);
+    if (c) {
+      c.innerHTML = UI.renderMarkdown(val);
+      /* 正常渲染路径会给「（…）」旁白染灰；这里是就地改 innerHTML，不补一次就会丢灰化，
+         要等下次整列重建才恢复。 */
+      try { UI.grayParens(c); } catch (e) { /* 灰化失败不影响正文 */ }
+    }
     else renderMessages();
   }
 
@@ -1176,11 +1789,24 @@
     });
     UI.closeModal("deleteModal");
     if (!count) { UI.toast("没有勾选任何消息"); return; }
+    const gonePhone = [];   /* 被删的那些主聊天消息，有没有绑定手机消息 */
     mutateMessages((msgs) => {
-      const kept = msgs.filter((m, idx) => !del[idx]);
+      const kept = msgs.filter((m, idx) => {
+        if (!del[idx]) return true;
+        if (m && m.phoneMsgId) gonePhone.push(String(m.phoneMsgId));
+        return false;
+      });
       msgs.length = 0;
       kept.forEach((m) => msgs.push(m));
     });
+    /* 两边是同一次对话的两面：主聊天这条删了，手机里那条也一起没（10-18 用户要求） */
+    if (gonePhone.length) {
+      const s = session();
+      if (s && s.phone && Array.isArray(s.phone.msgs)) {
+        s.phone.msgs = s.phone.msgs.filter((pm) => !pm || gonePhone.indexOf(String(pm.id || "")) < 0);
+        Store.saveSessions(Store.getSessions());
+      }
+    }
     renderAll();
     UI.toast("已删除 " + count + " 条消息");
   }
@@ -1208,7 +1834,7 @@
         fired = true;
         if (el.__msg.role === "assistant") enterSelect(el.__idx);
         else openMessageMenu(el.__idx);
-      }, 500);
+      }, 480);   /* 与会话列表的长按阈值（ui.js 里的 480）统一，同一 App 不再两套手感 */
     }, { passive: true });
 
     box.addEventListener("touchmove", (e) => {
@@ -1243,6 +1869,19 @@
           e.stopPropagation();
           toggleSelect(el.__idx);
         }
+        return;
+      }
+      const wc = e.target.closest ? e.target.closest("[data-world-view]") : null;
+      if (wc) {
+        const wEl = wc.closest(".msg");
+        if (wEl && typeof wEl.__idx === "number") { e.preventDefault(); openWorldView(wEl.__idx); }
+        return;
+      }
+      const cbtn = e.target.closest ? e.target.closest('[data-act="cont"]') : null;
+      if (cbtn) {
+        e.preventDefault();
+        const cEl = cbtn.closest(".msg");
+        continueFrom(cEl && typeof cEl.__idx === "number" ? cEl.__idx : -1);
         return;
       }
       const vb = e.target.closest ? e.target.closest(".variant-btn") : null;
@@ -1334,7 +1973,7 @@
     return out;
   }
 
-  function runHistorySearch() {
+  async function runHistorySearch() {
     const mode = state.histMode;
     const kw = $v("#histKeyword").trim();
     const from = parseDateStart($v("#histFrom"));
@@ -1343,18 +1982,30 @@
     if ((mode === "time" || mode === "both") && from === null && to === null) { UI.toast("请选择时间范围", true); return; }
 
     const out = [];
-    Store.getSessions().forEach((s) => {
-      s.messages.forEach((m, i) => {
-        if (!activeText(m)) return;
+    const kwLow = kw.toLowerCase();
+    const sessions = Store.getSessions();
+    const box = $("#histResults");
+    if (box) box.innerHTML = '<div class="hist-empty">正在搜索…</div>';
+    /* 分片扫描：原来是一次性同步遍历「所有会话的所有消息」，消息一多界面就卡住一下。
+       现在每扫完 4 条会话就让出一次主线程（setTimeout 0），结果与原来完全一致，
+       只是把长任务拆开跑。activeText(m) 也从「每条调两次」收敛成一次。 */
+    for (let si = 0; si < sessions.length; si++) {
+      const s = sessions[si];
+      const msgs = s.messages || [];
+      for (let i = 0; i < msgs.length; i++) {
+        const m = msgs[i];
+        const text = activeText(m);
+        if (!text) continue;
         if (mode !== "content") {
-          if (typeof m.ts !== "number") return;
-          if (from !== null && m.ts < from) return;
-          if (to !== null && m.ts > to) return;
+          if (typeof m.ts !== "number") continue;
+          if (from !== null && m.ts < from) continue;
+          if (to !== null && m.ts > to) continue;
         }
-        if ((mode === "content" || mode === "both") && activeText(m).toLowerCase().indexOf(kw.toLowerCase()) < 0) return;
-        out.push({ sessionId: s.id, title: s.title || "新对话", index: i, role: m.role, ts: m.ts, content: activeText(m) });
-      });
-    });
+        if ((mode === "content" || mode === "both") && text.toLowerCase().indexOf(kwLow) < 0) continue;
+        out.push({ sessionId: s.id, title: s.title || "新对话", index: i, role: m.role, ts: m.ts, content: text });
+      }
+      if (si % 4 === 3) await new Promise(function (r) { setTimeout(r, 0); });
+    }
     out.sort((a, b) => (b.ts || 0) - (a.ts || 0));
     renderHistResults(out, kw, mode);
   }
@@ -1425,6 +2076,320 @@
     UI.openModal("searchModal");
   }
 
+  /* ── 快捷回复：AI 站在「我」的立场给出几条可回的话 ─────────────────
+     面板与软键盘互斥（需求原文）：
+       · 键盘在时点快捷回复 → 收键盘、弹面板（面板占住键盘原来的位置）
+       · 面板在时点输入框   → 收面板、起键盘
+     每批 4 条，一次打开最多换 5 批；每条左边的「修改」把它填进输入框并唤起键盘。 */
+  var QUICK_MAX = 5;
+  var QUICK_N = 4;
+  var quick = { open: false, batch: 0, busy: false, items: [], sid: "" };
+
+  function quickSysText(s) {
+    const ch = characterFor(s);
+    let sys = "";
+    if (s && s.isGroup) sys = buildGroupSystemText(s);
+    else if (ch) sys = Memory.buildSystemText(ch, s, state.settings);
+    else sys = ((s && typeof s.systemPrompt === "string" && s.systemPrompt.trim()) || state.settings.systemPrompt || "");
+    const fmt = ((s && typeof s.adoptFormat === "string" && s.adoptFormat.trim()) || (state.settings.adoptFormat || "")).trim();
+    if (fmt) sys += "\n\n【采用格式】\n" + fmt;
+    sys += "\n\n【现在的任务】换个身份：你是「我」（用户本人）的台词助手，不是角色。" +
+      "请站在「我」的立场，写出 " + QUICK_N + " 条「我这时可以怎么回」的候选台词。硬性要求：" +
+      "① 贴合「我」的设定，以及此刻关系的亲疏（别突然说越界的话，也别突然变得冷淡）；" +
+      "② 必须接得住最后那条消息，前后逻辑与物理场景连贯（时间、地点、在场的人、手上的东西别对不上）；" +
+      "③ 绝不 OOC、不替角色说话、不写旁白、不用括号动作、不用 Markdown、不自称 AI；" +
+      "④ " + QUICK_N + " 条要有明显差异（态度、角度、情绪走向各不相同），不要只换几个词；" +
+      "⑤ 口语、简短，一般一两句，长短也要拉开一点。\n" +
+      "只输出 " + QUICK_N + " 行，每行以「- 」开头，不要编号、不要解释、不要任何其它文字。";
+    return sys;
+  }
+
+  function quickContextText(s) {
+    const covered = (s && s.memory && s.memory.coveredUntil) || 0;
+    let t = "";
+    const mt = Memory.memoryText ? Memory.memoryText(s && s.memory) : "";
+    if (mt) t += "【记忆摘要】\n" + mt + "\n";
+    const rt = Memory.recentTranscript ? Memory.recentTranscript((s && s.messages) || [], covered, 24, s) : "";
+    if (rt) t += "\n【最近的对话】\n" + rt;
+    return t || "（你们还没聊过什么）";
+  }
+
+  /* 一行一条；容忍「- 」「1. 」「1、」等前缀，空行与纯标点行丢掉 */
+  function parseQuickLines(text) {
+    const out = [];
+    String(text || "").split(/\r?\n/).forEach((ln) => {
+      let t = String(ln).trim();
+      if (!t) return;
+      t = t.replace(/^\s*[-*•]\s*/, "").replace(/^\s*\d+\s*[.、)）]\s*/, "").trim();
+      if (!t) return;
+      if (/^[（(【\[]/.test(t) && t.length <= 4) return;
+      out.push(t);
+    });
+    return out.slice(0, QUICK_N);
+  }
+
+  function quickRender() {
+    const box = $("#qpList");
+    if (!box) return;
+    box.innerHTML = "";
+    if (quick.busy) {
+      const d = document.createElement("div");
+      d.className = "qp-hint";
+      d.textContent = "正在想几条回复…";
+      box.appendChild(d);
+      setText("#qpCount", "");
+      setDisabled("#qpRefresh", true);
+      return;
+    }
+    if (!quick.items.length) {
+      const d = document.createElement("div");
+      d.className = "qp-hint";
+      d.textContent = "没生成出内容，点「换一批」再试试。";
+      box.appendChild(d);
+    }
+    quick.items.forEach((t, i) => {
+      const row = document.createElement("div");
+      row.className = "qp-item";
+      const eb = document.createElement("button");
+      eb.type = "button";
+      eb.className = "qp-edit";
+      eb.innerHTML = UI.iconSvg("pencil-outline");
+      eb.setAttribute("aria-label", "改一下再发");
+      eb.title = "改一下再发";
+      eb.addEventListener("click", () => quickUse(i));
+      const tx = document.createElement("div");
+      tx.className = "qp-text";
+      tx.textContent = t;
+      tx.addEventListener("click", () => quickUse(i));   /* 点正文同样填进输入框（不自动发） */
+      row.appendChild(eb);
+      row.appendChild(tx);
+      box.appendChild(row);
+    });
+    const left = Math.max(0, QUICK_MAX - quick.batch);
+    setText("#qpCount", quick.batch ? ("已生成 " + quick.batch + " 批 · 还能换 " + left + " 次") : "");
+    setDisabled("#qpRefresh", quick.batch >= QUICK_MAX);
+  }
+
+  async function quickGen() {
+    if (quick.busy) return;
+    /* 生成中不允许再开一批：本文件其它入口（resendAt / regenerateAt / searchMessage）
+       都有这层守卫，这里以前漏了 —— 生成中点「换一批」会并发打第二次接口。 */
+    if (state.busy) { UI.toast("正在生成中，等这轮结束再换一批", true); return; }
+    const s = session();
+    if (!s) { UI.toast("先打开一个对话", true); return; }
+    if (!state.settings.apiKey) { UI.toast("请先在「设置」里填写 API Key", true); return; }
+    if (quick.batch >= QUICK_MAX) { UI.toast("这批已经换满 5 批了，先挑一条或关掉重开", true); return; }
+    quick.busy = true;
+    quick.items = [];
+    quickRender();
+    try {
+      await ensureMemoryReady();
+      if (!Api || typeof Api.summarize !== "function") throw new Error("接口模块 api.js 没有加载成功");
+      const res = await Api.summarize(state.settings, [
+        { role: "system", content: quickSysText(s) },
+        { role: "user", content: quickContextText(s) }
+      ], { maxTokens: 600 });
+      if (res && res.usage && typeof recordUsage === "function") recordUsage(s.id, res.usage, s.characterId, "quickreply");
+      quick.items = parseQuickLines((res && res.text) || "");
+      if (quick.items.length) { quick.batch++; quick.sid = s.id; }
+      else UI.toast("这次没生成出内容，再点一次「换一批」", true);
+    } catch (e) {
+      UI.toast("生成失败：" + (e && e.message ? e.message : e), true);
+    } finally {
+      quick.busy = false;
+      quickRender();
+    }
+  }
+
+  /* 这条线有没有记忆可用（日 / 周 / 月摘要任一非空）。
+     用户口径：**没有记忆就不给点快捷回复** —— 它要站在「你们之间发生过什么」上
+     才接得住话，空记忆生成出来的都是泛泛而谈的废话。 */
+  function hasAnyMemory(s) {
+    try {
+      const m = (Memory && Memory.ensureMemory) ? Memory.ensureMemory(s) : (s && s.memory);
+      if (!m) return false;
+      return !!((m.days && m.days.length) || (m.weeks && m.weeks.length) || (m.months && m.months.length));
+    } catch (e) { return false; }
+  }
+
+  function quickOpen() {
+    const el = $("#quickPanel");
+    if (!el) return;
+    const s = session();
+    if (!s) { UI.toast("先打开一个对话", true); return; }
+    if (!hasAnyMemory(s)) { UI.toast("这条对话还没有记忆，聊几轮攒出记忆后再用", true); return; }
+    /* 软键盘先收：面板要占它的位置，两个都在会把输入区挤没 */
+    const inp = $("#input");
+    if (inp && document.activeElement === inp) inp.blur();
+    el.hidden = false;
+    quick.open = true;
+    const qb = $("#quickBtn"); if (qb) qb.classList.add("on");
+    /* 换了会话就重新生成；同一会话再打开沿用上一批（省一次调用） */
+    if (quick.sid !== s.id) { quick.batch = 0; quick.items = []; }
+    if (!quick.items.length && !quick.busy) quickGen();
+    else quickRender();
+  }
+
+  /* 按钮自身的置灰状态跟着会话走（切到没记忆的线就变灰，一眼看得出为什么点不动）。
+     只改视觉，真正的拦截在 quickOpen 里 —— 那边有 toast 说明原因。 */
+  function syncQuickBtn() {
+    const qb = $("#quickBtn");
+    if (!qb) return;
+    const s = session();
+    const ok = !!(s && hasAnyMemory(s));
+    qb.classList.toggle("disabled", !ok);
+    qb.setAttribute("aria-disabled", ok ? "false" : "true");
+    qb.title = ok ? "快捷回复" : "这条对话还没有记忆";
+  }
+
+  function quickClose() {
+    const el = $("#quickPanel");
+    if (el) el.hidden = true;
+    quick.open = false;
+    const qb = $("#quickBtn"); if (qb) qb.classList.remove("on");
+  }
+
+  function quickUse(i) {
+    const t = quick.items[i];
+    if (!t) return;
+    const inp = $("#input");
+    if (!inp) return;
+    quickClose();
+    setVal("#input", t);
+    autoResize();
+    inp.focus();                                   /* 唤起软键盘 */
+    try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) { /* ignore */ }
+  }
+
+  function bindQuickReply() {
+    const qb = $("#quickBtn");
+    if (qb) {
+      /* ⚠️ 这里**不能写成开关**（open ? close : open）。一旦这个绑定被跑了两遍
+         （例如 app.js 的 bind() 被重复调用），一个点击会「先开、再立刻关」，
+         表现为「按钮点了没反应」——极难查。就让它永远只做「打开」这一件事：
+         收起有面板上的 ✕、点输入框、点某条回复这三条路，够了。 */
+      qb.addEventListener("click", () => { quickOpen(); });
+    }
+    const rf = $("#qpRefresh");
+    if (rf) rf.addEventListener("click", () => quickGen());
+    const cl = $("#qpClose");
+    if (cl) cl.addEventListener("click", () => quickClose());
+    const inp = $("#input");
+    /* 面板在时点输入框 → 收面板、把键盘叫回来（浏览器自己会 focus，这里只负责收面板） */
+    if (inp) inp.addEventListener("focus", () => { if (quick.open) quickClose(); });
+  }
+
+  /* ── 继续说：接着最后一条角色消息往下讲 ──────────────────────────
+     只挂在**最后一条**角色消息下面 —— 每条下面都挂一排按钮只会眼花。
+     做法：把模型消息拼完后再补一句「继续说」的临时指令（不落库），
+     所以真正发出去的上下文里没有这句，历史还是干净的。 */
+  var CONTINUE_NUDGE = "（继续说：接着你刚才那条消息往下讲，别重复已经说过的内容，也别从头开始。"
+    + "像真人接着往下发消息那样自然。）";
+  /* 群聊里点某条消息的「继续说」= 指定那位角色发言（10-18 用户口径）。
+     所以指令要明确「只由他一个人说」，并按「名字：内容」一行输出 —— 好让落库时剥前缀、
+     直接挂到他名下，不再走「让 AI 自己决定谁说话」那条路。 */
+  function continueNudgeOne(name) {
+    return "（继续说：接着「" + name + "」刚才那条话往下说。这一次**只由「" + name + "」一个人**发言，"
+      + "按「" + name + "：内容」一行的格式输出，别让别人插话，也别重复已经说过的内容。）";
+  }
+  /* 模型按「名字：内容」输出时把开头那截名字剥掉 —— 名字已经存在 speakerName 里了 */
+  function stripSpeakerPrefix(text, name) {
+    const n = String(name || "").trim();
+    if (!n) return String(text || "");
+    const esc = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    try { return String(text || "").replace(new RegExp("^\\s*" + esc + "\\s*[：:]\\s*"), ""); }
+    catch (e) { return String(text || ""); }
+  }
+
+  function syncContinueRow() {
+    const box = $("#messages");
+    if (!box) return;
+    const olds = box.querySelectorAll('[data-act="cont"]');
+    for (let k = 0; k < olds.length; k++) olds[k].remove();
+    const s = session();
+    if (!s || state.busy) return;
+    const msgs = s.messages || [];
+    if (!msgs.length) return;
+    const usable = (i) => {
+      const m = msgs[i];
+      return !!(m && m.role === "assistant" && !m.error && !m.world && String(activeText(m) || "").trim());
+    };
+    /* 群聊：每一条角色消息都挂（点谁就是让谁说）；
+       单聊只有一个角色，「从这里继续说」和「继续说」是一回事，仍旧只挂最后一条。 */
+    const targets = [];
+    if (s.isGroup) {
+      for (let i = 0; i < msgs.length; i++) if (usable(i)) targets.push(i);
+    } else if (usable(msgs.length - 1)) {
+      targets.push(msgs.length - 1);
+    }
+    targets.forEach((i) => {
+      const el = msgElAt(i);
+      const bar = el ? el.querySelector(".msg-actions") : null;
+      if (!bar) return;
+      const btn = UI.actionBtn("cont", "message-plus-outline", "继续说", "act-btn cont-act");
+      bar.appendChild(btn);
+    });
+  }
+
+  function continueLast() {
+    const s = session();
+    if (!s || state.busy) return;
+    runGeneration(s.id, { cont: true });
+  }
+
+  /* 从第 idx 条继续。群聊 = 指定该条说话人接着发；单聊退化成 continueLast。 */
+  function continueFrom(idx) {
+    const s = session();
+    if (!s || state.busy) return;
+    const msgs = s.messages || [];
+    const m = (typeof idx === "number" && idx >= 0 && idx < msgs.length) ? msgs[idx] : null;
+    if (!m || m.role !== "assistant") { continueLast(); return; }
+    const who = s.isGroup && m.speakerName ? { id: m.speaker || "", name: m.speakerName } : null;
+    runGeneration(s.id, { cont: true, forceSpeaker: who });
+  }
+
+  /* ── 剧情卡：点开铺满全屏看全文 ──────────────────────────────────
+     详细版就是**灌给 AI 的那一份**，一个字都不截。
+     左上角返回键退出；同一条再点开能接着上次读到的地方。 */
+  var worldViewKey = "";
+  var worldViewScroll = {};      /* { 这条剧情的 ts: 滚动位置 } —— 用 ts 做键，删消息后也不会串位 */
+
+  function openWorldView(i) {
+    const s = session();
+    const m = s && (s.messages || [])[i];
+    const box = $("#worldView");
+    const body = $("#worldViewBody");
+    if (!m || !box || !body) return;
+    const t = String(activeText(m) || "").trim();
+    if (!t) { UI.toast("这条没有可看的正文", true); return; }
+    worldViewKey = String(m.ts || i);
+    body.textContent = t;
+    box.classList.add("show");
+    /* 恢复上次读到的地方（首帧布局还没稳定，推到下一帧再设） */
+    const keep = worldViewScroll[worldViewKey] || 0;
+    body.scrollTop = keep;
+    setTimeout(() => { try { body.scrollTop = keep; } catch (e) { /* ignore */ } }, 0);
+  }
+
+  function closeWorldView() {
+    const box = $("#worldView");
+    const body = $("#worldViewBody");
+    if (body && worldViewKey) worldViewScroll[worldViewKey] = body.scrollTop;
+    if (box) box.classList.remove("show");
+    worldViewKey = "";
+  }
+
+  function bindWorldView() {
+    const back = $("#worldViewBack");
+    if (back) back.addEventListener("click", closeWorldView);
+    /* ESC 只方便电脑上预览用；真机走左上角那个返回键 */
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const box = $("#worldView");
+      if (box && box.classList.contains("show")) closeWorldView();
+    });
+  }
+
   /* ── 输入框 ────────────────────────────────────── */
   function autoResize() {
     const el = $("#input");
@@ -1445,10 +2410,19 @@
     exitSelect: exitSelect, saveEdit: saveEdit, copySelected: copySelected,
     openDeleteDialog: openDeleteDialog, confirmDelete: confirmDelete,
     bindMessageGestures: bindMessageGestures,
-    runHistorySearch: runHistorySearch, openSearchModal: openSearchModal
+    runHistorySearch: runHistorySearch, openSearchModal: openSearchModal,
+    activeText: activeText, buildGroupSystemText: buildGroupSystemText,
+    /* 本轮新增：快捷回复面板 + 继续说（continueFrom = 群聊里指定谁接着说） */
+    bindQuickReply: bindQuickReply, continueLast: continueLast, continueFrom: continueFrom,
+    syncContinueRow: syncContinueRow, syncRegenRow: syncRegenRow,
+    /* 群聊：对彼此的认知 + 同步到各自线（对话设置里那两个按钮用） */
+    peerCogOf: peerCogOf, peerCogText: peerCogText, peerCogOn: peerCogOn,
+    updatePeerCog: updatePeerCog, syncGroupToLines: syncGroupToLines, lineOfMember: lineOfMember,
+    groupMembers: groupMembers,
+    openWorldView: openWorldView, closeWorldView: closeWorldView, bindWorldView: bindWorldView
   });
 
-  window.__dlScripts.push("chat.js");
+  (window.__dlScripts = window.__dlScripts || []).push("chat.js");
   return true;
   }
 
