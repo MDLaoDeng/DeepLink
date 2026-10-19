@@ -64,7 +64,7 @@
         "--shadow": "0 12px 26px rgba(28,34,48,.10)",
         "--text": "#1D2026",
         "--text-dim": "#5D646F",
-        "--text-mute": "#6E7683",
+        "--text-mute": "#676F7B",
         "--user-bg": "#E7ECF8",
         "--user-ink": "#1D2026"
       },
@@ -89,7 +89,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#E6E8ED",
         "--text-dim": "#9BA1AC",
-        "--text-mute": "#6E7481",
+        "--text-mute": "#7A818E",
         "--user-bg": "#262C38",
         "--user-ink": "#E6E8ED"
       }
@@ -116,7 +116,7 @@
         "--shadow": "0 12px 26px rgba(30,34,58,.10)",
         "--text": "#1E2136",
         "--text-dim": "#5F6582",
-        "--text-mute": "#6D7389",
+        "--text-mute": "#686E83",
         "--user-bg": "#E6E9F8",
         "--user-ink": "#1E2136"
       },
@@ -141,14 +141,14 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#E8E9F5",
         "--text-dim": "#9FA3C0",
-        "--text-mute": "#737A9C",
+        "--text-mute": "#7980A0",
         "--user-bg": "#262B47",
         "--user-ink": "#E8E9F5"
       }
     },
     "lake": {
       light: {
-        "--accent": "#2F85AA",
+        "--accent": "#2C7DA0",
         "--accent-2": "#3B917F",
         "--accent-ink": "#FFFFFF",
         "--ai-bg": "#FFFFFF",
@@ -168,7 +168,7 @@
         "--shadow": "0 12px 26px rgba(22,50,60,.10)",
         "--text": "#16303A",
         "--text-dim": "#4F6E7A",
-        "--text-mute": "#617E8A",
+        "--text-mute": "#59737E",
         "--user-bg": "#E2EFF5",
         "--user-ink": "#16303A"
       },
@@ -200,7 +200,7 @@
     },
     "celadon": {
       light: {
-        "--accent": "#44876C",
+        "--accent": "#418067",
         "--accent-2": "#4B7C93",
         "--accent-ink": "#FFFFFF",
         "--ai-bg": "#FFFFFF",
@@ -220,7 +220,7 @@
         "--shadow": "0 12px 26px rgba(24,44,36,.10)",
         "--text": "#1B2A24",
         "--text-dim": "#557061",
-        "--text-mute": "#647C6D",
+        "--text-mute": "#5E7567",
         "--user-bg": "#E4F0EA",
         "--user-ink": "#1B2A24"
       },
@@ -252,7 +252,7 @@
     },
     "pine": {
       light: {
-        "--accent": "#3F8657",
+        "--accent": "#3D8154",
         "--accent-2": "#798930",
         "--accent-ink": "#FFFFFF",
         "--ai-bg": "#FFFFFF",
@@ -272,7 +272,7 @@
         "--shadow": "0 12px 26px rgba(22,42,28,.10)",
         "--text": "#17281B",
         "--text-dim": "#4F6B55",
-        "--text-mute": "#617A6B",
+        "--text-mute": "#5C7466",
         "--user-bg": "#E2F0E6",
         "--user-ink": "#17281B"
       },
@@ -324,7 +324,7 @@
         "--shadow": "0 12px 26px rgba(36,30,58,.10)",
         "--text": "#221E38",
         "--text-dim": "#665F86",
-        "--text-mute": "#74708F",
+        "--text-mute": "#6E6A88",
         "--user-bg": "#EAE5F8",
         "--user-ink": "#221E38"
       },
@@ -349,7 +349,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#EAE7F7",
         "--text-dim": "#A9A2CB",
-        "--text-mute": "#7A749C",
+        "--text-mute": "#817BA1",
         "--user-bg": "#2A2348",
         "--user-ink": "#EAE7F7"
       }
@@ -401,7 +401,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#F0E9EC",
         "--text-dim": "#BAA6AE",
-        "--text-mute": "#8B7A80",
+        "--text-mute": "#8F7E84",
         "--user-bg": "#4E3240",
         "--user-ink": "#F1E7EB"
       }
@@ -453,7 +453,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#F3E9EA",
         "--text-dim": "#BBA2A3",
-        "--text-mute": "#8C7677",
+        "--text-mute": "#917C7D",
         "--user-bg": "#4C3134",
         "--user-ink": "#F3E9EA"
       }
@@ -480,7 +480,7 @@
         "--shadow": "0 12px 26px rgba(56,46,32,.10)",
         "--text": "#332A1E",
         "--text-dim": "#776A57",
-        "--text-mute": "#7D715F",
+        "--text-mute": "#7A6E5D",
         "--user-bg": "#F7E6D2",
         "--user-ink": "#3A3020"
       },
@@ -597,6 +597,63 @@
     splitChar: "你是「角色卡整理」助手。用户会把关于这次角色扮演的零散想法一股脑发给你（可能还附带「当前已经填好的设定」）。请把它拆开、归位到给定字段，输出一个 JSON 对象。硬性要求：① 只输出这个 JSON 对象，不要任何解释、前后缀或代码块；② 键必须与给定字段表完全一致，且每个键都要出现；③ 以**用户这次发来的内容**为准：这次提到的就按这次写，**和字段现有内容冲突时一律以这次为准**（这是「重新拆一遍」，要用新内容覆盖旧内容，不要把新旧两版揉在一起）；④ 这次确实没提到的字段，才参考它的现有内容保留下来；两者都没有时，再按整体语境做简短合理的推断补全（宁可简短，也不要留空）；⑤ 每项用简洁中文，不复述原话，内容长的提炼成要点；⑥ 角色名写入 charName。",
     correct: "你是记忆整理助手。下面给出某次角色扮演的「记忆」（按 精华 / 月 / 周 / 日 分条）以及用户提出的纠正或补充。请输出纠正后的完整记忆。要求：① 逐行输出，行格式与输入完全一致——精华行写「〖精华〗内容」，月写「〖月·key〗内容」，周写「〖周·key〗内容」，日写「〖日期〗内容」；② 用户明确指出要改的必须改对，没提到的条目原样保留，不要改写、合并或删除；③ 用户补充的新信息并入最合适的一条，确实无处可并时才新增一条日记忆（日期用今天）；④ 每条内容简洁、第三人称；⑤ 只输出这些行，不要解释、不要代码块、不要多余文字。"
   };
+
+
+  /* ── 内置表情包（10-19）────────────────────────────────────────────────
+     现状：先用 Unicode 字符（e）占位，图片素材到位后把 e 换成 src（emoji/xxx.svg），
+     同一条记录只用其中一个 —— 其余字段（n / means / tone）两边通用，不用重写。
+     为什么要有 n 和 means：模型看不见图，只认这两个字段；名字就是它眼里的那张图。
+     每条：src 图片（Fluent，MIT）/ e 字符（兜底）/ n 名字 / means 能表达的意思（刻意多义）/ tone 语气标签。 */
+  const EMOJI_PACK = [
+    { src: "emoji/1f600.svg", e: "😀", n: "咧嘴笑", means: ["开心", "打招呼", "稳住气氛"], tone: "暖" },
+    { src: "emoji/1f604.svg", e: "😄", n: "眯眼大笑", means: ["真的很高兴", "被逗到", "松了口气"], tone: "暖" },
+    { src: "emoji/1f60a.svg", e: "😊", n: "微笑", means: ["客气", "害羞地开心", "不想说太多"], tone: "暖" },
+    { src: "emoji/1f642.svg", e: "🙂", n: "淡淡的微笑", means: ["还行", "礼貌回应", "有点无奈"], tone: "平" },
+    { src: "emoji/1f609.svg", e: "😉", n: "眨眼", means: ["逗你", "暗示", "别当真"], tone: "俏皮" },
+    { src: "emoji/1f60f.svg", e: "😏", n: "坏笑", means: ["得意的调侃", "看穿了", "故意气你"], tone: "俏皮" },
+    { src: "emoji/1f60c.svg", e: "😌", n: "满足地闭眼", means: ["舒服", "放下心", "终于安静了"], tone: "暖" },
+    { src: "emoji/1f634.svg", e: "😴", n: "睡着了", means: ["困", "不想聊了", "装睡避开"], tone: "冷" },
+    { src: "emoji/1f971.svg", e: "🥱", n: "打哈欠", means: ["无聊", "困", "有点敷衍"], tone: "冷" },
+    { src: "emoji/1f643.svg", e: "🙃", n: "倒过来笑", means: ["反讽", "强撑", "都行吧"], tone: "刺" },
+    { src: "emoji/1f636.svg", e: "😶", n: "说不出话", means: ["无语", "卡住了", "不知道回什么"], tone: "冷" },
+    { src: "emoji/1f610.svg", e: "😐", n: "面无表情", means: ["不置可否", "尴尬", "等你先说"], tone: "冷" },
+    { src: "emoji/1f611.svg", e: "😑", n: "无语", means: ["懒得解释", "被冒犯到", "算了"], tone: "刺" },
+    { src: "emoji/1f644.svg", e: "🙄", n: "翻白眼", means: ["嫌弃", "又来了", "不服气"], tone: "刺" },
+    { src: "emoji/1f624.svg", e: "😤", n: "哼气", means: ["不服", "较劲", "嘴硬"], tone: "刺" },
+    { src: "emoji/1f620.svg", e: "😠", n: "生气", means: ["真的不高兴", "被踩到", "警告你"], tone: "炸" },
+    { src: "emoji/1f622.svg", e: "😢", n: "哭了", means: ["难过", "委屈", "想被哄"], tone: "软" },
+    { src: "emoji/1f97a.svg", e: "🥺", n: "求求你", means: ["撒娇", "示弱", "想让你答应"], tone: "软" },
+    { src: "emoji/1f62d.svg", e: "😭", n: "大哭", means: ["崩溃", "又好笑又难过", "夸张地诉苦"], tone: "软" },
+    { src: "emoji/1f61e.svg", e: "😞", n: "失落", means: ["失望", "被忽略", "泄气"], tone: "软" },
+    { src: "emoji/1f614.svg", e: "😔", n: "低落", means: ["心里堵", "有点丧", "不想解释"], tone: "软" },
+    { src: "emoji/1f61f.svg", e: "😟", n: "担心", means: ["不放心你", "怕出事", "追问一句"], tone: "软" },
+    { src: "emoji/1f62e.svg", e: "😮", n: "惊讶", means: ["没想到", "被吓到", "真的假的"], tone: "平" },
+    { src: "emoji/1f914.svg", e: "🤔", n: "思考", means: ["在琢磨", "不太信", "要不要答应"], tone: "平" },
+    { src: "emoji/1f605.svg", e: "😅", n: "尴尬笑", means: ["场面有点僵", "自嘲", "先退一步"], tone: "平" },
+    { src: "emoji/1f602.svg", e: "😂", n: "笑到流泪", means: ["太好笑了", "崩不住了", "缓和气氛"], tone: "暖" },
+    { src: "emoji/1f923.svg", e: "🤣", n: "笑趴了", means: ["真的笑到不行", "被戳中", "亲昵的取笑"], tone: "暖" },
+    { src: "emoji/1f970.svg", e: "🥰", n: "心里暖暖的", means: ["被甜到", "喜欢你说的话", "想靠近"], tone: "甜" },
+    { src: "emoji/1f60d.svg", e: "😍", n: "眼睛发亮", means: ["太喜欢了", "被迷住", "夸你"], tone: "甜" },
+    { src: "emoji/1f618.svg", e: "😘", n: "飞吻", means: ["亲昵", "道晚安", "撒娇讨好"], tone: "甜" },
+    { src: "emoji/1f917.svg", e: "🤗", n: "想抱抱", means: ["安慰你", "想被安慰", "见到你很高兴"], tone: "甜" },
+    { src: "emoji/1f633.svg", e: "😳", n: "脸红", means: ["被说中了", "害羞", "手足无措"], tone: "甜" },
+    { src: "emoji/1fae3.svg", e: "🫣", n: "捂脸偷看", means: ["不敢看", "又忍不住", "被夸到害羞"], tone: "甜" },
+    { src: "emoji/1f607.svg", e: "😇", n: "无辜笑", means: ["我没错", "装乖", "小小地撒谎"], tone: "俏皮" },
+    { src: "emoji/1f608.svg", e: "😈", n: "小恶魔笑", means: ["想捉弄你", "有个坏主意", "得意"], tone: "俏皮" },
+    { src: "emoji/1f92d.svg", e: "🤭", n: "捂嘴笑", means: ["偷笑", "知道点你不知道的", "憋着"], tone: "俏皮" },
+    { src: "emoji/1f440.svg", e: "👀", n: "盯着看", means: ["在看你", "嗅到八卦", "等你解释"], tone: "俏皮" },
+    { src: "emoji/1fae0.svg", e: "🫠", n: "融化了", means: ["招架不住", "累瘫", "被甜到没脾气"], tone: "软" },
+    { src: "emoji/1f4a4.svg", e: "💤", n: "困了", means: ["要睡了", "聊不动了", "晚安"], tone: "冷" },
+    { src: "emoji/1f319.svg", e: "🌙", n: "月亮", means: ["晚安", "夜深了", "该睡了"], tone: "暖" },
+    { src: "emoji/2614.svg", e: "☔", n: "下雨", means: ["记得带伞", "天气不好", "有点惆怅"], tone: "平" },
+    { src: "emoji/1f35c.svg", e: "🍜", n: "一碗面", means: ["吃饭了吗", "想一起吃", "深夜饿了"], tone: "暖" },
+    { src: "emoji/2615.svg", e: "☕", n: "咖啡", means: ["提神", "约你出来", "歇一会儿"], tone: "平" },
+    { src: "emoji/1f382.svg", e: "🎂", n: "蛋糕", means: ["生日祝福", "庆祝", "记得这个日子"], tone: "暖" },
+    { src: "emoji/1f339.svg", e: "🌹", n: "一支玫瑰", means: ["示好", "道歉", "认真的喜欢"], tone: "甜" },
+    { src: "emoji/1f44d.svg", e: "👍", n: "点赞", means: ["同意", "干得好", "收到"], tone: "平" },
+    { src: "emoji/1f64f.svg", e: "🙏", n: "拜托", means: ["求你", "谢谢", "别生气"], tone: "软" },
+    { src: "emoji/1f4aa.svg", e: "💪", n: "加油", means: ["给你打气", "我能行", "撑住"], tone: "暖" }
+  ];
 
   /* ── 预设角色（角色管理页「预设」入口用）────────────────────────
      只填「AI 那半边」：我的名称 / 性格 / 外貌 / 背景 / 喜好 由用户自己写，预设不碰。
@@ -1069,7 +1126,45 @@
     (g.items || []).forEach(function (it) { IMAGE_STYLE_INDEX[it.id] = it; });
   });
 
+  /* 常见模型能力表（10-19）：按子串匹配，长的排前面。
+     vision=能看图 / asr=能听音 / tts=能朗读 / img=能画图。
+     查不到就按「只当文字模型」处理 —— 宁可少放开，也别让用户传了图却发不出去。 */
+  const MODEL_CAPS = [
+    { k: "gpt-4o", n: "GPT-4o", vision: true, asr: true, tts: true, img: true },
+    { k: "gpt-4.1", n: "GPT-4.1", vision: true, asr: false, tts: false, img: true },
+    { k: "gpt-5", n: "GPT-5", vision: true, asr: false, tts: false, img: true },
+    { k: "o3", n: "o3", vision: true, asr: false, tts: false, img: false },
+    { k: "o4-mini", n: "o4-mini", vision: true, asr: false, tts: false, img: false },
+    { k: "claude-3", n: "Claude 3", vision: true, asr: false, tts: false, img: false },
+    { k: "claude-4", n: "Claude 4", vision: true, asr: false, tts: false, img: false },
+    { k: "claude", n: "Claude", vision: true, asr: false, tts: false, img: false },
+    { k: "gemini", n: "Gemini", vision: true, asr: true, tts: true, img: true },
+    { k: "qwen-vl", n: "通义千问 VL", vision: true, asr: false, tts: false, img: false },
+    { k: "qwen2-vl", n: "通义千问 2-VL", vision: true, asr: false, tts: false, img: false },
+    { k: "qwen3", n: "通义千问 3", vision: true, asr: false, tts: false, img: false },
+    { k: "qwen-audio", n: "通义千问 Audio", vision: false, asr: true, tts: false, img: false },
+    { k: "glm-4v", n: "智谱 GLM-4V", vision: true, asr: false, tts: false, img: false },
+    { k: "glm-4.5", n: "智谱 GLM-4.5", vision: true, asr: false, tts: false, img: false },
+    { k: "doubao-vision", n: "豆包 Vision", vision: true, asr: false, tts: false, img: false },
+    { k: "doubao-seed", n: "豆包 Seed", vision: true, asr: false, tts: false, img: true },
+    { k: "llava", n: "LLaVA", vision: true, asr: false, tts: false, img: false },
+    { k: "llama-3.2-vision", n: "Llama 3.2 Vision", vision: true, asr: false, tts: false, img: false },
+    { k: "deepseek-vl", n: "DeepSeek VL", vision: true, asr: false, tts: false, img: false },
+    /* DeepSeek 从 V4.1 Flash 起原生多模态（2026-09 上线）：模型名带 flash / vision 的都能看图，
+       旧的 chat / reasoner 仍是纯文本。这几条必须排在下面那条泛匹配之前。 */
+    { k: "deepseek-flash", n: "DeepSeek V4.1 Flash", vision: true, asr: false, tts: false, img: false },
+    { k: "deepseek-v4-flash", n: "DeepSeek V4 Flash", vision: true, asr: false, tts: false, img: false },
+    { k: "deepseek-vision", n: "DeepSeek Vision", vision: true, asr: false, tts: false, img: false },
+    { k: "deepseek", n: "DeepSeek 文本模型", vision: false, asr: false, tts: false, img: false },
+    { k: "tts", n: "语音合成模型", vision: false, asr: false, tts: true, img: false },
+    { k: "whisper", n: "Whisper", vision: false, asr: true, tts: false, img: false },
+    { k: "dall-e", n: "DALL·E", vision: false, asr: false, tts: false, img: true },
+    { k: "flux", n: "FLUX", vision: false, asr: false, tts: false, img: true },
+    { k: "sd3", n: "Stable Diffusion 3", vision: false, asr: false, tts: false, img: true }
+  ];
   window.CONFIG = {
+    MODEL_CAPS: MODEL_CAPS,
+    EMOJI_PACK: EMOJI_PACK,
     DEFAULT_SYSTEM_PROMPT,
     THEMES,
     THEME_VARS,
@@ -1081,7 +1176,7 @@
     IMAGE_STYLES,
     IMAGE_STYLE_INDEX,
     COMPRESS_PROMPTS,
-    APP_VERSION: "6.2.1",
+    APP_VERSION: "6.2.2",
     /* 更新检查（10-18 用户要求）：
        放一个能被 https 直接读到的 JSON（对象存储 / 静态托管的直链都行），格式：
          { "version": "6.3.0",
@@ -1159,13 +1254,25 @@
       "│  │  └─ 主对话 / 手机 / 世界生成 / 摘要读同一套时间；手机隔 3 分钟插一条居中时分",
       "│  ├─ 助手总结：主动问才出（关系剖析报告）",
       "│  ├─ 情绪日记：主动写，AI 依日记引导角色发言",
-      "│  └─ 功能开关集中在「设置 · 功能」",
+      "│  ├─ 功能开关集中在「设置 · 功能」",
+      "├─ 6.2 新增",
+      "│  ├─ 表情包：内置 48 个（图片，不再是系统 emoji）",
+      "│  │  ├─ 手机输入栏笑脸进入；点一下插进输入框，发出去渲染成图",
+      "│  │  ├─ 自添加：选图 → 挑张 → 选范围（都能用 / TA 用 / 自己用）→ 导入",
+      "│  │  └─ 模型也能发：提示词列出可用名字，写 [表情:名字] 即出图",
+      "│  ├─ 模型能力检测：内置表 → 问模型自己 → 问不出来就先不限制上传",
+      "│  │  └─ 按能力放开可上传类型；配了独立视觉模型时图片照传",
+      "│  ├─ 搜索兜底：DeepSeek 官方 Anthropic 兼容通道（web_search 工具）",
+      "│  ├─ 手机角色两类：功能型（不校验）/ 相熟型（要填齐必填栏，且只通过手机联系）",
+      "│  ├─ 备忘录（手机页）：「这条线」里进，约定时间按故事时间到点冒红点",
+      "│  ├─ 头像外置：有桥就落文件，启动时把老数据里的 base64 搬一次",
+      "│  ├─ 用量新增两类：表情包命名 / 模型能力检测",
+      "│  └─ 检查更新：每天静默查一次（有新版本才提示）＋ 关于页手动检查",
       "└─ 数据",
       "   ├─ 导入 / 导出（导出时自设口令；角色个人图库随角色 / 会话一起走）",
       "   ├─ 本机加密：记忆 + 角色卡 + 关系/经历/场景",
       "   ├─ 自动备份（按对话；快照同样只存密文）",
-      "   ├─ 图片：外置存储 + 到期转文字",
-      "   └─ 检查更新：每天静默查一次（有新版本才提示）＋ 关于页手动检查"
+      "   └─ 图片：外置存储 + 到期转文字"
     ].join("\n"),
     DEFAULT_SETTINGS: {
       /* ── 模型配置：每个模型区各自最多 6 套 ────────────────
@@ -1203,6 +1310,14 @@
       mode: "dark",
       avatarUser: "",
       avatarAi: "",
+      /* 手机页里「我」的头像：留空 → 回落到 avatarUser（10-19 用户要求单独可设） */
+      phoneAvatarUser: "",
+      /* 群聊里改/删消息的强提醒：勾过「以后不再提示」就为 true（10-19） */
+      groupWarnOff: false,
+      /* 自添加的图片表情包：[{ id, src, name, means, scope }]（10-19） */
+      stickers: [],
+      /* 主模型能力检测结果（10-19）：null=没检测过 */
+      modelCaps: null,
 
       /* 角色扮演 / 记忆压缩 / 用量预警 */
       roleplayEnabled: false,

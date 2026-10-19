@@ -182,12 +182,62 @@
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
       body: JSON.stringify({ query: String(query || "").slice(0, 128), count: 6, need_content: false })
     }, 20000);
-    return clean((data.results || []).map((r) => ({
+    const rows = clean((data.results || []).map((r) => ({
       title: r.title || r.site_name || "",
       url: r.url,
       snippet: r.summary || r.description || r.content || ""
     })));
+    if (rows.length) return rows;
+    /* 老接口没给结果 —— 走官方兼容通道再试一次 */
+    return await deepseekViaMessages(query, settings);
   }
+  /* 官方通道：Anthropic 兼容 Messages + web_search_20250305 服务端工具。
+     返回结构是 content 块数组：text 块是答案，web_search_tool_result 里才是来源。
+     每次搜索等于一次完整模型轮次（官方没有单独的检索端点），所以只在老路失败时才走它。 */
+  async function deepseekViaMessages(query, settings) {
+    const key = String(settings.apiKey || "");
+    const root = String(settings.baseUrl || "").replace(/\/+$/, "").replace(/\/v1$/i, "");
+    if (!key || !/deepseek\.com/i.test(root)) throw new Error("主模型不是 DeepSeek，用不了这条通道");
+    const model = String(settings.searchModel || settings.model || "deepseek-flash");
+    const data = await fetchJson(root + "/anthropic/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1500,
+        tools: [{ type: "web_search_20250305", name: "web_search" }],
+        messages: [{ role: "user", content: String(query || "") + "\n\n请先联网检索最新信息，再给结论；如果检索不到就说检索不到。" }]
+      })
+    }, 90000);
+    const blocks = data.content || [];
+    const out = [];
+    blocks.forEach(function (b) {
+      if (!b) return;
+      if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
+        b.content.forEach(function (r) {
+          if (!r || r.type !== "web_search_result") return;
+          out.push({
+            title: r.title || r.url || "",
+            url: r.url || "",
+            snippet: String(r.cited_text || r.page_age || "").slice(0, 400)
+          });
+        });
+      }
+    });
+    /* 顺序很重要（10-19 修）：clean() 要求 url 必须是 http，
+       所以「只拿到答案、没拿到来源块」那条会被它整条滤掉 —— 而那正是兜底要保的东西。
+       因此先做正常清洗，清洗完是空，再把答案正文作为最后一条结果带回去。 */
+    const rows = clean(out);
+    if (rows.length) return rows;
+    const text = blocks.filter(function (b) { return b && b.type === "text"; })
+      .map(function (b) { return String(b.text || ""); }).join("\n").trim();
+    return text ? [{ title: "DeepSeek 联网答复", url: "", snippet: text.slice(0, 400) }] : [];
+  }
+
   function deepseekReady(settings) {
     return !!String(settings.apiKey || "") && /deepseek\.com/i.test(String(settings.baseUrl || ""));
   }

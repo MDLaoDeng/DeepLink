@@ -4,17 +4,24 @@
   const SPEC = {
     asr: { enabled: "asrEnabled", base: "asrBaseUrl", key: "asrKey", model: "asrModel" },
     tts: { enabled: "ttsEnabled", base: "ttsBaseUrl", key: "ttsKey", model: "ttsModel" },
-    img: { enabled: "imgEnabled", base: "imgBaseUrl", key: "imgKey", model: "imgModel" }
+    img: { enabled: "imgEnabled", base: "imgBaseUrl", key: "imgKey", model: "imgModel" },
+    /* vision（10-19 补）：这张表原来没有它，于是 Media.capable("vision", …) 会
+       在 cfg() 里读 undefined.enabled 直接抛 TypeError —— 表现是「加表情」整条链路
+       静默失败（调用处没有 try/catch）。字段名与设置页、api.js 的 visionSettings 一致。 */
+    vision: { enabled: "visionEnabled", base: "visionBaseUrl", key: "visionKey", model: "visionModel" }
   };
 
   function cfg(kind, s) {
     const k = SPEC[kind];
+    const st = s || {};
+    /* 能力名没登记就按「不支持」返回，绝不抛错 —— 调用点都在 if 条件里，抛出去等于整条链路静默失败 */
+    if (!k) return { enabled: false, base: "", key: "", model: "" };
     return {
-      enabled: !!s[k.enabled],
-      base: String(s[k.base] || s.baseUrl || "").replace(/\/+$/, ""),
-      key: String(s[k.key] || s.apiKey || ""),
+      enabled: !!st[k.enabled],
+      base: String(st[k.base] || st.baseUrl || "").replace(/\/+$/, ""),
+      key: String(st[k.key] || st.apiKey || ""),
       /* 模型名留空同样嫁接到主模型（与设置页里那句说明一致） */
-      model: String(s[k.model] || s.model || "")
+      model: String(st[k.model] || st.model || "")
     };
   }
 

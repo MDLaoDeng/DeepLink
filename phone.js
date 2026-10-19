@@ -140,6 +140,19 @@
     return true;
   }
 
+  /* 表情翻译（10-19）：主聊天那边走 memory.js 的 msgText（带 emojiReadable），
+     手机这边原来只有自己这一份，模型收到的是 [[s:stabc123]] 这种原始标记。
+     统一在这里过一道，两套 msgText 的口径就一致了。 */
+  function readableText(t) {
+    var x = String(t || "");
+    if (!x) return x;
+    try {
+      var M = (typeof Memory !== "undefined" && Memory) || window.Memory;
+      if (M && M.emojiReadable) return M.emojiReadable(x);
+    } catch (e) { /* 翻译失败就按原文，不能因此断消息 */ }
+    return x;
+  }
+
   /* 一条手机消息 → 给模型看的文本 */
   function msgText(m) {
     if (!m) return "";
@@ -156,10 +169,10 @@
       var d = m.desc ? "，画面：" + m.desc : "";
       return "（" + (m.role === "user" ? "我" : "你") + "发了一张图片" + d + "）";
     }
-    if (m.kind === "voice") return "（" + (m.role === "user" ? "我" : "你") + "发来一条语音，说的是：" + (m.text || "") + "）";
-    if (m.kind === "call") return "（" + (m.role === "user" ? "我们" : "我们") + "通了一次电话" + (m.text ? "，内容：" + m.text : "") + "）";
+    if (m.kind === "voice") return "（" + (m.role === "user" ? "我" : "你") + "发来一条语音，说的是：" + readableText(m.text) + "）";
+    if (m.kind === "call") return "（" + (m.role === "user" ? "我们" : "我们") + "通了一次电话" + (m.text ? "，内容：" + readableText(m.text) : "") + "）";
     if (m.kind === "sys") return "（系统提示：" + (m.text || "") + "）";
-    return String(m.text || "");
+    return readableText(m.text);
   }
   /* 列表里的一行预览 */
   function previewOf(m) {
@@ -170,7 +183,8 @@
     if (m.kind === "image") return "[图片]";
     if (m.kind === "voice") return "[语音] " + (m.text || "");
     if (m.kind === "call") return "[通话]";
-    return String(m.text || "");
+    /* 列表预览别把 [[s:xxx]] / [表情:名字] 原样露出来（10-19） */
+    return String(m.text || "").replace(/\[\[s:[a-z0-9]+\]\]/g, "[表情]").replace(/\[表情:[^\]]+\]/g, "[表情]");
   }
   function fmtMoney(v) {
     var n = Number(v);
@@ -188,6 +202,8 @@
       var own = s.phoneAvatar || "";
       if (own) return own;
     }
+    /* 角色卡上的「默认手机头像」（10-19 用户要求）：这张线专用，没设就回落到角色头像 */
+    if (ch && ch.phoneAvatar) return ch.phoneAvatar;
     if (ch && ch.avatar) return ch.avatar;
     return state.settings.avatarAi || "";
   }
@@ -209,7 +225,8 @@
     box.className = "ph-av";
     if (url) {
       var im = document.createElement("img");
-      im.src = url; im.alt = "";
+      im.src = (window.DL && window.DL.avatarUrl) ? window.DL.avatarUrl(url) : url;
+      im.alt = "";
       box.appendChild(im);
     } else {
       box.innerHTML = UI.iconSvg(role === "user" ? "account" : "creation");
@@ -929,6 +946,25 @@
     setTimeout(scrollPhoneBottom, 20);
   }
 
+  /* 开场白按钮：只有「空对话 + 还没生成过」才出现（跟主聊天同一套判定）。 */
+  function syncPhoneOpening() {
+    var btn = $("#phoneOpeningBtn");
+    if (!btn) return;
+    if (!btn.dataset.bound) {
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", function () {
+        if (window.DL && window.DL.startOpening) window.DL.startOpening(ps.sid);
+      });
+    }
+    var s = ps.sid ? sessionById(ps.sid) : null;
+    var mine = !!(s && (s.messages || []).some(function (m) { return m && m.role === "user"; }));
+    var show = !!(s && ps.view === "chat" && !mine && !state.busy);
+    var said = !!(s && (s.messages || []).some(function (m) { return m && m.role === "assistant"; }));
+    var label = btn.querySelector("span:last-child");
+    if (label) label.textContent = said ? "再说一次" : "生成第一句话";
+    btn.hidden = !show;
+  }
+
   function renderChat() {
     var box = $("#phoneMsgs");
     if (!box) return;
@@ -959,6 +995,8 @@
       box.appendChild(el);
     });
     prevCount = total;
+    syncPhoneOpening();
+    if (window.DL && window.DL.bindEmojiPanel) window.DL.bindEmojiPanel();
   }
 
   /* 居中的时间分隔（走故事时间） */
@@ -1152,7 +1190,7 @@
     var s = sessionById(ps.sid);
     var ch = characterFor(s);
     var avUrl;
-    if (m.role === "user") avUrl = state.settings.avatarUser || "";
+    if (m.role === "user") avUrl = state.settings.phoneAvatarUser || state.settings.avatarUser || "";
     else if (m.speaker) avUrl = avatarOf(charById(m.speaker) || ch, s);
     else avUrl = avatarOf(ch, s);
     wrap.appendChild(avatarEl(avUrl, m.role === "user" ? "user" : "assistant"));
@@ -1197,6 +1235,7 @@
     }
     col.appendChild(bubble);
     wrap.appendChild(col);
+    try { if (UI.stickerize) UI.stickerize(col); } catch (e) { /* ignore */ }
     /* 长按气泡弹菜单（10-18）：对方的消息能重说/修改/删，自己的能撤回 */
     if (m.kind !== "sys" && m.kind !== "recalled") {
       bindLongPress(bubble, function () { openMsgMenu(m); });
@@ -1874,7 +1913,13 @@
     var ses = sessionById(sid);
     var missF = (window.DL && window.DL.charMissingFields) ? window.DL.charMissingFields(ses) : [];
     if (missF.length) {
-      toast("这个角色还差 " + missF.length + " 栏设定才能开始对话：" + missF.slice(0, 3).join("、") + (missF.length > 3 ? "…" : ""), true);
+      /* 手机页没有填设定的入口（10-19：「相熟型」角色会走到这里），
+         所以提示里必须写清去哪儿补，否则用户只知道被拦住、不知道怎么办。 */
+      var how = (ses && ses.phoneOnly)
+        ? "。补设定：侧栏 → 角色 → 选中这个联系人，或在角色卡里把「手机角色类型」改回功能型"
+        : "。补设定：侧栏 → 角色 → 选中这个角色";
+      toast("这个角色还差 " + missF.length + " 栏设定才能开始对话：" + missF.slice(0, 3).join("、") +
+        (missF.length > 3 ? "…" : "") + how, true);
       return;
     }
     pushMsg(sid, { role: "user", kind: "text", text: text });
@@ -2487,7 +2532,7 @@
     wrap.className = "ph-moment";
     var head = document.createElement("div");
     head.className = "ph-moment-head";
-    head.appendChild(avatarEl(state.settings.avatarUser || "", "user"));
+    head.appendChild(avatarEl(state.settings.phoneAvatarUser || state.settings.avatarUser || "", "user"));
     var meta = document.createElement("div");
     meta.className = "ph-moment-meta";
     var nm = document.createElement("div");
@@ -2745,7 +2790,12 @@
     on("#phoneSetBtn", "click", function () { openPhoneSettings(); });
     on("#phoneMore", "click", function () {
       var row = document.querySelector("#phoneChatView .phone-actions");
-      if (row) row.hidden = !row.hidden;
+      if (row) {
+        row.hidden = !row.hidden;
+        /* 图标补注入：这一块在启动那次 applyIcons 之后没再刷新过，
+           真机上出现过「方块是空的」—— 展开时补一遍最省事，也不影响别的区域 */
+        if (!row.hidden && UI.applyIcons) UI.applyIcons(row);
+      }
     });
     on("#phoneActTransfer", "click", doTransfer);
     on("#phoneActLoc", "click", doLocation);
@@ -2802,7 +2852,8 @@
     /* 删一条手机消息（连同绑定的主聊天那条）。名字带 Phone 前缀，
        免得以后主聊天那边也挂一个 deleteMsg 撞名。 */
     deletePhoneMessage: function (msg) { return deletePhoneMsg(ps.sid, msg); },
-    splitSpeakers: function (t, s) { return splitPhoneSpeakers(t, s); }
+    splitSpeakers: function (t, s) { return splitPhoneSpeakers(t, s); },
+    syncPhoneOpening: function () { return syncPhoneOpening(); }
   };
   Object.keys(api).forEach(function (k) {
     D[k] = function () { syncModules(); return api[k].apply(null, arguments); };

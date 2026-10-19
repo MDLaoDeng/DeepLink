@@ -16,15 +16,41 @@
   }
 
   /* 取一条消息当前选中版本的文本（兼容多版本） */
+  /* 表情 → 文字说明。模型看不见图，只能靠名字和意思认。
+     自添加的表情包按 id 去 settings.stickers 里找（name / means 是上传时让 AI 写的）。 */
+  function emojiReadable(text) {
+    let t = String(text || "");
+    if (!t) return t;
+    const pack = (window.CONFIG && window.CONFIG.EMOJI_PACK) || [];
+    const sets = (window.DL && window.DL.state && window.DL.state.settings) || {};
+    const stickers = sets.stickers || [];
+    /* 自添加：先把 token 换掉，避免后面的字符替换误伤 */
+    if (t.indexOf("[[s:") >= 0) {
+      t = t.replace(/\[\[s:([a-z0-9]+)\]\]/g, function (m, id) {
+        const st = stickers.filter(function (x) { return x && x.id === id; })[0];
+        if (!st) return "[表情包]";
+        const name = st.name || "表情";
+        return st.means ? ("[表情包:" + name + "｜" + st.means + "]") : ("[表情包:" + name + "]");
+      });
+    }
+    /* 内置：逐个字符换。名字优先，没名字就跳过（保持原样） */
+    for (let i = 0; i < pack.length; i++) {
+      const it = pack[i];
+      if (!it || !it.e || !it.n) continue;
+      if (t.indexOf(it.e) >= 0) t = t.split(it.e).join("[表情:" + it.n + "]");
+    }
+    return t;
+  }
+
   function msgText(m) {
     if (!m) return "";
     if (m.role === "user") {
-      if (Array.isArray(m.variants) && m.variants.length) return String(m.variants[m.vi || 0] || "");
-      return String(m.content || "");
+      if (Array.isArray(m.variants) && m.variants.length) return emojiReadable(m.variants[m.vi || 0] || "");
+      return emojiReadable(m.content || "");
     }
     const vs = Array.isArray(m.variants) && m.variants.length ? m.variants : [{ content: m.content }];
     const v = vs[m.vi || 0] || vs[0] || {};
-    return String(v.content || "");
+    return emojiReadable(v.content || "");
   }
 
   /* 这条线的「AI 这边」到底叫什么。**必须带具体名字**：一律标成「角色：」的话，
@@ -152,6 +178,24 @@
     const f = ch.fields || {};
     const my = resolveMy(settings, f);
     const L = [CONFIG.ROLEPLAY_PROMPT, ""];
+    /* 表情包（10-19）：只把「能用」的列给模型 —— scope=me 的是用户自己用的，不列。
+       写法是 [表情:名字]，渲染层会把它画成图；不写就不发，绝不强求。 */
+    const _pk = (window.CONFIG && CONFIG.EMOJI_PACK) || [];
+    const _stk = (settings && settings.stickers) || [];
+    /* 自添加的最多列 12 个：表情包攒到几十张以后，全列进去每次请求都要多烧几百 token，
+       而模型也用不上那么多名字。去重是同名贴纸的保险（存储层已经保证不重名）。 */
+    const _mine = _stk.filter(function (x) { return (x.scope || "both") !== "me" && x.name; })
+      .map(function (x) { return String(x.name); })
+      .filter(function (n, i, arr) { return arr.indexOf(n) === i; })
+      .slice(0, 12);
+    const _names = _pk.map(function (x) { return x.n; }).filter(Boolean).concat(_mine);
+    const _emojiHint = _names.length
+      ? "【表情包】你可以偶尔发一个表情代替说话（想逗他、害羞、无语、撒娇、被说中的时候）。" +
+        "能用的表达：" + _names.join("、") + "。" +
+        "想发就单独一行写 [表情:名字]（名字必须是上面列出的之一），不要塞进句子中间；" +
+        "不想发就别写。没有情绪落点的时候不要发，一条回复最多一个。"
+      : "";
+
     const _tl = timeLine(ch, s);
     if (_tl) { L.push(_tl); L.push(""); }
     L.push("【我（用户）的设定】");
@@ -179,6 +223,13 @@
     if (s && s.cognition) { L.push(""); L.push("【对用户的认知】"); L.push(s.cognition); }
     const mem = memoryText(s && s.memory);
     if (mem) { L.push(""); L.push("【记忆摘要】"); L.push(mem); }
+    /* 相熟型的手机角色：人在手机那头，不在一间屋里（10-19） */
+    if (ch.phoneKind === "close") {
+      L.push("");
+      L.push("【联系方式的限定】你们只通过手机联系，彼此不在同一个空间。写「当前场景」时不要写成两人同处一室、面对面或正在一起做什么；" +
+        "场景只能是各自所在的地方（比如他那边在加班、你这边刚回家），需要见面就当作还没见。");
+    }
+    if (_emojiHint) { L.push(""); L.push(_emojiHint); }
     return L.join("\n").trim();
   }
 
@@ -520,7 +571,12 @@
         const out = await summarize(settings, CONFIG.COMPRESS_PROMPTS.daily, "日期：" + d + "\n\n" + text, 700);
         usage = Api.sumUsage(usage, out.usage);
         if (out.text.trim()) {
-          m.days.push({ date: d, summary: out.text.trim() });
+          /* 同一天可能已经有条目（「同步到各自线」会先往当天摘要里写一段群聊记忆）。
+             原来无条件 push，第二天压缩时就会多出一条同 date 的记录 —— memoryText 里
+             同一天打印两遍，周压缩也把同一天当两段素材。这里改成按日期合并。 */
+          const exist = m.days.filter((x) => x && x.date === d)[0];
+          if (exist) exist.summary = String(exist.summary || "") + "\n" + out.text.trim();
+          else m.days.push({ date: d, summary: out.text.trim() });
           newParts.push(d + "：" + out.text.trim());
         } else {
           /* 模型没吐出摘要：**别**把这天标记成「已覆盖」——那样它的原文此后既不再喂给模型、
@@ -836,6 +892,9 @@
   }
 
   window.Memory = { buildSystemText, personaText, memoryText, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, correctMemory, activePersona,
+    /* 表情 → 可读说明（10-19）：手机那边有自己的 msgText，也要用同一套翻译，
+       否则模型收到的是 [[s:xxx]] 这种原始标记 */
+    emojiReadable, msgText,
     /* 故事时间轴（10-15）：主对话 / 手机 / 世界生成 / 摘要都读它 */
     hasTimeline, timeOffset, nowOf, storyAt, fmtStory, fmtStoryShort, weekdayOf,
     validRange, checkTime, timeLine, parseYMD, addYears, ageOf, tryJumpTime, DAY_MS, fmtHM,

@@ -18,7 +18,7 @@
     <span class="w2" id="splashW2">Link</span>
     <span class="splash-line"></span>
   </div>
-  <div class="splash-credit" id="splashCredit">耄耋老登/DS共同制作</div>
+  <div class="splash-credit" id="splashCredit">菠萝味柠檬汁/DS共同制作</div>
 </div>
 <script>
 /* 启动自愈：偶尔样式表没加载上、或主题变量没注入（症状：白底黑字、没有边框），
@@ -243,6 +243,9 @@
       <button id="modeBtn" class="icon-btn" type="button" aria-label="切换日间/夜间"><span data-icon="white-balance-sunny"></span></button>
     </header>
 
+    <button id="openingBtn" class="opening-btn" type="button" hidden>
+      <span data-icon="message-plus-outline"></span><span>生成第一句话</span>
+    </button>
     <section id="messages" class="messages"></section>
 
     <div id="dropHint" class="drop-hint">松手即可添加文件</div>
@@ -256,7 +259,24 @@
       </div>
     </div>
 
-    <div class="composer">
+      <div class="composer">
+
+      <div id="stickerImport" class="sticker-import" hidden>
+        <div class="si-mask"></div>
+        <div class="si-card">
+          <div class="si-head"><span>选择要添加的表情</span><span id="siCount" class="si-count"></span></div>
+          <div class="emoji-scopes si-scopes">
+            <button class="emoji-scope si-scope on" type="button" data-scope="both">都能用</button>
+            <button class="emoji-scope si-scope" type="button" data-scope="ai">TA 用</button>
+            <button class="emoji-scope si-scope" type="button" data-scope="me">自己用</button>
+          </div>
+          <div id="siGrid" class="si-grid"></div>
+          <div class="si-actions">
+            <button id="siCancel" class="btn ghost" type="button">取消</button>
+            <button id="siOk" class="btn primary" type="button">导入</button>
+          </div>
+        </div>
+      </div>
       <div id="attachmentBar" class="attachment-bar"></div>
       <div class="composer-row">
         <button id="plusBtn" class="icon-btn plus-btn" type="button" aria-label="拍照或上传文件" title="拍照 / 上传文件"><span data-icon="plus"></span></button>
@@ -325,6 +345,18 @@
         </div>
         <p class="hint">最多 6 套配置，每套填一个平台的接口地址与密钥（DeepSeek 之外也可以，见「使用指南」）。<b>模型</b>一栏每行写一个模型名；聊天页右上角点模型名，就能在这些配置的模型之间切换主模型。</p>
         <label class="check-field"><input type="checkbox" id="setMainCompat"><span>模型兼容（主模型自己就是多模态）</span></label>
+        <div class="char-actions">
+          <button id="detectCapsBtn" class="btn ghost" type="button">检测主模型能力</button>
+        </div>
+        <div id="capsLine" class="hint"></div>
+        <p class="hint">为什么要按能力限制上传类型：模型读不了图的时候，你传进去也只会等一轮再拿到一句「不支持图片」。先卡住上传，是省掉这一轮白等，不是不给你用。</p>
+        <div id="capsManual" class="caps-manual">
+          <span class="hint">表里没收录的模型，可以自己勾（勾了就以你勾的为准）：</span>
+          <label class="check-field"><input type="checkbox" id="capVision"><span>能看图</span></label>
+          <label class="check-field"><input type="checkbox" id="capAsr"><span>能听音</span></label>
+          <label class="check-field"><input type="checkbox" id="capTts"><span>能朗读</span></label>
+          <label class="check-field"><input type="checkbox" id="capImg"><span>能画图</span></label>
+        </div>
         <p class="hint"><b>不开（默认）</b>：主模型只当纯文字模型用，图片一律先由「视觉模型」转成文字描述再喂给它；听觉 / 朗读 / 画图也各走各的模型。<b>开启</b>：主模型能看图，图片直接交给它，视觉区那套配置不再参与（看图一律走主模型）。无论主模型是不是多模态，不开这个开关行为都一样——所以只有你确定主模型看得懂图时才勾。</p>
       </div>
 
@@ -349,6 +381,18 @@
               <button class="btn ghost" id="setAvatarAiClear" type="button">清除</button>
             </div>
           </div>
+        </div>
+        <div class="field">
+          <span>我的默认手机头像（只在手机页用）</span>
+          <div class="avatar-field">
+            <div class="avatar-preview" id="setPhoneAvUserPreview"></div>
+            <div class="avatar-btns">
+              <button class="btn" id="setPhoneAvUserPick" type="button">选择图片</button>
+              <button class="btn ghost" id="setPhoneAvUserAi" type="button">AI 生成</button>
+              <button class="btn ghost" id="setPhoneAvUserClear" type="button">清除</button>
+            </div>
+          </div>
+          <p class="hint">留空就沿用上面那张「我的头像」。手机页里「我」的气泡用这一张。</p>
         </div>
       </div>
 
@@ -516,6 +560,7 @@
       <div class="settings-section">
         <h3 class="sec-head">角色扮演 · 记忆压缩<button class="btn ghost mini" type="button" data-reset="memory">重置本区</button></h3>
         <label class="check-field"><input type="checkbox" id="setRoleplayEnabled"><span>启用角色扮演模式（侧栏出现角色切换）</span></label>
+        <label class="check-field"><input type="checkbox" id="setGroupWarn" checked><span>群里改 / 删消息前先弹强提醒（5 秒后才能确认）</span></label>
         <p class="hint">全局「我的设定」：角色里留空时用这里的值。</p>
         <label class="field"><span>我的昵称（也叫这个名字；酒馆卡里的 <code>{{user}}</code> 也替换成它）</span><input id="setMyName" type="text" placeholder="留空则显示为「你」"></label>
         <label class="field"><span>我的性格</span><textarea id="setMyPersona" rows="2"></textarea></label>
@@ -626,7 +671,7 @@
           <option value="5">头像 · 先出图再出字</option>
         </select></label>
         <label class="field"><span>主文字（留空＝DeepLink）</span><input id="setSplashText" type="text" placeholder="DeepLink"></label>
-        <label class="field"><span>底部小字（留空＝默认署名）</span><input id="setSplashSub" type="text" placeholder="耄耋老登/DS共同制作"></label>
+        <label class="field"><span>底部小字（留空＝默认署名）</span><input id="setSplashSub" type="text" placeholder="菠萝味柠檬汁/DS共同制作"></label>
         <label class="field"><span>启动图片（可留空；填 avatars/xxx.png 或图片地址）</span><input id="setSplashImage" type="text" placeholder="avatars/shenyan.png"></label>
         <label class="field"><span>或选一个角色头像</span><select id="setSplashAvatar"></select></label>
         <p class="hint">图片优先于角色头像。改完<b>下次启动</b>生效。图片要是加载失败，会在后台自动重试，重试期间启动页不会提前退出。</p>
@@ -917,6 +962,27 @@
           </div>
         </div>
         <div id="charForm"></div>
+        <div class="field">
+          <span>手机角色类型（只影响手机页）</span>
+          <select id="cfPhoneKind">
+            <option value="casual">功能型 / 还不熟（先聊着，不校验设定）</option>
+            <option value="close">相熟型（要填完整设定，且只通过手机联系）</option>
+          </select>
+          <p class="hint">选「相熟型」后，发消息前会要求把角色那十几栏填齐；聊顺了再改过来也算「转正」。</p>
+        </div>
+        <div class="field">
+          <span>默认手机头像（手机页用）</span>
+          <div class="avatar-field">
+            <div class="avatar-preview" id="cfPhAvPreview"></div>
+            <div class="avatar-btns">
+              <button class="btn" id="cfPhAvPick" type="button">选择图片</button>
+              <button class="btn ghost" id="cfPhAvAi" type="button">AI 生成</button>
+              <button class="btn ghost" id="cfPhAvClear" type="button">清除</button>
+            </div>
+          </div>
+          <p class="hint">留空就沿用角色头像。手机页的列表和气泡都用这一张。</p>
+          <input type="file" id="cfPhAvInput" accept="image/*" hidden>
+        </div>
         <p class="hint">「当前场景 / 对我的认知 / 记忆压缩 / 自动备份」都在每条对话的「对话设置」里（同一个角色可有主线 + 支线，各自分开）。</p>
         <div class="settings-section">
           <h3 class="sec-head">上下文筛选（只裁角色读到的，不改聊天记录）<button class="btn ghost mini" type="button" data-reset="charfilter">重置</button></h3>
@@ -960,7 +1026,7 @@
     </div>
     <div class="modal-body">
       <div id="usageGlobal" class="usage-list"></div>
-      <div class="settings-section"><h3>按类型</h3><p class="hint">除对话外的一切 AI 消耗（记忆压缩 / 认知、日更、世界生成、状态量化、群聊、动态筛选、助手总结、情绪日记、手机、自动发信息、快捷回复等）都在这儿。</p><div id="usageCats" class="usage-list"></div></div>
+      <div class="settings-section"><h3>按类型</h3><p class="hint">除对话外的一切 AI 消耗（记忆压缩 / 认知、日更、世界生成、状态量化、群聊、动态筛选、助手总结、情绪日记、手机、自动发信息、快捷回复、表情包命名、模型能力检测、图片转文字等）都在这儿。</p><div id="usageCats" class="usage-list"></div></div>
       <div class="settings-section"><h3>按会话</h3><div id="usageSessions" class="usage-list"></div></div>
       <div class="settings-section"><h3>按角色</h3><div id="usageChars" class="usage-list"></div></div>
       <p class="hint">缓存命中率 = 命中 tokens ÷ 输入 tokens（DeepSeek 自动上下文缓存）。花费为估算值，可在「设置 → 用量花费」里调整计费标准。</p>
@@ -1317,6 +1383,32 @@
               <p><b>「跳过这个版本」</b>：更新弹窗里点「取消」= 这个版本先不提醒了（自动检查不再弹它），但<b>手动点「检查更新」仍会提示</b>。</p>
               <p><b>外链为什么不会在应用里打开</b>：指南里的 DeepSeek 开放平台、硅基流动、Tavily 这些链接，点了是<b>交给系统浏览器</b>打开，不会把应用界面顶掉。万一封装工具没提供「打开链接」的原生接口，会退回复制链接并提示你粘到浏览器——无论如何都不会在应用内跳走。</p>
             </div>
+            <div class="guide-sec">
+              <h4>十八、模型能力与可上传的文件类型</h4>
+              <p><b>为什么要限制上传类型</b>：模型读不了图的时候，你传进去也只会白等一轮，再拿到一句「不支持图片」。先把文件选择器卡住，省的是这一轮时间，不是不让你用。</p>
+              <p><b>能力是怎么判出来的</b>（设置 → 主模型 → 检测主模型能力），顺序是：<b>内置表</b>（常见模型直接命中，不发请求、不花钱）→ <b>问模型自己</b>（用你填的 key 调一次，让它只回一段 JSON）→ 都没问出来，<b>就先不限制</b>，结果行会如实写「未确认」。</p>
+              <p><b>「没确认」不等于「不支持」</b>：这一版改了判断口径——问不出结论时上传类型原样放开，不会因为你打开过一次设置就把图片入口关掉。判定为<b>纯文本</b>才真的收紧，而且只收紧主聊天那个文件选择器。</p>
+              <p><b>配了独立视觉模型就不受这个限制</b>：主模型看不了图、但你在「设置 → 视觉」里配了能看图的模型时，图片照样能传——发送前先用视觉模型转成文字描述，再交给主模型。上传类型跟着这条链路一起放开。</p>
+              <p><b>手动勾的那四个优先级最高</b>（看图 / 听音 / 朗读 / 画图）：勾过之后<b>不再自动重测</b>，也不会被后台结果冲掉。模型能力变得很快（例如 DeepSeek 从 V4.1 Flash 起就能看图了），看到表里的旧结论又不服气，直接勾一下，别跟内置表较劲。</p>
+              <p><b>这一轮检测花了多少</b>：走内置表不花钱；走「问模型自己」是一次真实调用，记在用量统计的「<b>模型能力检测</b>」一栏。同一个模型名问过一次没结论，不会每次进设置都再问。</p>
+            </div>
+            <div class="guide-sec">
+              <h4>十九、联网搜索（含 DeepSeek 自带搜索）</h4>
+              <p><b>搜索源在「设置 → 搜索」里选</b>：Tavily、自定义接口、DeepSeek，或者 <b>auto</b>。auto 的规则是：主模型是 DeepSeek 时<b>先走它自己的搜索</b>（质量稳、带长摘要），失败或没结果再退到免费源——你永远拿得到东西。</p>
+              <p><b>DeepSeek 搜索有两条通道</b>：先打 <code>/v1/tools/search</code>（纯检索，便宜）；这条不通或返回空，会自动退到官方文档明确支持的 <code>/anthropic/v1/messages</code> + <code>web_search_20250305</code> 服务端工具。</p>
+              <p><b>官方通道只给答案、没给来源块时</b>：结果区会出现一条「DeepSeek 联网答复」，它是不可点的——那不是链接坏了，是这次确实没取到网址，只取到了正文。以前这种结果会被过滤掉，看着像「搜了个寂寞」。</p>
+              <p><b>费用差别要心里有数</b>：纯检索只算检索的钱；带搜索的那次 Messages 调用<b>等于完整跑了一轮模型</b>（官方没有独立检索端点）。所以是「先便宜后贵」，不是每次都贵。</p>
+              <p><b>注意 <code>chat/completions</code> 不支持搜索</b>：往里塞 <code>web_search_options</code> 或 <code>enable_search</code> 不会报错，但也不会检索（返回里没有引用、用量也不变）。要用官方搜索只能用 Responses 或 Anthropic 兼容 Messages 那两个接口。</p>
+            </div>
+            <div class="guide-sec">
+              <h4>二十、表情包：内置 48 个，也能加自己的</h4>
+              <p><b>入口在手机聊天</b>：输入栏右边那个笑脸。点开是两栏——「常规表情包」是内置的 48 个，「自添加表情包」是你自己传的图。</p>
+              <p><b>点一下插进输入框</b>：内置那栏点任意一个，字符会插到手机输入框的光标处，发出去显示成图（不再是系统 emoji）。点面板外面或再点一次笑脸就收起。</p>
+              <p><b>加自己的表情</b>：自添加那栏右上角「<b>+</b>」→ 选图（可多选）→ 面板里默认全选，点掉不要的 → 上方选范围 → 「导入」。图会压到最大边 192、保持原比例、保留透明，长条表情不会被切。</p>
+              <p><b>三档使用范围</b>：都能用 / TA 用 / 自己用。<b>长按</b>任意一张可以直接改它属于哪档（改之前先切到对应页签，切页签会自动退出改范围态，避免改错对象）。「自己用」那档不会出现在给模型的清单里。</p>
+              <p><b>模型也会发表情</b>：系统提示词里会把它<b>能用的表情名字</b>列给模型，它想逗你、害羞、无语时可以在单独一行写 <code>[表情:名字]</code>，渲染出来就是那张图。它看不见图，认的是<b>名字和意思</b>——所以表情的名字取得说得通很重要，配了视觉模型时程序会自动看图写一个。</p>
+              <p><b>花费记在哪</b>：自动命名会调一次视觉模型，记在用量统计的「<b>表情包命名</b>」一栏。没配视觉模型就不调，直接用「表情1、表情2」这样的默认名。</p>
+            </div>
           </div>
         </details>
         <div class="row-actions" style="justify-content:flex-start;margin-top:12px">
@@ -1395,7 +1487,7 @@
         </div>
         <div class="intro-page" hidden>
           <div class="intro-h">省心小功能</div>
-          <p class="intro-p">· <b>快捷回复</b>：输入框<b>左边</b>（加号右边）那个无边框按钮，AI 站在你的立场给几条「这时可以怎么回」，可以换批、点铅笔填进输入框；<b>继续说</b>在角色最后一条消息的操作栏里。<br>· <b>故事时间</b>：给角色填上出生日期和年龄，就能锁定他的合法时段；顶栏「对话设置」按钮上直接显示故事里的时:分。<br>· <b>剧情卡</b>：世界生成采纳后浮一张居中的卡，点开铺满全屏看全文。<br>· 记忆压缩 / 再压缩 / 上下文筛选：让长对话不越聊越贵。<br>· 图片（自己发的 / AI 画的）会在若干轮后删原图、只留「<b>视觉模型</b>」写的文字描述，省空间也省 token。<br>· 对话很长时只先渲染<b>最近 20 条</b>、往上滑再加载，不会越拉越卡。<br>· 对话和角色都能<b>置顶、排序</b>（长按即可）。<br>· 记忆栏能看记忆，记错了可用「<b>记忆纠偏</b>」让 AI 纠正（勿滥用）。<br>· 消息「重新说」存了多版本时，记忆与认知以你<b>当前选定的版本</b>为准。<br>· 用量统计与预警：随时看花了多少。<br>· 导入导出与自动备份：换机、防丢。<br>· <b>群聊</b>：建群时每位成员绑一条线；「对话设置」里能看<b>对彼此的认知</b>（一人一条折叠条，可开关、手动更新），也能一键<b>同步到各自线</b>。<br>· <b>检查更新</b>：设置 → 关于，启动时每天自动查一次，有新版本才提示；装之前记得先导出备份。</p>
+          <p class="intro-p">· <b>快捷回复</b>：输入框<b>左边</b>（加号右边）那个无边框按钮，AI 站在你的立场给几条「这时可以怎么回」，可以换批、点铅笔填进输入框；<b>继续说</b>在角色最后一条消息的操作栏里。<br>· <b>故事时间</b>：给角色填上出生日期和年龄，就能锁定他的合法时段；顶栏「对话设置」按钮上直接显示故事里的时:分。<br>· <b>剧情卡</b>：世界生成采纳后浮一张居中的卡，点开铺满全屏看全文。<br>· 记忆压缩 / 再压缩 / 上下文筛选：让长对话不越聊越贵。<br>· 图片（自己发的 / AI 画的）会在若干轮后删原图、只留「<b>视觉模型</b>」写的文字描述，省空间也省 token。<br>· 对话很长时只先渲染<b>最近 20 条</b>、往上滑再加载，不会越拉越卡。<br>· 对话和角色都能<b>置顶、排序</b>（长按即可）。<br>· 记忆栏能看记忆，记错了可用「<b>记忆纠偏</b>」让 AI 纠正（勿滥用）。<br>· 消息「重新说」存了多版本时，记忆与认知以你<b>当前选定的版本</b>为准。<br>· 用量统计与预警：随时看花了多少。<br>· 导入导出与自动备份：换机、防丢。<br>· <b>群聊</b>：建群时每位成员绑一条线；「对话设置」里能看<b>对彼此的认知</b>（一人一条折叠条，可开关、手动更新），也能一键<b>同步到各自线</b>。<br>· <b>表情包</b>：手机输入栏那个笑脸，内置 48 个；也能自己加图，按「都能用 / TA 用 / 自己用」分范围，模型会挑着发。<br>· <b>模型能力检测</b>：设置 → 主模型 → 检测主模型能力，按结论决定能传哪些文件；配了独立视觉模型就不受这个限制。<br>· <b>检查更新</b>：设置 → 关于，启动时每天自动查一次，有新版本才提示；装之前记得先导出备份。</p>
           <p class="intro-p">更多在「设置 → 关于 → 使用指南」。</p>
         </div>
       </div>
@@ -1765,20 +1857,47 @@
         <button id="phoneCloseBtn2" class="icon-btn" type="button" aria-label="关闭"><span data-icon="close"></span></button>
       </div>
       <div id="phoneTypingBar" class="phone-typing-bar" hidden>对方正在输入…</div>
+      <button id="phoneOpeningBtn" class="opening-btn phone-opening" type="button" hidden>
+        <span data-icon="message-plus-outline"></span><span>生成第一句话</span>
+      </button>
       <div id="phoneMsgs" class="phone-msgs"></div>
       <div class="phone-actions" hidden>
-        <button id="phoneActCall" class="phone-act" type="button"><span data-icon="phone-outline"></span><span>电话</span></button>
-        <button id="phoneActTransfer" class="phone-act" type="button"><span data-icon="cash"></span><span>转账</span></button>
-        <button id="phoneActLoc" class="phone-act" type="button"><span data-icon="map-marker-outline"></span><span>位置</span></button>
-        <button id="phoneActImg" class="phone-act" type="button"><span data-icon="image-outline"></span><span>图片</span></button>
-        <button id="phoneActVoice" class="phone-act" type="button"><span data-icon="microphone"></span><span id="phoneActVoiceLabel">语音</span></button>
-        <button id="phoneActVideo" class="phone-act" type="button"><span data-icon="video-outline"></span><span>视频</span></button>
-        <button id="phoneActAvatar" class="phone-act" type="button"><span data-icon="account"></span><span>这条线</span></button>
+        <button id="phoneActCall" class="phone-act" type="button"><span class="act-tile" data-icon="phone-outline"></span><span>电话</span></button>
+        <button id="phoneActImg" class="phone-act" type="button"><span class="act-tile" data-icon="image-outline"></span><span>相册</span></button>
+        <button id="phoneActVideo" class="phone-act" type="button"><span class="act-tile" data-icon="video-outline"></span><span>视频通话</span></button>
+        <button id="phoneActLoc" class="phone-act" type="button"><span class="act-tile" data-icon="map-marker-outline"></span><span>位置</span></button>
+        <button id="phoneActTransfer" class="phone-act" type="button"><span class="act-tile" data-icon="cash"></span><span>转账</span></button>
+        <button id="phoneActVoice" class="phone-act" type="button"><span class="act-tile" data-icon="microphone"></span><span id="phoneActVoiceLabel">语音输入</span></button>
+        <button id="phoneActAvatar" class="phone-act" type="button"><span class="act-tile" data-icon="account"></span><span>这条线</span></button>
       </div>
       <div class="phone-composer">
+      <div id="emojiPanel" class="emoji-panel phone-emoji-panel" hidden>
+        <div class="emoji-tabs">
+          <button class="emoji-tab on" type="button" data-tab="builtin">常规表情包</button>
+          <button class="emoji-tab" type="button" data-tab="custom">自添加表情包</button>
+        </div>
+
+        <div id="emojiBuiltinPane" class="emoji-pane">
+          <div id="emojiGrid" class="emoji-grid"></div>
+        </div>
+
+        <div id="emojiCustomPane" class="emoji-pane" hidden>
+          <div class="emoji-scopes">
+            <button class="emoji-scope on" type="button" data-scope="both">都能用</button>
+            <button class="emoji-scope" type="button" data-scope="ai">TA 用</button>
+            <button class="emoji-scope" type="button" data-scope="me">自己用</button>
+            <button id="stickerAddBtn" class="emoji-add" type="button" aria-label="添加表情">+</button>
+          </div>
+          <div id="stickerGrid" class="emoji-grid"></div>
+          <div class="emoji-tip">长按可改范围；范围在选图页也能先定好</div>
+        </div>
+
+        <input type="file" id="stickerInput" accept="image/*" multiple hidden>
+      </div>
         <button id="phoneSetBtn" class="icon-btn" type="button" aria-label="手机设置"><span data-icon="cog-outline"></span></button>
         <button id="phoneMore" class="icon-btn" type="button" aria-label="更多功能"><span data-icon="plus"></span></button>
         <input id="phoneInput" class="phone-input" type="text" placeholder="发消息…">
+        <button id="emojiBtn" class="icon-btn emoji-btn" type="button" aria-label="表情" title="表情"><span data-icon="emoticon-outline"></span></button>
         <button id="phoneSend" class="phone-send" type="button">发送</button>
       </div>
     </div>

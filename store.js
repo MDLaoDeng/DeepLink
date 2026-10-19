@@ -204,12 +204,18 @@
       return out;
     } catch (e) { readError = true; return undefined; }
   }
+  /* 最近一次写盘到底成没成。
+     localStorage 配额满 / 原生 KV 被锁时 setItem 会抛，writeRaw 吞掉了异常只回 false ——
+     以前调用方（尤其 saveSettings）根本不看这个返回值，于是「设置已保存」照样弹出来，
+     重启后全回落。这里记一笔，界面在关键保存点查一下就能如实报错。 */
+  let lastWriteOk = true;
   function writeRaw(key, value) {
     try {
-      if (pickBackend() === "native") { nativeKV()["存储指定文本"](key, String(value)); return true; }
+      if (pickBackend() === "native") { nativeKV()["存储指定文本"](key, String(value)); lastWriteOk = true; return true; }
       localStorage.setItem(key, value);
+      lastWriteOk = true;
       return true;
-    } catch (e) { return false; }
+    } catch (e) { lastWriteOk = false; return false; }
   }
   function removeRaw(key) {
     try {
@@ -419,6 +425,7 @@
   const brokenMem = {};
   let memSeq = 0;
   let memPending = Promise.resolve();
+  let memUnlockPromise = null;   /* 启动解锁只跑一次，后来者共享同一个 Promise（见 unlockMemory） */
 
   function cryptoOk() {
     try { return !!(window.crypto && window.crypto.subtle && window.TextEncoder && window.btoa); } catch (e) { return false; }
@@ -699,6 +706,69 @@
     })().catch(() => {});
   }
 
+  /* 启动时解一次记忆密文（异步）；解不开的就当空，绝不把密文当明文用。
+     顺手把老的 dl1 记下来，解完统一换成 dl2。
+     ⚠️ 并发语义（原来是错的）：整段只跑一次，后来者拿【同一个 Promise】。
+        老写法 `if (memUnlocked) return;` 会让第二条调用立刻「成功返回」，而第一条的
+        PBKDF2（12 万次迭代）和解密还在路上 —— 谁 await 谁就被骗。表现出来就是同一份
+        代码连跑两次、红了不同断言，看着随机，其实是等错了对象。 */
+  async function memUnlockWork() {
+    if (memUnlocked) return;
+    const raw = readRaw(K_SESSIONS);
+    const arr = raw === undefined ? [] : safeParse(raw, []);
+    const list = Array.isArray(arr) ? arr : [];
+    const legacy = [];
+    let upgraded = 0;   /* 本次把「老明文三项」并进载荷的条数 → 解完统一回写成密文 */
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (!s || typeof s !== "object") continue;
+      let hasPlain = false;
+      for (let k = 0; k < MEM_EXTRA.length; k++) { if (s[MEM_EXTRA[k]]) { hasPlain = true; break; } }
+      const hasPlainMem = s.memory !== undefined || s.cognition !== undefined;
+      if (!s.memEnc && !hasPlain && !hasPlainMem) continue;   /* 这条没东西要管 */
+      let p = null;
+      if (s.memEnc) {
+        try {
+          const txt = await decryptMem(s.memEnc);
+          if (txt) {
+            p = JSON.parse(txt);
+            cipherMem[s.id] = s.memEnc;
+            encPlain[s.id] = txt;
+            if (isLegacyEnc(s.memEnc)) legacy.push(s.id);
+          }
+        } catch (e) { p = null; }   /* 解不开：保持空，绝不把密文当明文用 */
+        /* 有密文却解不出来 → 打标记，后面一律不许覆盖（见 brokenMem 注释） */
+        if (!p) brokenMem[s.id] = true;
+      }
+      if (p) {
+        /* 老密文只装了记忆 → 把还留在明文里的三项并进来（并完由下面统一回写） */
+        for (let k = 0; k < MEM_EXTRA.length; k++) {
+          const key = MEM_EXTRA[k];
+          if ((p[key] === undefined || p[key] === "") && s[key]) { p[key] = s[key]; upgraded++; }
+        }
+        plainMem[s.id] = p;
+      } else if (!s.memEnc) {
+        /* 老版从没加密过（没密文）→ 记忆 + 三项一起组个新载荷 */
+        plainMem[s.id] = Object.assign(
+          { memory: s.memory || null, cognition: s.cognition || "" }, memExtraOf(s));
+        upgraded++;
+      }
+    }
+    memUnlocked = true;
+    sessionsCache = null;
+    /* 角色卡跟记忆同一把钥匙，一并解开；解完渲染前一定拿到明文 */
+    try { await unlockChars(); } catch (e) { /* ignore */ }
+    /* dl1→dl2 迁移、以及「老明文并进载荷」的回写，都要挂到 memPending 上：
+       memReady() 才是「记忆真的换了密文并落盘」的准确信号，外面 await 它不会提前醒。
+       以前这两步没登记，await memReady() 拿到的是上一轮的已决议 Promise。 */
+    const tail = (async () => {
+      if (legacy.length) { try { await migrateLegacyMem(legacy); } catch (e) { /* ignore */ } }
+      if (upgraded) { try { await queueMemEncrypt(Store.getSessions()); } catch (e) { /* ignore */ } }
+    })();
+    memPending = tail.catch(() => {});
+    await memPending;
+  }
+
   const Store = {
     MAX_SETS: MAX_SETS,
     SET_FLAT: SET_FLAT,
@@ -781,57 +851,11 @@
       return ok;
     },
 
-    /* 启动时解一次记忆密文（异步）；解不开的就当空，绝不把密文当明文用。
-       顺手把老的 dl1 记下来，解完统一换成 dl2（在后台跑，不挡启动）。 */
-    async unlockMemory() {
-      if (memUnlocked) return;
-      const raw = readRaw(K_SESSIONS);
-      const arr = raw === undefined ? [] : safeParse(raw, []);
-      const list = Array.isArray(arr) ? arr : [];
-      const legacy = [];
-      let upgraded = 0;   /* 本次把「老明文三项」并进载荷的条数 → 解完统一回写成密文 */
-      for (let i = 0; i < list.length; i++) {
-        const s = list[i];
-        if (!s || typeof s !== "object") continue;
-        let hasPlain = false;
-        for (let k = 0; k < MEM_EXTRA.length; k++) { if (s[MEM_EXTRA[k]]) { hasPlain = true; break; } }
-        const hasPlainMem = s.memory !== undefined || s.cognition !== undefined;
-        if (!s.memEnc && !hasPlain && !hasPlainMem) continue;   /* 这条没东西要管 */
-        let p = null;
-        if (s.memEnc) {
-          try {
-            const txt = await decryptMem(s.memEnc);
-            if (txt) {
-              p = JSON.parse(txt);
-              cipherMem[s.id] = s.memEnc;
-              encPlain[s.id] = txt;
-              if (isLegacyEnc(s.memEnc)) legacy.push(s.id);
-            }
-          } catch (e) { p = null; }   /* 解不开：保持空，绝不把密文当明文用 */
-          /* 有密文却解不出来 → 打标记，后面一律不许覆盖（见 brokenMem 注释） */
-          if (!p) brokenMem[s.id] = true;
-        }
-        if (p) {
-          /* 老密文只装了记忆 → 把还留在明文里的三项并进来（并完由下面统一回写） */
-          for (let k = 0; k < MEM_EXTRA.length; k++) {
-            const key = MEM_EXTRA[k];
-            if ((p[key] === undefined || p[key] === "") && s[key]) { p[key] = s[key]; upgraded++; }
-          }
-          plainMem[s.id] = p;
-        } else if (!s.memEnc) {
-          /* 老版从没加密过（没密文）→ 记忆 + 三项一起组个新载荷 */
-          plainMem[s.id] = Object.assign(
-            { memory: s.memory || null, cognition: s.cognition || "" }, memExtraOf(s));
-          upgraded++;
-        }
-      }
-      memUnlocked = true;
-      sessionsCache = null;
-      /* 角色卡跟记忆同一把钥匙，一并解开；解完渲染前一定拿到明文 */
-      try { await unlockChars(); } catch (e) { /* ignore */ }
-      if (legacy.length) { try { await migrateLegacyMem(legacy); } catch (e) { /* ignore */ } }
-      /* 有升级/新装载荷的会话 → 回写一次，把明文形态从磁盘上抹掉 */
-      if (upgraded) { try { await queueMemEncrypt(Store.getSessions()); } catch (e) { /* ignore */ } }
+    /* 启动时解一次记忆密文（异步）。只跑一次，后来者拿到的是同一个 Promise ——
+       「已经解完了」和「正在解」必须分得开，否则并发调用方会拿到假成功。 */
+    unlockMemory() {
+      if (!memUnlockPromise) memUnlockPromise = memUnlockWork();
+      return memUnlockPromise;
     },
     decryptMem(enc) { return decryptMem(enc); },
     cipherFor(id) { return cipherMem[id] || ""; },
@@ -888,6 +912,13 @@
     },
     /* 这条附件还有没有图（内联或文件都算） */
     hasImage(att) { return !!(att && att.kind === "image" && (att.dataUrl || att.imgRef)); },
+    /* 最近一次写盘是否成功（见 writeRaw 上面的注释）。界面在关键保存点查它 */
+    writeOk() { return lastWriteOk; },
+    /* 背景图外置：返回落到哪个路径（空串 = 没桥 / 没写成，调用方就继续留 dataURL）。
+       背景这类大图塞进 settings 会一路顶到 localStorage 配额，能不塞就不塞。 */
+    saveBgImage(dataUrl) {
+      try { return saveExternalImage(dataUrl, "dl_bg_"); } catch (e) { return ""; }
+    },
     /* 单条附件外置：给手机模块用（把刚发的图立刻搬进文件，别撑 localStorage）。
        搬家失败 / 无桥 / 没写成 → 保持内联，绝不删内容（同三条底线）。 */
     hoistImage(att) { try { return hoistOne(att); } catch (e) { return false; } },

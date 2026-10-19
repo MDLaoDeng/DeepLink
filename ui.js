@@ -46,6 +46,10 @@
   const ICONS = {
     menu: "M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z",
     plus: "M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z",
+    /* 横排三点（10-19）：消息操作条收起后的入口，同时也是通用「更多」 */
+    /* 表情入口：一个笑脸轮廓，比三个点更直白（10-19） */
+    "emoticon-outline": "M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M9,9.5A1.5,1.5 0 0,1 10.5,11A1.5,1.5 0 0,1 9,12.5A1.5,1.5 0 0,1 7.5,11A1.5,1.5 0 0,1 9,9.5M15,9.5A1.5,1.5 0 0,1 16.5,11A1.5,1.5 0 0,1 15,12.5A1.5,1.5 0 0,1 13.5,11A1.5,1.5 0 0,1 15,9.5M12,15C14,15 15.7,14 16.5,12.5C16.3,14.9 14.4,17 12,17C9.6,17 7.7,14.9 7.5,12.5C8.3,14 10,15 12,15Z",
+    "dots-horizontal": "M16,12A2,2 0 0,1 18,10A2,2 0 0,1 20,12A2,2 0 0,1 18,14A2,2 0 0,1 16,12M10,12A2,2 0 0,1 12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12M4,12A2,2 0 0,1 6,10A2,2 0 0,1 8,12A2,2 0 0,1 6,14A2,2 0 0,1 4,12Z",
     "arrow-left": "M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z",
     "book-outline": "M18,2A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2H18M6,4V20H18V4H6M11,6H16V13L13.5,11.75L11,13V6Z",
     "settings-outline": "M19.43,12.98C19.47,12.66 19.5,12.34 19.5,12C19.5,11.66 19.47,11.34 19.43,11.02L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11.02C4.53,11.34 4.5,11.66 4.5,12C4.5,12.34 4.53,12.66 4.57,12.98L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.04 4.95,18.95L7.44,17.95C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.95L19.05,18.95C19.27,19.04 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.98M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5Z",
@@ -129,6 +133,91 @@
     });
   }
 
+  /* 把文本里的表情字符 / [[s:id]] 换成图片。只在气泡里跑，pre、code 里跳过。 */
+  function stickerize(root) {
+    if (!root) return;
+    const pack = (window.CONFIG && window.CONFIG.EMOJI_PACK) || [];
+    const stickers = (window.DL && window.DL.state && window.DL.state.settings && window.DL.state.settings.stickers) || [];
+    if (!pack.length && !stickers.length) return;
+    const charMap = {};
+    const alts = [];
+    pack.forEach((it) => { if (it.e && it.src) { charMap[it.e] = it; alts.push(it.e); } });
+    if (!alts.length && !stickers.length) return;
+    const stickMap = {};
+    stickers.forEach((st) => { if (st && st.id) stickMap[st.id] = st; });
+    /* 存的是外置文件路径就换成可用 URL（10-19：贴纸也开始外置了） */
+    const toUrl = (v) => {
+      const x = String(v || "");
+      if (!x || x.slice(0, 5) === "data:") return x;
+      try { return (window.DL && window.DL.avatarUrl && window.DL.avatarUrl(x)) || ""; } catch (e) { return ""; }
+    };
+    /* 长的放前面，避免短字符先匹配掉半个组合 */
+    alts.sort((x, y) => y.length - x.length);
+    const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const src = "\\[\\[s:[a-z0-9]+\\]\\]|\\[表情:[^\\]]+\\]" + (alts.length ? "|" + alts.map(esc).join("|") : "");
+    const re = new RegExp("(" + src + ")", "g");
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const jobs = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      const t = node.nodeValue || "";
+      if (!t) continue;
+      if (t.indexOf("[[s:") < 0 && t.indexOf("[表情") < 0 && !alts.some((ch) => t.indexOf(ch) >= 0)) continue;
+      const p = node.parentNode;
+      if (p && p.closest && p.closest("pre, code, .code-block")) continue;
+      jobs.push(node);
+    }
+    jobs.forEach((nd) => {
+      const text = nd.nodeValue || "";
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      text.replace(re, (m, _hit, offset) => {
+        if (offset > last) frag.appendChild(document.createTextNode(text.slice(last, offset)));
+        const tok = /^\[\[s:([a-z0-9]+)\]\]$/.exec(m);
+        if (tok) {
+          const st = stickMap[tok[1]];
+          if (st && st.src) {
+            const im = document.createElement("img");
+            im.className = "stk-big";
+            im.src = toUrl(st.src);
+            im.alt = st.name || "表情";
+            frag.appendChild(im);
+          } else {
+            frag.appendChild(document.createTextNode(m));
+          }
+        } else if (m.slice(0, 3) === "[表情") {
+          /* 模型按提示词写的 [表情:名字] —— 先查自添加（提示词里也列了它们），
+             再查内置包；都查不到才原样留着。
+             10-19 修：原来只查内置包，模型照提示词发自添加表情的名字会变成一串文字。 */
+          const nm = m.replace(/^\[表情:/, "").replace(/\]$/, "").trim();
+          const mine = stickers.filter((x) => x && x.name === nm && (x.scope || "both") !== "me")[0];
+          const hit = mine || pack.filter((x) => x.n === nm)[0];
+          if (hit && hit.src) {
+            const im = document.createElement("img");
+            im.className = mine ? "stk-big" : "stk";
+            im.src = toUrl(hit.src);
+            im.alt = hit.name || hit.n || nm;
+            frag.appendChild(im);
+          } else {
+            frag.appendChild(document.createTextNode(m));
+          }
+        } else {
+          const it = charMap[m];
+          const im = document.createElement("img");
+          im.className = "stk";
+          im.src = toUrl(it.src);
+          im.alt = it.n || m;
+          frag.appendChild(im);
+        }
+        last = offset + m.length;
+        return m;
+      });
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      if (nd.parentNode) nd.parentNode.replaceChild(frag, nd);
+    });
+  }
+
   /* GitHub 提醒框的图标 */
   const ALERT_ICON = {
     note: "information-outline",
@@ -174,10 +263,44 @@
   function msgActionsEl(msg) {
     const bar = document.createElement("div");
     bar.className = "msg-actions";
+    /* 10-19 用户口径：一排按钮收成一个「⋯」，点开才浮出来。
+       按钮仍是 .msg-actions 的直接子节点 —— test_r9 / test_r13 有断言依赖 parentNode
+       就是这条栏，套一层容器会把那些断言弄红。 */
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "act-btn act-more";
+    more.setAttribute("data-more", "1");
+    more.setAttribute("aria-label", "更多操作");
+    more.title = "更多操作";
+    more.innerHTML = iconSvg("dots-horizontal");
+    bar.appendChild(more);
+    more.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const open = bar.classList.contains("open");
+      closeActMenus();
+      if (!open) bar.classList.add("open");
+    });
     const list = msg.role === "user" ? ACTIONS.user : ACTIONS.assistant;
     list.forEach((a) => bar.appendChild(actionBtn(a[0], a[1], a[2])));
     return bar;
   }
+
+  /* 收起所有展开的操作条。点空白、点某一项操作、或点另一条的「⋯」都收。 */
+  function closeActMenus() {
+    const open = document.querySelectorAll(".msg-actions.open");
+    for (let i = 0; i < open.length; i++) open[i].classList.remove("open");
+  }
+  /* 只挂一次（ui.js 加载时就挂）。用捕获阶段：先收菜单，再让 app.js 的
+     [data-act] 委派去执行具体操作，顺序不会互相挡。 */
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    const bar = t.closest(".msg-actions");
+    if (!bar) { closeActMenus(); return; }
+    /* 点了菜单里的某一项（不是「⋯」本身）→ 收起来 */
+    if (t.closest(".act-btn") && !t.closest(".act-more")) closeActMenus();
+  }, true);
 
   /* 多版本时的 ‹ n/m › 切换（点击由 app.js 的事件委派处理） */
   function variantsEl(msg) {
@@ -660,6 +783,8 @@
     /* 图片消息的 content 恒为空 —— 不加 msg.image 的话，AI 画的图就完全没有操作栏
        （「重新说 / 复制 / 删除」对它是断的）。 */
     if (msg.content || noBody || msg.error || msg.image) bubble.appendChild(msgActionsEl(msg));
+    /* 表情画成图片（Fluent 内置 / 自添加的图） */
+    try { stickerize(bubble); } catch (e) { /* ignore */ }
     if (msg.error) {
       const e = document.createElement("div");
       e.className = "msg-error";
@@ -727,9 +852,18 @@
     head.innerHTML = iconSvg("link-variant") + "<span>来源 · " + sources.length + "</span>";
     box.appendChild(head);
     sources.forEach((s) => {
-      const a = document.createElement("a");
       const u = safeUrl(s.url);
-      a.href = u || "#";
+      if (!u) {
+        /* 没有网址的来源（DeepSeek 兼容通道只给了答案、没给来源块时就是这样）：
+           渲染成不可点的普通条目，别做成 href="#" 的假链接（点了没反应，还带个外链图标）。 */
+        const d = document.createElement("div");
+        d.className = "src-plain";
+        d.innerHTML = "<span>" + escapeHtml(s.title || "（无来源）") + "</span>";
+        box.appendChild(d);
+        return;
+      }
+      const a = document.createElement("a");
+      a.href = u;
       a.target = "_blank";
       a.rel = "noopener";
       a.innerHTML = "<span>" + escapeHtml(s.title || s.url) + "</span>" + iconSvg("open-in-new");
@@ -954,6 +1088,69 @@
       dialogSettle = cleanup;
       openModal("dialogModal");
       setTimeout(() => { try { inp.focus(); } catch (e) { /* ignore */ } }, 60);
+    });
+  }
+
+  /* 强警告确认框（10-19）：用于「群里改/删消息」这种会影响别人看到的内容。
+     和 confirmDialog 的差别只有三点：
+       ① 确定键延时 N 秒才可点（期间显示倒计时），逼用户先把话读完；
+       ② 多一个「以后不再显示」勾选框，返回 { ok, dontAsk }；
+       ③ 不开 escape/遮罩关闭 —— 想走只能点取消，不能一抹黑划走。
+     复用 #dialogModal，临时插一行勾选框，退出时删掉（跟 askDialog 同一套办法）。 */
+  function confirmDanger(title, text, opts) {
+    const o = opts || {};
+    return new Promise((resolve) => {
+      if (dialogSettle) { const f = dialogSettle; dialogSettle = null; try { f(false); } catch (e) { /* ignore */ } }
+      $("#dialogTitle").textContent = title || "请确认";
+      const txt = $("#dialogText");
+      txt.textContent = text || "";
+      const ok = $("#dialogOk");
+      const cancel = $("#dialogCancel");
+      const okLabel = ok.textContent;
+
+      const wrap = document.createElement("label");
+      wrap.className = "check-field danger-ask";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      const span = document.createElement("span");
+      span.textContent = o.checkText || "以后不再提示";
+      wrap.appendChild(box);
+      wrap.appendChild(span);
+      if (txt && txt.parentNode) txt.parentNode.insertBefore(wrap, txt.nextSibling);
+
+      let settled = false;
+      let timer = null;
+      const delayMs = Math.max(0, Number(o.delayMs) || 0);
+      if (delayMs > 0) {
+        let left = Math.ceil(delayMs / 1000);
+        ok.disabled = true;
+        ok.textContent = okLabel + "（" + left + "s）";
+        timer = setInterval(() => {
+          left--;
+          if (left <= 0) { clearInterval(timer); timer = null; ok.disabled = false; ok.textContent = okLabel; return; }
+          ok.textContent = okLabel + "（" + left + "s）";
+        }, 1000);
+      }
+
+      function cleanup(result, dontAsk) {
+        if (settled) return;
+        settled = true;
+        if (timer) { clearInterval(timer); timer = null; }
+        ok.disabled = false;
+        ok.textContent = okLabel;
+        ok.removeEventListener("click", onOk);
+        cancel.removeEventListener("click", onCancel);
+        if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+        if (dialogSettle === cleanup) dialogSettle = null;
+        closeModal("dialogModal");
+        resolve({ ok: !!result, dontAsk: !!dontAsk });
+      }
+      function onOk() { if (ok.disabled) return; cleanup(true, box.checked); }
+      function onCancel() { cleanup(false, box.checked); }
+      ok.addEventListener("click", onOk);
+      cancel.addEventListener("click", onCancel);
+      dialogSettle = cleanup;
+      openModal("dialogModal");
     });
   }
 
@@ -1211,8 +1408,8 @@
   }
 
   window.UI = {
-    $, escapeHtml, renderMarkdown, grayParens, msgEl, createStreamView, iconSvg, applyIcons, actionBtn, msgActionsEl, ACTIONS, setAvatarResolver, setSpeakerResolver, forceRepaint, themeDiagnostics,
-    toast, openModal, closeModal, confirmDialog, askDialog,
+    $, escapeHtml, renderMarkdown, grayParens, msgEl, createStreamView, iconSvg, applyIcons, actionBtn, msgActionsEl, ACTIONS, setAvatarResolver, setSpeakerResolver, forceRepaint, themeDiagnostics, stickerize,
+    toast, openModal, closeModal, confirmDialog, confirmDanger, askDialog,
     pickBind, pickRefreshAll,
     applyTheme, buildModeSwitch, buildThemeGrid, sessionListEl,
     isNearBottom, scrollToBottom, copyText

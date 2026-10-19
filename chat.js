@@ -211,6 +211,8 @@
     /* 换了会话就把快捷回复收掉：面板里装的还是上一条会话的台词 */
     if (quick.open && s && quick.sid && quick.sid !== s.id) quickClose();
     syncContinueRow();
+    syncOpeningBtn();
+    bindEmojiPanel();
     syncRegenRow();     /* 群聊：只有最后一条角色消息保留「重新说」 */
     syncQuickBtn();     /* 快捷回复按钮的置灰状态跟着当前这条会话的记忆走 */
     UI.scrollToBottom();
@@ -616,7 +618,21 @@
       if (Object.keys(row).length) next[fromId] = row;
     });
     if (!n) return { ok: false, why: "模型没给出任何有依据的印象" };
-    Store.updateSession(sid, { peerCog: next, peerCogTs: Date.now() });
+    /* 合并写入，不是整表覆盖：模型这次漏掉某个人时，那个人上次的印象得以保留。
+       （原来的写法是 `peerCog: next`，一次不完整的返回就等于把旧印象全删了。） */
+    const merged = {};
+    const old = peerCogOf(s);
+    Object.keys(old).forEach((fromId) => {
+      if (old[fromId] && typeof old[fromId] === "object") merged[fromId] = Object.assign({}, old[fromId]);
+    });
+    Object.keys(next).forEach((fromId) => {
+      merged[fromId] = Object.assign({}, merged[fromId] || {}, next[fromId]);
+    });
+    Store.updateSession(sid, { peerCog: merged, peerCogTs: Date.now() });
+    /* 记账：这次是一次实打实的非流式请求，用量统计里要看得见（归到「群聊」） */
+    if (r && r.usage && typeof recordUsage === "function") {
+      try { recordUsage(null, r.usage, "", "group"); } catch (e) { /* ignore */ }
+    }
     return { ok: true, count: n };
   }
 
@@ -674,13 +690,29 @@
       });
       if (views.length) parts.push(m.name + "在群里的印象：" + views.join("；"));
       if (!parts.length) { skipped.push(m.name); return; }
-      const text = "【来自群聊「" + groupName + "」的记忆】" + parts.join("\n");
+      /* 这一块用「开始/结束」两个标记裹起来 —— 再点一次「同步」时按标记【替换】而不是追加，
+         否则同一天的摘要里会堆出两份一模一样的群聊记忆（实测连点两次就写两遍），
+         之后每次对话都多喂一份重复内容，周/月压缩还会把它当两件事。 */
+      const START = "【来自群聊「" + groupName + "」的记忆】";
+      const END = "【群聊同步结束】";
+      const text = START + parts.join("\n") + "\n" + END;
 
       const mem = line.memory ? JSON.parse(JSON.stringify(line.memory)) : { days: [], weeks: [], months: [], coveredUntil: 0 };
       if (!Array.isArray(mem.days)) mem.days = [];
       const hit = mem.days.find((d) => d && d.date === today);
-      if (hit) hit.summary = String(hit.summary || "") + "\n" + text;
-      else mem.days.push({ date: today, summary: text });
+      if (hit) {
+        const cur = String(hit.summary || "");
+        const a = cur.indexOf(START);
+        if (a >= 0) {
+          /* 旧块（含昨晚没有结束标记的那版）一律按「从这里到结尾」算：
+             我们的同步永远是追加在当天摘要末尾的，最后一块之后不该有别的内容。 */
+          const b = cur.indexOf(END, a);
+          const tail = b >= 0 ? cur.slice(b + END.length) : "";
+          hit.summary = cur.slice(0, a) + text + tail;
+        } else {
+          hit.summary = cur + "\n" + text;
+        }
+      } else mem.days.push({ date: today, summary: text });
       /* coveredUntil 不动：群聊这段不是这条线的原文，压低水位线会让它把原文再压一遍 */
       Store.updateSession(line.id, { memory: mem });
       done.push(m.name);
@@ -1462,7 +1494,13 @@
   function copyMsgText(msg) {
     const text = activeText(msg);
     if (!text) { UI.toast("没有可复制的文字", true); return; }
-    UI.copyText(text).then((ok) => UI.toast(ok ? "已复制" : "复制失败", !ok));
+    /* 复制给人看，别让人粘出去一串 [[s:stabc123]]（10-19）。
+       渲染层画的是图，剪贴板里要的是能读的字。 */
+    let out = text;
+    try {
+      if (Memory && Memory.emojiReadable) out = Memory.emojiReadable(text);
+    } catch (e) { out = text; }
+    UI.copyText(out).then((ok) => UI.toast(ok ? "已复制" : "复制失败", !ok));
   }
 
   /* ── 多选模式 ──────────────────────────────────── */
@@ -1508,17 +1546,38 @@
   }
 
   /* 定位用 DOM 索引：Store 走 JSON 序列化，对象引用不可靠 */
-  function handleMessageAction(action, i) {
+  /* 群聊里改/删消息不是「只影响我」—— 先弹一次强警告。单聊直接放行，不加无谓摩擦。 */
+  async function groupDanger(kind) {
+    const s = session();
+    if (!s || !s.isGroup) return true;
+    if (state.settings.groupWarnOff) return true;
+    const r = await UI.confirmDanger(
+      kind === "edit" ? "要改群里这条消息？" : "要删群里这条消息？",
+      kind === "edit"
+        ? "改完会立刻对所有参与者生效。之前已经读过这条的角色，记忆里可能还留着旧版本；要彻底纠正，改完再到「角色记忆」里说一句。"
+        : "删除不可恢复。已经进过记忆的内容不会跟着删，需要的话到「对话设置 → 记忆」里纠正。",
+      { delayMs: 5000, checkText: "以后不再提示（可在设置里恢复）" });
+    if (r.dontAsk) state.settings = Store.saveSettings({ groupWarnOff: true });
+    return r.ok;
+  }
+
+  async function handleMessageAction(action, i) {
     const s = session();
     if (!s) return;
     const msg = s.messages[i];
     if (!msg) return;
     if (action === "copy") { copyMsgText(msg); return; }
-    if (action === "edit") { openEdit(i); return; }
+    if (action === "edit") {
+      if (!(await groupDanger("edit"))) return;
+      openEdit(i); return;
+    }
     if (action === "resend") { resendAt(i); return; }
     if (action === "search") { searchMessage(i); return; }
     if (action === "regen") { regenerateAt(i); return; }
-    if (action === "delete") { openDeleteDialog([i]); return; }
+    if (action === "delete") {
+      if (!(await groupDanger("delete"))) return;
+      openDeleteDialog([i]); return;
+    }
     if (action === "rollback") { rollbackTo(i); return; }
   }
 
@@ -1662,7 +1721,9 @@
     const s = session();
     if (!s) return;
     const idx = Array.from(state.selected).sort((a, b) => a - b);
-    const text = idx.map((i) => (s.messages[i] ? activeText(s.messages[i]) : "")).filter(Boolean).join("\n\n");
+    let text = idx.map((i) => (s.messages[i] ? activeText(s.messages[i]) : "")).filter(Boolean).join("\n\n");
+    /* 和单条复制同一口径：剪贴板里要可读的字，不要 [[s:xxx]] */
+    try { if (Memory && Memory.emojiReadable) text = Memory.emojiReadable(text); } catch (e) { /* ignore */ }
     if (!text) { UI.toast("没有可复制的文字", true); return; }
     UI.copyText(text).then((ok) => UI.toast(ok ? "已复制 " + idx.length + " 条" : "复制失败", !ok));
   }
@@ -2331,6 +2392,439 @@
     });
   }
 
+  /* 开场白：空对话时让 AI 先说第一句。
+     openingDone 一旦置真就永久失效（用户口径：生成完直接隐藏，不再出现）。
+     复用「继续说」那条生成链路；点下去先置失效，避免连点重复生成。 */
+  /* 我发过消息没有 —— 开场白的唯一消失条件（用户 10-19 口径）。 */
+  function hasMyMessage(s) {
+    return !!(s && (s.messages || []).some(function (m) { return m && m.role === "user"; }));
+  }
+  async function startOpening(sid) {
+    syncModules();
+    const s = sid ? sessionById(sid) : session();
+    if (!s || state.busy) return false;
+    if (hasMyMessage(s)) return false;
+    /* 必须填了「当前场景」才能用（用户口径）。纯手机角色本来就没有线下场景，放行。 */
+    if (!s.phoneOnly && !String(s.scene || "").trim()) {
+      UI.toast("先在「对话设置 → 当前场景」里写一句现在的场景，再生成开场", true);
+      /* 顺手把「对话设置」那个菜单点开，少一步找 */
+      try { var b = $("#sessionBtn"); if (b) b.click(); } catch (e) { /* ignore */ }
+      return false;
+    }
+    try { continueLast(); } catch (e) { /* ignore */ }
+    return true;
+  }
+  /* 按钮显隐：有消息 / 已生成过 / 正在生成 → 藏起来 */
+  function syncOpeningBtn() {
+    const s = session();
+    const btn = $("#openingBtn");
+    if (btn) {
+      if (!btn.dataset.bound) {
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", function () { startOpening(); });
+      }
+      const show = !!(s && !hasMyMessage(s) && !state.busy);
+      /* 已经有过 AI 的开场 → 换成「再说一次」（可反复重掷；我开口之后整块消失） */
+      const said = !!(s && (s.messages || []).some(function (m) { return m && m.role === "assistant"; }));
+      const label = btn.querySelector("span:last-child");
+      if (label) label.textContent = said ? "再说一次" : "生成第一句话";
+      btn.hidden = !show;
+    }
+    /* 手机页那个按钮由它自己的渲染流程同步（phone.js 的 renderChat 里调）——
+       这里【不要】反手去调 DL.syncPhoneOpening：那条链路会 syncModules + 重渲染，
+       在 renderMessages 里调用会绕回去，实测会把回归测试挂死。 */
+  }
+
+  /* ── 表情面板（10-19）──────────────────────────────────────────
+     两栏：常规 = 内置 Fluent（点一下插进输入框）；
+           自添加 = 自己传的图片表情包，带三档使用范围（都能用 / TA 用 / 自己用）。
+     范围只属于图片表情包 —— 内置那套谁都能用，不需要分。
+     自添加的图存在 settings.stickers：[{ id, src, name, means, scope }]，
+     name / means 是上传时让 AI 看一遍写出来的，模型之后靠这两个字段认它。 */
+  var emojiTab = "builtin";     /* builtin | custom */
+  var emojiScope = "both";      /* 自添加区当前范围页签 */
+  var stickerEditId = "";       /* 长按后待改范围的那个（空 = 不在编辑态） */
+
+  function emojiPack() { return (window.CONFIG && CONFIG.EMOJI_PACK) || []; }
+  function stickerList() { return (state.settings && state.settings.stickers) || []; }
+  function saveStickers(list) {
+    state.settings = Store.saveSettings({ stickers: list });
+  }
+
+  function renderBuiltinGrid() {
+    var grid = $("#emojiGrid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    emojiPack().forEach(function (it) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "emoji-cell";
+      b.title = it.n || "";
+      if (it.src) {
+        var im = document.createElement("img");
+        im.src = it.src;
+        im.alt = it.n || "";
+        b.appendChild(im);
+      } else {
+        var sp = document.createElement("span");
+        sp.className = "emoji-char";
+        sp.textContent = it.e || "";
+        b.appendChild(sp);
+      }
+      b.addEventListener("click", function () { insertAtCursor(it.e || ""); });
+      grid.appendChild(b);
+    });
+  }
+
+  function renderStickerGrid() {
+    var grid = $("#stickerGrid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    var list = stickerList().filter(function (st) { return (st.scope || "both") === emojiScope; });
+    if (!list.length) {
+      var tip = document.createElement("div");
+      tip.className = "emoji-empty";
+      tip.textContent = "这个范围里还没有表情。点右上角「+」加一批，长按可改范围。";
+      grid.appendChild(tip);
+    }
+    list.forEach(function (st) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "emoji-cell sticker-cell";
+      b.title = st.name || "表情";
+      var im = document.createElement("img");
+      im.src = stickerSrc(st.src);
+      im.alt = st.name || "";
+      b.appendChild(im);
+      var timer = null;
+      b.addEventListener("pointerdown", function () {
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+          stickerEditId = st.id;
+          var tipEl = document.querySelector("#emojiCustomPane .emoji-tip");
+          if (tipEl) tipEl.textContent = "要给「" + (st.name || "这个") + "」设成谁用？点上面任一范围";
+        }, 500);
+      });
+      ["pointerup", "pointercancel", "pointerleave"].forEach(function (ev) {
+        b.addEventListener(ev, function () { clearTimeout(timer); });
+      });
+      b.addEventListener("click", function () {
+        if (stickerEditId) {
+          var next = stickerList().map(function (x) {
+            return x.id === stickerEditId ? Object.assign({}, x, { scope: emojiScope }) : x;
+          });
+          saveStickers(next);
+          stickerEditId = "";
+          var tipEl = document.querySelector("#emojiCustomPane .emoji-tip");
+          if (tipEl) tipEl.textContent = "长按可改范围；范围在选图页也能先定好";
+          UI.toast("已改为「" + scopeLabel(emojiScope) + "」");
+          renderStickerGrid();
+          return;
+        }
+        insertAtCursor("[[s:" + st.id + "]]");
+      });
+      grid.appendChild(b);
+    });
+  }
+  function scopeLabel(v) { return v === "ai" ? "TA 用" : v === "me" ? "自己用" : "都能用"; }
+
+  /* 面板挂在哪个 composer 上，就往哪个输入框里插（10-19 修）。
+     原来写死 $("#input")：表情面板搬到手机页之后，点的字符全进了主聊天那个隐藏的 textarea，
+     手机输入框 #phoneInput 一个字符都不多 —— 表现就是「点了没反应」，切回主聊天还看到一堆表情。 */
+  function emojiTargetInput() {
+    var panel = $("#emojiPanel");
+    var box = panel && panel.closest ? panel.closest(".phone-composer") : null;
+    if (box) {
+      var pi = box.querySelector("#phoneInput, input.phone-input, textarea");
+      if (pi) return pi;
+    }
+    return $("#input");
+  }
+  /* 插到输入框光标处（没光标就接在末尾），并触发 input 让高度自适应 */
+  function insertAtCursor(text) {
+    var inp = emojiTargetInput();
+    if (!inp) return;
+    var v = String(inp.value || "");
+    var at = typeof inp.selectionStart === "number" ? inp.selectionStart : v.length;
+    inp.value = v.slice(0, at) + text + v.slice(inp.selectionEnd == null ? at : inp.selectionEnd);
+    try { inp.selectionStart = inp.selectionEnd = at + text.length; } catch (e) { /* ignore */ }
+    try { inp.dispatchEvent(new Event("input", { bubbles: true })); } catch (e) { /* ignore */ }
+    /* 手机页别抢焦点：一 focus 就弹软键盘，会把刚打开的表情面板顶掉。
+       用户想继续打字时自己点输入框即可。 */
+    if (inp.id !== "phoneInput") { try { inp.focus(); } catch (e) { /* ignore */ } }
+  }
+
+  function showEmojiTab(tab) {
+    emojiTab = tab === "custom" ? "custom" : "builtin";
+    /* 切页签就退出「长按改范围」态：否则长按了 A、切到别的范围页签再点 B，改的是 A */
+    stickerEditId = "";
+    var tabs = document.querySelectorAll(".emoji-tab");
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle("on", tabs[i].getAttribute("data-tab") === emojiTab);
+    }
+    var bp = $("#emojiBuiltinPane"), cp = $("#emojiCustomPane");
+    if (bp) bp.hidden = emojiTab !== "builtin";
+    if (cp) cp.hidden = emojiTab !== "custom";
+    if (emojiTab === "builtin") renderBuiltinGrid(); else renderStickerGrid();
+  }
+
+  function openEmojiPanel() {
+    var p = $("#emojiPanel");
+    if (!p) return;
+    p.hidden = false;
+    var btn = $("#emojiBtn");
+    if (btn) btn.classList.add("on");
+    showEmojiTab(emojiTab);
+  }
+  function closeEmojiPanel() {
+    var p = $("#emojiPanel");
+    if (p) p.hidden = true;
+    var btn = $("#emojiBtn");
+    if (btn) btn.classList.remove("on");
+    stickerEditId = "";
+  }
+  function toggleEmojiPanel() {
+    var p = $("#emojiPanel");
+    if (!p) return;
+    if (p.hidden) openEmojiPanel(); else closeEmojiPanel();
+  }
+
+  /* 选图 → 逐个压缩 → 让 AI 看一眼写名字/意思 → 入列。
+     没配视觉模型也要能用：AI 不可用时用文件名当名字，意思先留空。 */
+  /* ── 自研选图面板 ───────────────────────────────────────────────
+     系统选择器只负责把文件交过来；挑哪几张、归哪个范围，都在这一层做。 */
+  var siPending = [];   /* [{ src, on }] */
+  var siScope = "both";
+
+  /* 读一张表情图（10-19 修）：**不**复用 app.js 的 readAvatarFile。
+     原因有两条：
+       1. 那是 app.js 那个立即执行函数的私有件，chat.js 里裸名取不到（会 ReferenceError，
+          表现是选完图永远提示「这些图读不出来」）；
+       2. 它把头像是按正方形 cover 裁的，长条表情会被切掉两头 —— 表情要用 contain。
+     输出：最大边 192、保持长宽比、透明底、PNG。 */
+  function readStickerFile(file) {
+    return new Promise(function (resolve, reject) {
+      if (!file || !/^image\//.test(file.type || "")) { reject(new Error("请选择图片文件")); return; }
+      var fr = new FileReader();
+      fr.onload = function () {
+        var raw = String(fr.result || "");
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var box = 192;
+            var w = img.width || box, h = img.height || box;
+            var sc = Math.min(box / w, box / h, 1);
+            var cw = Math.max(1, Math.round(w * sc));
+            var chh = Math.max(1, Math.round(h * sc));
+            var cv = document.createElement("canvas");
+            cv.width = cw;
+            cv.height = chh;
+            var ctx = cv.getContext("2d");
+            ctx.clearRect(0, 0, cw, chh);
+            ctx.drawImage(img, 0, 0, cw, chh);
+            resolve(cv.toDataURL("image/png"));
+          } catch (e) { resolve(raw); }
+        };
+        img.onerror = function () { reject(new Error("图片读取失败")); };
+        img.src = raw;
+      };
+      fr.onerror = function () { reject(new Error("图片读取失败")); };
+      fr.readAsDataURL(file);
+    });
+  }
+
+  /* 贴纸图尽量外置（10-19）：和背景、头像同一套底线 —— 有桥才落文件，写不成仍留 dataURL。
+     不这么做的话，十来张贴纸就能把 settings 顶到 localStorage 配额，
+     而 saveSettings 每次都整坨重写。 */
+  function hoistSticker(val) {
+    var v = String(val || "");
+    if (v.slice(0, 5) !== "data:") return v;
+    try {
+      if (!Store.hasBridge || !Store.hasBridge("保存指定文件")) return v;
+      return (Store.saveBgImage ? (Store.saveBgImage(v) || "") : "") || v;
+    } catch (e) { return v; }
+  }
+  /* 存的是路径就换成能直接用的 URL；dataURL 原样返回 */
+  function stickerSrc(val) {
+    var v = String(val || "");
+    if (!v || v.slice(0, 5) === "data:") return v;
+    try { return (D.avatarUrl && D.avatarUrl(v)) || ""; } catch (e) { return ""; }
+  }
+
+  async function openStickerImport(files) {
+    syncModules();
+    var arr = Array.prototype.slice.call(files || []);
+    if (!arr.length) return;
+    siPending = [];
+    for (var i = 0; i < arr.length; i++) {
+      try {
+        var src = await readStickerFile(arr[i]);
+        if (src) siPending.push({ src: src, on: true });
+      } catch (e) { /* 单张失败跳过 */ }
+    }
+    if (!siPending.length) { UI.toast("这些图读不出来，换几张试试", true); return; }
+    siScope = emojiScope;
+    var sheet = $("#stickerImport");
+    if (!sheet) return;
+    sheet.hidden = false;
+    var scopes = sheet.querySelectorAll(".si-scope");
+    for (var k = 0; k < scopes.length; k++) {
+      scopes[k].classList.toggle("on", scopes[k].getAttribute("data-scope") === siScope);
+    }
+    renderSiGrid();
+  }
+
+  function closeStickerImport() {
+    var sheet = $("#stickerImport");
+    if (sheet) sheet.hidden = true;
+    siPending = [];
+  }
+
+  function renderSiGrid() {
+    var grid = $("#siGrid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    siPending.forEach(function (item, idx) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "si-cell" + (item.on ? " on" : "");
+      var im = document.createElement("img");
+      im.src = item.src;
+      im.alt = "";
+      b.appendChild(im);
+      if (item.on) {
+        var tick = document.createElement("span");
+        tick.className = "si-tick";
+        tick.textContent = "✓";
+        b.appendChild(tick);
+      }
+      b.addEventListener("click", function () {
+        siPending[idx].on = !siPending[idx].on;
+        renderSiGrid();
+      });
+      grid.appendChild(b);
+    });
+    var cnt = $("#siCount");
+    if (cnt) cnt.textContent = "已选 " + siPending.filter(function (x) { return x.on; }).length + " / " + siPending.length;
+  }
+
+  function bindStickerImport() {
+    var sheet = $("#stickerImport");
+    if (!sheet || sheet.dataset.bound) return;
+    sheet.dataset.bound = "1";
+    var mask = sheet.querySelector(".si-mask");
+    if (mask) mask.addEventListener("click", closeStickerImport);
+    var cancel = $("#siCancel");
+    if (cancel) cancel.addEventListener("click", closeStickerImport);
+    var scopes = sheet.querySelectorAll(".si-scope");
+    for (var i = 0; i < scopes.length; i++) {
+      (function (el) {
+        el.addEventListener("click", function () {
+          siScope = el.getAttribute("data-scope") || "both";
+          for (var j = 0; j < scopes.length; j++) scopes[j].classList.toggle("on", scopes[j] === el);
+        });
+      })(scopes[i]);
+    }
+    var okBtn = $("#siOk");
+    if (okBtn) okBtn.addEventListener("click", function () {
+      var picked = siPending.filter(function (x) { return x.on; }).map(function (x) { return x.src; });
+      closeStickerImport();
+      if (picked.length) commitStickers(picked, siScope);
+    });
+  }
+
+  /* 真正落库：逐张让视觉模型看一眼写名字/意思（没配就退化成「表情N」），再入列。
+     10-19 修四处：
+       1. Api.describe 返回 { text, usage }，直接 String() 会得到 "[object Obje" 当名字；
+       2. 这里漏了用量记账（口径是「除对话外一切 AI 消耗都计入」）；
+       3. 图先外置成文件，别把 settings 顶到配额；
+       4. 一次导入只写一次盘（原来每张都全量写一遍）。 */
+  async function commitStickers(srcs, scope) {
+    syncModules();
+    var list = stickerList().slice();
+    var added = 0;
+    var canSee = !!(Api && Api.describe && Media && Media.capable && Media.capable("vision", state.settings));
+    for (var i = 0; i < srcs.length; i++) {
+      var raw = srcs[i];
+      var name = "表情" + (list.length + 1);
+      var means = "";
+      if (canSee) {
+        var out = null;
+        try { out = await Api.describe(state.settings, raw, 120); } catch (e) { out = null; }
+        means = String((out && out.text) || "").trim();
+        if (out && out.usage && typeof recordUsage === "function") recordUsage(null, out.usage, "", "sticker");
+        var head = means.split(/[。！？\n]/)[0];
+        if (head) name = head.slice(0, 12);
+      }
+      /* 名字撞了就加序号：模型只认名字，两张同名等于只有一张能用 */
+      var nm = name, k = 2;
+      while (list.some(function (x) { return x && x.name === nm; })) { nm = name + k; k++; }
+      list.push({
+        id: "st" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        src: hoistSticker(raw), name: nm, means: means, scope: scope
+      });
+      added++;
+    }
+    if (added) {
+      saveStickers(list);
+      UI.toast("已添加 " + added + " 个表情（" + scopeLabel(scope) + "）");
+      renderStickerGrid();
+    } else {
+      UI.toast("没加成功，换张图试试", true);
+    }
+  }
+
+
+  function bindEmojiPanel() {
+    bindStickerImport();
+    /* 点面板与按钮之外就收起（10-19）：原来只能再点一次笑脸才关，手机上手感很别扭 */
+    if (!document.__dlEmojiOutside) {
+      document.__dlEmojiOutside = true;
+      document.addEventListener("click", function (e) {
+        var p = $("#emojiPanel");
+        if (!p || p.hidden) return;
+        var t = e.target;
+        if (t && t.closest && (t.closest("#emojiPanel") || t.closest("#emojiBtn"))) return;
+        closeEmojiPanel();
+      }, true);
+    }
+    var btn = $("#emojiBtn");
+    if (btn && !btn.dataset.bound) {
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", function (e) { e.preventDefault(); toggleEmojiPanel(); });
+    }
+    var tabs = document.querySelectorAll(".emoji-tab");
+    for (var i = 0; i < tabs.length; i++) {
+      (function (el) {
+        if (el.dataset.bound) return;
+        el.dataset.bound = "1";
+        el.addEventListener("click", function () { showEmojiTab(el.getAttribute("data-tab")); });
+      })(tabs[i]);
+    }
+    var scopes = document.querySelectorAll(".emoji-scope");
+    for (var j = 0; j < scopes.length; j++) {
+      (function (el) {
+        if (el.dataset.bound) return;
+        el.dataset.bound = "1";
+        el.addEventListener("click", function () {
+          emojiScope = el.getAttribute("data-scope") || "both";
+          for (var k = 0; k < scopes.length; k++) scopes[k].classList.toggle("on", scopes[k] === el);
+          renderStickerGrid();
+        });
+      })(scopes[j]);
+    }
+    var add = $("#stickerAddBtn"), inp = $("#stickerInput");
+    if (add && inp && !add.dataset.bound) {
+      add.dataset.bound = "1";
+      add.addEventListener("click", function () { inp.click(); });
+      inp.addEventListener("change", function (e) {
+        var fs2 = e.target.files;
+        e.target.value = "";
+        openStickerImport(fs2);
+      });
+    }
+  }
+
   function continueLast() {
     const s = session();
     if (!s || state.busy) return;
@@ -2419,7 +2913,8 @@
     peerCogOf: peerCogOf, peerCogText: peerCogText, peerCogOn: peerCogOn,
     updatePeerCog: updatePeerCog, syncGroupToLines: syncGroupToLines, lineOfMember: lineOfMember,
     groupMembers: groupMembers,
-    openWorldView: openWorldView, closeWorldView: closeWorldView, bindWorldView: bindWorldView
+    openWorldView: openWorldView, closeWorldView: closeWorldView, bindWorldView: bindWorldView,
+    startOpening: startOpening, syncOpeningBtn: syncOpeningBtn, bindEmojiPanel: bindEmojiPanel
   });
 
   (window.__dlScripts = window.__dlScripts || []).push("chat.js");

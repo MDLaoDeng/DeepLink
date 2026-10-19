@@ -29,6 +29,7 @@
   var saveSession = D.saveSession;
   var newSession = D.newSession, renderAll = D.renderAll;
   var avatarDraft = D.avatarDraft, renderAvatarPreview = D.renderAvatarPreview;
+  var readAvatarFile = D.readAvatarFile, genAvatarByAi = D.genAvatarByAi;
   /* recordUsage / renderCharUsage / renderBackupLine 在阶段④被搬进了 settings.js，
      而 settings.js 排在 roleplay.js 之后加载 —— 所以它们不能在这里快照，见下面 syncModules。 */
 
@@ -78,6 +79,7 @@
     ["aiName", "你的名称", "text"],
     ["age", "你的当前年龄（填数字，时间系统要用）", "text"],
     ["birth", "你的出生日期（时间系统用它算合法时段）", "date"],
+    ["aiGender", "你的性别（男 / 女 / 其他，其他可自填；没写就按整套设定推断）", "text"],
     ["myPersona", "我的性格", "textarea"],
     ["myAppearance", "我的外貌", "textarea"],
     ["myBackground", "我的背景", "textarea"],
@@ -86,6 +88,9 @@
     ["aiAppearance", "你的外貌", "textarea"],
     ["aiBackground", "你的背景", "textarea"],
     ["aiLikes", "你的喜好", "textarea"],
+    ["aiHealth", "你的身体状况（健康状况、身高体重、体型三围等，越详尽越好）", "textarea"],
+    ["myHealth", "我的身体状况（健康状况、身高体重、体型三围等，越详尽越好）", "textarea"],
+    ["aiPeriod", "你的生理期（女性填上次第一天，格式 2026-10-01；没填按 28 天规律推一个）", "date"],
     ["aiStyle", "你的说话风格", "textarea"],
     ["world", "世界观", "textarea"],
     ["shared", "共同经历（初始）", "textarea"],
@@ -96,7 +101,7 @@
   /* 「关于我（你）」的字段：勾了「只拆角色相关」时这几栏**不交给 AI、也不写回**。
      ⚠️ 命名容易看反：**my\* 是「你」（用户）的，ai\* 才是「角色」的**
      （角色的名字单独在 #charName，所以「我的名称」指的是用户的名字）。 */
-  const MY_FIELDS = ["myName", "aiCallMe", "myPersona", "myAppearance", "myBackground", "myLikes"];
+  const MY_FIELDS = ["myName", "aiCallMe", "myPersona", "myAppearance", "myBackground", "myLikes", "myHealth"];
   /* 发消息前的必填项（角色相关 + 共享）——缺任何一栏都不让发（见 chat.js 的 ensureCharReady）。
      不参与校验的：格式化 / 我的相关字段 / AI 筛选规则 / 对话名称（用户明确点过这几类）。
      age 例外：只在「时间系统」开着时必填。 */
@@ -127,6 +132,55 @@
       l.appendChild(input);
       box.appendChild(l);
     });
+    bindCharPhoneAvatar();
+    bindPeriodField();
+  }
+
+  /* 角色卡的「默认手机头像」（10-19 用户要求）：手机页里这个人用哪张脸。
+     留空 → 回落到角色头像（见 phone.js 的 avatarOf）。选图 / AI 生成都走同一份草稿。 */
+  function bindCharPhoneAvatar() {
+    const pick = $("#cfPhAvPick"), file = $("#cfPhAvInput");
+    if (pick && file) pick.addEventListener("click", function () { file.click(); });
+    if (file) file.addEventListener("change", async function (e) {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      try {
+        const url = await readAvatarFile(f);
+        avatarDraft.charPhone = url;
+        renderAvatarPreview("#cfPhAvPreview", url, "assistant");
+      } catch (err) { UI.toast(err.message || "头像读取失败", true); }
+    });
+    const clr = $("#cfPhAvClear");
+    if (clr) clr.addEventListener("click", function () {
+      avatarDraft.charPhone = "";
+      renderAvatarPreview("#cfPhAvPreview", "", "assistant");
+    });
+    const ai = $("#cfPhAvAi");
+    if (ai) ai.addEventListener("click", function () {
+      const ch = curChar();
+      const f = (ch && ch.fields) || {};
+      const look = [f.aiName || (ch && ch.name) || "", f.age ? ("年龄：" + f.age) : "",
+        f.aiAppearance || "", f.aiPersona || ""].filter(Boolean).join("；");
+      genAvatarByAi("charPhone", "#cfPhAvPreview", "char", look);
+    });
+  }
+
+  /* 生理期只在女性角色上出现；性别改了就跟着显隐（用户口径 10-19）。 */
+  function syncPeriodField() {
+    /* 这两栏是 buildCharForm 现场生成的（HTML 里没有），用 getElementById 取 */
+    const g = document.getElementById("cf_aiGender"), p = document.getElementById("cf_aiPeriod");
+    if (!g || !p) return;
+    const lab = p.closest("label");
+    if (lab) lab.hidden = String(g.value || "").indexOf("女") < 0;
+  }
+  function bindPeriodField() {
+    const g = document.getElementById("cf_aiGender");
+    if (!g || g.dataset.periodBound) return;
+    g.dataset.periodBound = "1";
+    g.addEventListener("input", syncPeriodField);
+    g.addEventListener("change", syncPeriodField);
+    syncPeriodField();
   }
 
   function renderCharBar() {
@@ -141,7 +195,7 @@
       b.className = "char-chip" + (active ? " on" : "");
       const av = document.createElement("span");
       av.className = "c-av";
-      if (avatar) { const im = document.createElement("img"); im.src = avatar; av.appendChild(im); }
+      if (avatar) { const im = document.createElement("img"); im.src = (D.avatarUrl ? D.avatarUrl(avatar) : avatar); av.appendChild(im); }
       else av.innerHTML = UI.iconSvg(id ? "account" : "creation");
       const nm = document.createElement("span");
       nm.className = "c-nm";
@@ -152,7 +206,10 @@
     };
     const aid = agentId();
     bar.appendChild(chip("", "助手", state.settings.avatarAi || "", aid === ""));
-    Store.getCharacters().slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).forEach((c) => bar.appendChild(chip(c.id, c.name || "角色", c.avatar || "", aid === c.id)));
+    /* 纯手机角色不进这一栏：它们只活在手机里，入口在侧栏「手机角色」那一栏。
+       以前这里不过滤 → 点它会在主对话里打开那条 phoneOnly 的线，
+       等于把「只活在手机里」这条设计从后门破掉了。 */
+    Store.getCharacters().filter((c) => !c.phoneOnly).slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).forEach((c) => bar.appendChild(chip(c.id, c.name || "角色", c.avatar || "", aid === c.id)));
     const add = document.createElement("button");
     add.type = "button";
     add.className = "char-chip add";
@@ -181,7 +238,7 @@
       b.className = "char-item" + ((state.settings.activeCharacterId || "") === id ? " active" : "");
       const av = document.createElement("span");
       av.className = "c-av";
-      if (avatar) { const im = document.createElement("img"); im.src = avatar; av.appendChild(im); }
+      if (avatar) { const im = document.createElement("img"); im.src = (D.avatarUrl ? D.avatarUrl(avatar) : avatar); av.appendChild(im); }
       else av.innerHTML = UI.iconSvg(id ? "account" : "creation");
       const nm = document.createElement("span");
       nm.className = "c-name";
@@ -369,6 +426,11 @@
        它是给所有人用的通用搭子，不是要摆设定才能聊的角色卡。
        否则老会话挂到它名下之后，用户会突然发不出消息（提示「还差 N 栏设定」）。 */
     if (ch.builtin) return [];
+    /* 纯手机角色（手机页「+ → 新建联系人」建的）同样不参与：
+       建的时候只填一个名字，本来就按「轻量联系人」设计；按 10 栏去卡，
+       它连第一条消息都发不出去，而手机页又没有去填角色卡的路 —— 链路直接断头。 */
+    /* 纯手机角色分两类（10-19）：功能型不校验；相熟型要按正常角色卡填齐。 */
+    if (ch.phoneOnly && ch.phoneKind !== "close") return [];
     const f = ch.fields || {};
     const labelOf = function (k) {
       const hit = CHAR_FIELDS.filter(function (x) { return x[0] === k; })[0];
@@ -517,6 +579,10 @@
       if (ch) {
         setVal("#charName", ch.name || "");
         CHAR_FIELDS.forEach(([key]) => setVal("#cf_" + key, (ch.fields && ch.fields[key]) || ""));
+        avatarDraft.charPhone = ch.phoneAvatar || "";
+        renderAvatarPreview("#cfPhAvPreview", avatarDraft.charPhone, "assistant", ch.avatar || "");
+        syncPeriodField();
+        setVal("#cfPhoneKind", ch.phoneKind === "close" ? "close" : "casual");
         const cf = Memory.ensureFilter(ch);
         setVal("#charFilterRule", cf.rule || "");
         setVal("#charFilterEvery", cf.every || 10);
@@ -540,6 +606,17 @@
     const form = readCharacterForm();
     ch.name = form.name;
     ch.fields = form.fields;
+    /* 女性角色没填生理期 → 按 28 天规律随机落一个近 28 天内的日期（用户口径：默认按月经规律算）。
+       只在「本来就没填」时补，用户手填的不动。 */
+    if (String(ch.fields.aiGender || "").indexOf("女") >= 0 && !String(ch.fields.aiPeriod || "").trim()) {
+      const d = new Date(Date.now() - (2 + Math.floor(Math.random() * 26)) * 86400000);
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      ch.fields.aiPeriod = d.getFullYear() + "-" + mm + "-" + dd;
+    }
+    /* 手机页专用头像：空串 = 跟随角色头像（不要写成 ch.avatar，那样会锁死） */
+    ch.phoneAvatar = avatarDraft.charPhone || "";
+    ch.phoneKind = $v("#cfPhoneKind") === "close" ? "close" : "casual";
     const cf = Memory.ensureFilter(ch);
     cf.rule = $v("#charFilterRule").trim();
     cf.every = readFilterEvery();
@@ -1447,6 +1524,10 @@
         { role: "user", content: worldText }
       ], { maxTokens: 600 });
       out = String((r && r.text) || "").trim();
+      /* 记账：这次挑手机消息也是一次真实请求，用量统计里要看得见（归到「手机」） */
+      if (r && r.usage && typeof recordUsage === "function") {
+        try { recordUsage(null, r.usage, "", "phone"); } catch (e) { /* ignore */ }
+      }
     } catch (e) { return 0; }
     if (!out || out === "无" || /^无[。.]?$/.test(out)) return 0;
     const lines = out.split("\n").map((x) => x.trim()).filter(Boolean);

@@ -267,11 +267,12 @@
     }
     if (tab === "phone") { renderPhonePane(); return; }
 
-    /* 「角色」栏只列用户当前切过去的那个角色 —— 这里**不能**用 agentId()：
-       那个函数在没选角色时会兜底返回听澜，于是听澜的线会同时出现在「助手」栏
-       和这里（重复），而群聊（characterId 为空）反而两边都落不进去、直接消失。 */
+    /* 「角色」栏：当前角色自己的线 + 所有群聊。
+       群聊的 characterId 是空串，如果只按「当前角色」过滤，开了角色扮演之后
+       群里那条线两边都不收（助手栏又把 isGroup 滤掉了）→ 群聊从侧栏消失，切走就回不去。
+       群聊跟「当前角色」无关，放这一栏最顺。 */
     const aid = state.settings.roleplayEnabled ? (state.settings.activeCharacterId || "") : "";
-    const list = Store.getSessions().filter((s) => (s.characterId || "") === aid && !s.phoneOnly);
+    const list = Store.getSessions().filter((s) => (s.isGroup || (s.characterId || "") === aid) && !s.phoneOnly);
     list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
     UI.sessionListEl(list, state.sessionId, {
       onOpen(id) {
@@ -637,7 +638,9 @@
   function importLineMemoryToGroup(groupId, from) {
     const gs = sessionById(groupId);
     if (!gs || !from) return;
-    const key = from.characterId || "__assistant__";
+    /* 多人群没有 characterId → 用 "g:线id" 当键。以前统一落到 __assistant__，
+       往同一个群里导第二个群时，后导的会把先导的整块冲掉（成员块只剩一个）。 */
+    const key = from.isGroup ? ("g:" + from.id) : (from.characterId || "__assistant__");
     const mem = Object.assign({}, gs.memberMem || {});
     mem[key] = {
       fromId: from.id,
@@ -943,6 +946,10 @@
 
   /* ── 头像 ──────────────────────────────────────── */
   function effectiveAvatar(role, s) {
+    /* 统一在这里解析：存的是文件路径就换成能直接用的 URL，dataURL 原样返回 */
+    return bgUrl(effectiveAvatarRaw(role, s));
+  }
+  function effectiveAvatarRaw(role, s) {
     const ses = s || session();
     const key = role === "user" ? "avatarUser" : "avatarAi";
     const sessVal = ses && ses[key] ? ses[key] : "";
@@ -952,6 +959,9 @@
 
   /* 群聊里每条消息的头像按「发言人」取：角色自己的头像优先，没有就用全局 AI 头像 */
   function speakerAvatar(charId, s) {
+    return bgUrl(speakerAvatarRaw(charId, s));
+  }
+  function speakerAvatarRaw(charId, s) {
     const c = Store.getCharacters().find((x) => x.id === charId);
     if (c && c.avatar) return c.avatar;
     const ses = s || session();
@@ -959,12 +969,12 @@
   }
 
   /* 头像草稿存在 JS 里：不依赖 <input type="hidden">（封装工具可能把它剔掉） */
-  const avatarDraft = { settingsUser: "", settingsAi: "", sessionUser: "", sessionAi: "" };
+  const avatarDraft = { settingsUser: "", settingsAi: "", phoneUser: "", sessionUser: "", sessionAi: "", charPhone: "" };
 
   function renderAvatarPreview(previewSel, url, role, fallback) {
     const box = $(previewSel);
     if (!box) return;
-    const shown = url || fallback || "";
+    const shown = bgUrl(url || fallback || "");
     box.innerHTML = "";
     if (shown) {
       const im = document.createElement("img");
@@ -985,6 +995,78 @@
     if (!val) return "";
     if (String(val).slice(0, 5) === "data:") return String(val);
     try { return Store.imageURL({ imgRef: val }) || ""; } catch (e) { return ""; }
+  }
+  /* 头像外置（10-19）：跟背景同一套 —— 有桥就存文件，读的时候统一解析。
+     头像以前是整段 base64 塞进 settings，六处头像字段叠起来能把 localStorage 顶到配额。 */
+  function keepAvatar(val) { return keepBg(val); }
+
+  /* 背景图尽量外置（10-19）：这三张图以前是整段 base64 直接塞进 settings ——
+     settings 每次保存都要整坨序列化重写，几张 1280 宽的 JPEG 就能把 localStorage 顶到配额，
+     而写盘失败是静默的（见 store.js 的 writeOk）。有桥就换成文件路径（bgUrl 本来就认路径），
+     没桥 / 没写成保持 dataURL，功能一点不受影响。 */
+  function keepBg(val) {
+    const v = String(val || "");
+    if (v.slice(0, 5) !== "data:") return v;
+    try {
+      if (!Store.hasBridge || !Store.hasBridge("保存指定文件")) return v;
+      const p = (Store.saveBgImage ? Store.saveBgImage(v) : "") || "";
+      return p || v;
+    } catch (e) { return v; }
+  }
+  /* 老数据里的背景图还是内联 base64（做外置之前存进去的）。启动后顺手搬一次：
+     有桥且确实搬成功才换成路径，任何一步不成就原样留着 —— 和图片外置同一套底线。 */
+  function migrateBgImages() {
+    try {
+      if (!Store.hasBridge || !Store.hasBridge("保存指定文件")) return;
+      const patch = {};
+      ["bgImage", "phoneBgImage"].forEach((k) => {
+        const v = String(state.settings[k] || "");
+        if (v.slice(0, 5) === "data:" && v.length > 120000) {
+          const p = Store.saveBgImage(v);
+          if (p) patch[k] = p;
+        }
+      });
+      /* 头像也一起搬（10-19）：以前只搬背景，五处头像字段的 base64 一直留在库里。
+         阈值不能照抄背景的 120000 —— 192×192 的头像只有十几 KB，永远够不着。 */
+      ["avatarUser", "avatarAi", "phoneAvatarUser"].forEach((k) => {
+        const v = String(state.settings[k] || "");
+        if (v.slice(0, 5) === "data:" && v.length > 2000) {
+          const p = Store.saveBgImage(v);
+          if (p) patch[k] = p;
+        }
+      });
+      if (Object.keys(patch).length) state.settings = Store.saveSettings(patch);
+      const list = Store.getSessions();
+      let hit = false;
+      list.forEach((s) => {
+        const v = String(s.bgImage || "");
+        if (v.slice(0, 5) === "data:" && v.length > 120000) {
+          const p = Store.saveBgImage(v);
+          if (p) { s.bgImage = p; hit = true; }
+        }
+        ["avatarUser", "avatarAi"].forEach((k) => {
+          const a = String(s[k] || "");
+          if (a.slice(0, 5) === "data:" && a.length > 2000) {
+            const p = Store.saveBgImage(a);
+            if (p) { s[k] = p; hit = true; }
+          }
+        });
+      });
+      if (hit) Store.saveSessions(list);
+      /* 角色头像（两个字段：主对话用 / 手机页用） */
+      const chars = Store.getCharacters ? Store.getCharacters() : [];
+      let chHit = false;
+      chars.forEach((c) => {
+        ["avatar", "phoneAvatar"].forEach((k) => {
+          const a = String(c[k] || "");
+          if (a.slice(0, 5) === "data:" && a.length > 2000) {
+            const p = Store.saveBgImage(a);
+            if (p) { c[k] = p; chHit = true; }
+          }
+        });
+      });
+      if (chHit && Store.saveCharacters) Store.saveCharacters(chars);
+    } catch (e) { /* 迁移失败不影响使用 */ }
   }
   function renderBgPreview(sel, val) {
     const box = $(sel);
@@ -1026,12 +1108,44 @@
       const url = await Media.image(desc + "，用作聊天界面背景：横构图，画面不要出现人物和文字",
         state.settings, null);
       if (!url) { UI.toast("模型没有返回图片", true); return; }
-      bgDraft[target] = url;
-      renderBgPreview(prevSel, url);
+      bgDraft[target] = keepBg(url);
+      renderBgPreview(prevSel, bgDraft[target]);
       if (target === "session") setChecked("#setSessionBgFollow", false);
       UI.toast("已生成，点右下角「保存」生效");
     } catch (e) {
       UI.toast("生成失败：" + ((e && e.message) || e), true);
+    }
+  }
+
+  /* AI 生成头像（10-19）：设置里的「我的默认手机头像」和角色卡里的「默认手机头像」共用这一个。
+     kind 决定提示词的方向：user=本人自拍感，char=角色特写。look 是人物设定（可空）。
+     结果只进草稿并刷新预览，点保存才落库 —— 跟背景那套一致，生成不满意可以直接不保存。 */
+  async function genAvatarByAi(draftKey, prevSel, kind, look) {
+    if (!Media.capable("img", state.settings)) {
+      UI.toast("先在「设置 → 画图」里填好接口地址、密钥和模型", true);
+      return false;
+    }
+    const face = kind === "user" ? "本人自拍头像" : "这个角色的头像";
+    const desc = await UI.askDialog("AI 生成" + face,
+      String(look || "").trim() || "补充一句长相/气质/穿着，留空就按通用头像生成", "例：短发，眼神温和，浅灰卫衣");
+    if (!desc) return false;
+    const prompt = [
+      "头像特写，正方形构图，人物居中，肩部以上，表情自然，光线柔和，背景干净不杂乱。",
+      "不要文字、不要水印、不要边框、不要拼图。",
+      look ? "【人物设定（必须一致）】\n" + look : "",
+      "具体形象：" + desc
+    ].filter(Boolean).join("\n\n");
+    UI.toast("正在生成头像，可能要十几秒…");
+    try {
+      const url = await Media.image(prompt, state.settings, null);
+      if (!url) { UI.toast("模型没有返回图片", true); return false; }
+      avatarDraft[draftKey] = keepAvatar(url);
+      renderAvatarPreview(prevSel, url, kind === "user" ? "user" : "assistant");
+      UI.toast("已生成，点「保存」生效");
+      return true;
+    } catch (e) {
+      UI.toast("生成失败：" + ((e && e.message) || e), true);
+      return false;
     }
   }
 
@@ -1520,10 +1634,10 @@
         if (r !== false) return true;
       } catch (e) { /* 这个名字不通就试下一个 */ }
     }
-    try {
-      const w = window.open(u, "_system");
-      if (w) return true;
-    } catch (e) { /* ignore */ }
+    /* 不再走 window.open(u, "_system")（10-19 去掉）：
+       安卓 WebView 里它经常返回一个 WindowProxy、却在应用内新开一个 WebView ——
+       返回值骗人，界面照样被顶掉，正是用户最初反映的毛病。没有原生桥时直接复制，
+       宁可让用户粘一下，也不要在应用内跳走。 */
     UI.copyText(u).then((ok) => UI.toast(ok ? "已复制链接，粘到浏览器里打开" : u, !ok));
     return false;
   }
@@ -1578,6 +1692,9 @@
     const info = r.info || {};
     const cur = CONFIG.APP_VERSION || "0";
     const remote = String(info.version || "").trim();
+    /* 读到清单才算「今天查过了」。以前是发请求前就写日期 —— 一次网络失败，当天就不再试，
+       对一天只开一次 App 的人等于永远不检查。 */
+    try { localStorage.setItem(UPDATE_DAY_KEY, todayKey()); } catch (e) { /* ignore */ }
     if (!remote) {
       if (manual && box) setText("#updateState", "清单里没写 version 字段");
       return { ok: false, why: "清单里没写 version" };
@@ -1596,7 +1713,12 @@
   function promptUpdate(info, cur, remote, box) {
     const notes = String(info.notes || "").trim();
     const dl = String(info.url || "").trim() || String(CONFIG.UPDATE_PAGE || "").trim();
+    /* min = 清单里声明的最低支持版本（config.js 注释里写了，之前一直没实现）：
+       从很老的版本直接跳，迁移链没跑过，最容易丢数据。 */
+    const min = String(info.min || "").trim();
+    const tooOld = !!(min && vCmp(cur, min) < 0);
     const text = "当前 " + cur + "　→　最新 " + remote + "\n\n"
+      + (tooOld ? "注意：你的版本低于这份清单支持的最低版本 " + min + "，跨版本升级更容易出问题，务必先导出备份。\n\n" : "")
       + (notes ? notes.slice(0, 800) + "\n\n" : "")
       + (dl ? "下载地址：" + dl + "\n\n" : "（清单里没有下载地址）\n\n")
       + "装之前先去「设置 → 导入导出」导出一次备份。只有签名一致的包才能直接覆盖安装；"
@@ -1615,13 +1737,12 @@
     });
   }
 
-  /* 启动后静默查一次（一天一次，没配地址就什么都不做） */
+  /* 启动后静默查一次（一天一次，没配地址就什么都不做）。
+     日期只在 checkUpdate 成功读到清单后才写 —— 失败留给下次启动再试。 */
   function maybeCheckUpdate() {
     if (!String(CONFIG.UPDATE_URL || "").trim()) return;
-    const key = todayKey();
     try {
-      if (localStorage.getItem(UPDATE_DAY_KEY) === key) return;
-      localStorage.setItem(UPDATE_DAY_KEY, key);
+      if (localStorage.getItem(UPDATE_DAY_KEY) === todayKey()) return;
     } catch (e) { /* 存不了就还是查，最多多查几次 */ }
     setTimeout(() => { checkUpdate(false).catch(() => { /* 静默 */ }); }, 4500);
   }
@@ -1671,13 +1792,12 @@
       return;
     }
 
-    /* 内部私有目录优先，拿不到再退外部私有目录（同 store.js 的 imgDir 口径） */
+    /* 内部私有目录优先，拿不到再退外部私有目录（同 store.js 的 imgDir 口径）。
+       一律经 Store 的桥封装取，不直连 window.webapp（那条规矩对全项目一样）。 */
     let root = "";
-    try { root = String(window.webapp["获取内部文件目录"]() || ""); } catch (e) { root = ""; }
+    try { if (Store.hasBridge("获取内部文件目录")) root = String(Store.callBridge("获取内部文件目录") || ""); } catch (e) { root = ""; }
     if (!root) {
-      try {
-        if (typeof window.webapp["获取外部文件目录"] === "function") root = String(window.webapp["获取外部文件目录"]() || "");
-      } catch (e) { root = ""; }
+      try { if (Store.hasBridge("获取外部文件目录")) root = String(Store.callBridge("获取外部文件目录") || ""); } catch (e) { root = ""; }
     }
     root = root.replace(/\/+$/, "");
     if (!root) { say("拿不到应用的私有目录，无法保存模型（原生接口没返回路径）。"); return; }
@@ -1688,7 +1808,7 @@
     const relOf = (f) => String(f.webkitRelativePath || f.name).split("/").slice(1).join("/") || f.name;
     let probeW = null;
     try {
-      probeW = window.webapp["保存指定文件"](dir + "/" + relOf(entry), await readAsDataUrl(entry));
+      probeW = Store.callBridge("保存指定文件", dir + "/" + relOf(entry), await readAsDataUrl(entry));
     } catch (e) { probeW = false; }
     if (probeW === false) {
       say("写入失败：「" + relOf(entry) + "」。这台设备的原生接口可能不支持建子目录，或者没有存储权限。");
@@ -1703,7 +1823,7 @@
       const rel = relOf(f);
       const path = dir + "/" + rel;
       let w = null;
-      try { w = window.webapp["保存指定文件"](path, await readAsDataUrl(f)); }
+      try { w = Store.callBridge("保存指定文件", path, await readAsDataUrl(f)); }
       catch (e) { w = false; }
       /* 写完复核：有「判断指定文件」就查一遍，没写成的不算成功（否则会填一个读不到的路径） */
       let ok = w !== false;
@@ -1789,6 +1909,7 @@
     const AVATAR_FIELDS = [
       { draft: "settingsUser", pick: "#setAvatarUserPick", clear: "#setAvatarUserClear", preview: "#setAvatarUserPreview", role: "user" },
       { draft: "settingsAi", pick: "#setAvatarAiPick", clear: "#setAvatarAiClear", preview: "#setAvatarAiPreview", role: "assistant" },
+      { draft: "phoneUser", pick: "#setPhoneAvUserPick", clear: "#setPhoneAvUserClear", preview: "#setPhoneAvUserPreview", role: "user" },
       { draft: "sessionUser", pick: "#setSessionAvatarUserPick", clear: "#setSessionAvatarUserClear", preview: "#setSessionAvatarUserPreview", role: "user" },
       { draft: "sessionAi", pick: "#setSessionAvatarAiPick", clear: "#setSessionAvatarAiClear", preview: "#setSessionAvatarAiPreview", role: "assistant" }
     ];
@@ -1807,11 +1928,20 @@
       const t = avatarTarget;
       try {
         const url = await readAvatarFile(file);
-        avatarDraft[t.draft] = url;
+        /* 手动选图也要外置（10-19）：这是五个头像入口的主要路径，
+           以前只有 AI 生成那条走 keepAvatar，等于外置几乎没生效。 */
+        avatarDraft[t.draft] = keepAvatar(url);
         renderAvatarPreview(t.preview, url, t.role);
       } catch (err) {
         UI.toast(err.message || "头像读取失败", true);
       }
+    });
+
+    /* 「我的默认手机头像」的 AI 生成入口（选图走上面那张 AVATAR_FIELDS 表） */
+    on("#setPhoneAvUserAi", "click", () => {
+      const look = [state.settings.myName, state.settings.myAppearance, state.settings.myPersona]
+        .filter(Boolean).join("；");
+      genAvatarByAi("phoneUser", "#setPhoneAvUserPreview", "user", look);
     });
 
     /* ── 自定义背景：全局 / 会话两处共用一个文件选择器，靠 bgTarget 区分 ── */
@@ -1838,10 +1968,10 @@
       if (!file) return;
       try {
         const url = await readBgFile(file);
-        bgDraft[bgTarget] = url;
+        bgDraft[bgTarget] = keepBg(url);
         const prevSel = bgTarget === "session" ? "#setSessionBgPreview"
           : (bgTarget === "phone" ? "#setPhoneBgPreview" : "#setBgPreview");
-        renderBgPreview(prevSel, url);
+        renderBgPreview(prevSel, bgDraft[bgTarget]);
         if (bgTarget === "session") setChecked("#setSessionBgFollow", false);
       } catch (err) {
         UI.toast(err.message || "背景图读取失败", true);
@@ -1885,7 +2015,6 @@
       try {
         const r = await window.DL.updatePeerCog(cur.id);
         if (r && r.ok) {
-          setText("#peerCogState", "已更新 " + r.count + " 条");
           const now = sessionById(cur.id);
           if (window.DL.renderGroupCog) window.DL.renderGroupCog(now);
           setText("#peerCogState", "已更新 " + r.count + " 条");
@@ -1928,7 +2057,7 @@
     on("#live2dUploadBtn", "click", () => {
       const inp = $("#live2dFolderInput");
       if (!inp) return;
-      if (!(window.webapp && typeof window.webapp["保存指定文件"] === "function")) {
+      if (!Store.hasBridge("保存指定文件")) {
         setText("#live2dUploadState", "这个环境没有原生桥（浏览器预览），上传只在手机上可用。");
         return;
       }
@@ -2162,11 +2291,14 @@
       patch.phoneBgBlur = Number($v("#setPhoneBgBlur")) || 0;
       patch.phoneBgBright = Number($v("#setPhoneBgBright")) || 100;
       state.settings = Store.saveSettings(patch);
+      /* 写盘失败必须说出来：配额满时以前照样提示「已保存」，重启后全回落，最难查 */
+      const wroteOk = !Store.writeOk || Store.writeOk() !== false;
       syncToggles();
       renderAll();
       stopRead();
       UI.closeModal("settingsModal");
-      UI.toast("设置已保存");
+      if (wroteOk) UI.toast("设置已保存");
+      else UI.toast("设置没能写入存储（多半是空间满了）。背景图 / 头像最容易顶满，先清一张再保存一次。", true);
       applyBgKeep();   /* B3：开关变了要同步给原生（后台状态 / 电池优化 / 通知权限） */
     });
     on("#setRoleplayEnabled", "change", (e) => {
@@ -2604,6 +2736,8 @@
             console.warn("[DeepLink] 图片外置迁移：搬走 " + r.hoisted + " 张，仍留内联 " + r.left + " 张");
           }
         } catch (e) { /* 迁移失败不影响使用 */ }
+        /* 背景图同理（也是大图，以前跟着 settings 一起塞内联） */
+        try { migrateBgImages(); } catch (e) { /* ignore */ }
       }, 2600);
       /* 无图模式按设置生效（除了原生开关，自己再加一层 CSS 兜底，保证一定生效） */
       applyNoImage(state.settings.noImage);
@@ -2739,9 +2873,12 @@
     jsonDataUrl: jsonDataUrl, exportFileName: exportFileName,
     /* roleplay.js（阶段③）要用、但仍留在 app.js 的：头像是草稿对象（要共享同一份引用）。 */
     avatarDraft: avatarDraft, renderAvatarPreview: renderAvatarPreview, readAvatarFile: readAvatarFile,
+    genAvatarByAi: genAvatarByAi,
     /* 6.0.0：自定义背景（全局 / 会话共用同一份草稿与渲染），供 settings.js / roleplay.js 用 */
     bgDraft: bgDraft, renderBgPreview: renderBgPreview, syncBgLabels: syncBgLabels,
     applyPhoneBackground: applyPhoneBackground,
+    /* 头像解析：存的是文件路径就换成可用 URL（10-19） */
+    avatarUrl: bgUrl,
     applyChatBackground: applyChatBackground,
     /* 世界生成的「触发判定」：init 里 1500ms 会自动调一次，这里也挂出来以便测试确定性触发 */
     openWorldCheck: openWorldCheck,

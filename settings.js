@@ -786,6 +786,9 @@
     { id: "phone", name: "手机" },
     { id: "auto", name: "自动发信息" },
     { id: "quickreply", name: "快捷回复" },
+    /* 6.2.2 新增两类：这两件事都是真实的模型调用，以前混在「其它 / 记忆压缩」里看不清 */
+    { id: "sticker", name: "表情包命名" },
+    { id: "caps", name: "模型能力检测" },
     { id: "other", name: "其它" }
   ];
   function catName(id) { const c = USAGE_CATS.filter((x) => x.id === id)[0]; return c ? c.name : id; }
@@ -1135,6 +1138,7 @@
     setVal("#setMusicTemplate", s.musicTemplate || "");
 
     setChecked("#setRoleplayEnabled", !!s.roleplayEnabled);
+    setChecked("#setGroupWarn", !s.groupWarnOff);
     setVal("#setMyName", s.myName || "");
     setVal("#setMyPersona", s.myPersona || "");
     setVal("#setMyAppearance", s.myAppearance || "");
@@ -1208,8 +1212,15 @@
     renderModelBadge();
     avatarDraft.settingsUser = s.avatarUser || "";
     avatarDraft.settingsAi = s.avatarAi || "";
+    avatarDraft.phoneUser = s.phoneAvatarUser || "";
     renderAvatarPreview("#setAvatarUserPreview", avatarDraft.settingsUser, "user");
     renderAvatarPreview("#setAvatarAiPreview", avatarDraft.settingsAi, "assistant");
+    renderAvatarPreview("#setPhoneAvUserPreview", avatarDraft.phoneUser, "user", avatarDraft.settingsUser);
+    renderCapsLine();
+    applyUploadTypes();
+    bindCapChecks();
+    syncCapChecks();
+    autoDetectIfStale();
     renderSettingsMemory();
     renderDataUsage();
     syncProviderFields();
@@ -1570,6 +1581,7 @@
       /* 五个模型区的地址 / 密钥 / 模型都不在这里取 —— 它们在末尾由 collectModelSets() 统一写入 */
       avatarUser: avatarDraft.settingsUser,
       avatarAi: avatarDraft.settingsAi,
+      phoneAvatarUser: avatarDraft.phoneUser,
       temperature: Number($v("#setTemperature")),
       topP: Number($v("#setTopP")),
       systemPrompt: $v("#setSystemPrompt"),
@@ -1593,6 +1605,7 @@
       phoneShareImg: checkedOf("#setPhoneShareImg"),
 
       roleplayEnabled: checkedOf("#setRoleplayEnabled"),
+      groupWarnOff: !checkedOf("#setGroupWarn"),
       myName: $v("#setMyName").trim(),
       myPersona: $v("#setMyPersona").trim(),
       myAppearance: $v("#setMyAppearance").trim(),
@@ -2635,7 +2648,159 @@
     for (var n = h3.firstChild; n; n = n.nextSibling) { if (n.nodeType === 3) t += n.nodeValue; }
     return t.replace(/\s+/g, "");
   }
+  /* 主模型能力：查表 → 查不到就当纯文本（宁可不放开）。
+     用户口径是「联网自动检测」：表里没有的名字，这里会尝试走搜索源查一次再落库。 */
+  function capsOfName(name) {
+    var table = ((window.CONFIG && CONFIG.MODEL_CAPS) || []).slice();
+    var t = String(name || "").toLowerCase();
+    /* 长的键优先（10-19）：原来按表里书写顺序命中，"o3" 这种短键会先吃掉
+       "xx-o3-pro"，"deepseek" 也会抢在 "deepseek-vl" 前面。 */
+    table.sort(function (a, b) { return String(b.k).length - String(a.k).length; });
+    for (var i = 0; i < table.length; i++) {
+      if (t.indexOf(String(table[i].k).toLowerCase()) >= 0) return table[i];
+    }
+    return null;
+  }
+  function syncCapChecks() {
+    var m = (state.settings.modelCaps || {}).manual;
+    if (!m) return;
+    var map = { capVision: "vision", capAsr: "asr", capTts: "tts", capImg: "img" };
+    Object.keys(map).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.checked = !!m[map[id]];
+    });
+  }
+  function bindCapChecks() {
+    var map = { capVision: "vision", capAsr: "asr", capTts: "tts", capImg: "img" };
+    Object.keys(map).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el || el.dataset.bound) return;
+      el.dataset.bound = "1";
+      el.addEventListener("change", function () {
+        var cur = (state.settings.modelCaps || {});
+        var manual = Object.assign({}, cur.manual || {});
+        manual[map[id]] = !!el.checked;
+        /* 把 model 一起写上（10-19）：不写的话下次进设置会被 autoDetectIfStale 判成「过期」，
+           重新检测后整个 modelCaps 被替换，用户刚勾的 manual 就没了。 */
+        var next = Object.assign({}, cur, { manual: manual, src: "手动指定", model: state.settings.model || "" });
+        state.settings = Store.saveSettings({ modelCaps: next });
+        applyUploadTypes();
+        renderCapsLine();
+      });
+    });
+  }
+  function renderCapsLine() {
+    var el = document.getElementById("capsLine");
+    if (!el) return;
+    var caps = state.settings.modelCaps;
+    var name = state.settings.model || "（未设置主模型）";
+    if (!caps) { el.textContent = "主模型：" + name + "。还没检测过能力。"; return; }
+    if (caps.unknown) {
+      el.textContent = "主模型：" + name + "。没检测出结论，上传类型先不限制（下面可以自己勾）。";
+      return;
+    }
+    var on = [];
+    if (caps.vision) on.push("看图");
+    if (caps.asr) on.push("听音");
+    if (caps.tts) on.push("朗读");
+    if (caps.img) on.push("画图");
+    el.textContent = "主模型：" + name + " · " + (on.length ? "支持 " + on.join(" / ") : "只当文字模型") +
+      (caps.src ? "（" + caps.src + "）" : "");
+  }
+  /* 按能力放开上传类型：不能看图的就别让选图片，不能听音的别让选音频 */
+  /* 手动勾选优先：用户自己知道自己的模型行不行，比任何查表都准。 */
+  function effectiveCaps() {
+    var c = state.settings.modelCaps || {};
+    var m = c.manual || null;
+    if (m) return { vision: !!m.vision, asr: !!m.asr, tts: !!m.tts, img: !!m.img };
+    return { vision: !!c.vision, asr: !!c.asr, tts: !!c.tts, img: !!c.img };
+  }
+  function applyUploadTypes() {
+    var caps = effectiveCaps();
+    var m = state.settings || {};
+    /* 10-19 修两处：
+       1. 独立视觉 / 语音模型（设置里那套 visionEnabled / asrEnabled）本来就负责「主模型看不了图，
+          先用视觉模型转成文字」。只看主模型会把这条成熟链路从入口堵死；
+       2. 没检测过（modelCaps 为 null）时【不收紧】—— 否则用户只是打开设置看一眼，
+          出来就发现图片选不了了。 */
+    var known = !!(m.modelCaps && !m.modelCaps.unknown);
+    var canVision = !known ? true : !!(caps.vision || m.mainCompat ||
+      (window.Media && Media.capable && Media.capable("vision", m)));
+    var canAsr = !known ? true : !!(caps.asr ||
+      (window.Media && Media.capable && Media.capable("asr", m)));
+    var list = [".txt", ".md", ".json", ".pdf"];
+    if (canVision) list = list.concat([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+    if (canAsr) list = list.concat([".mp3", ".wav", ".m4a", ".ogg", ".webm"]);
+    var accept = list.join(",");
+    ["fileInput", "plusFile"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && el.setAttribute) el.setAttribute("accept", accept);
+    });
+  }
+  /* 问模型自己：不依赖外部搜索源，用你填的那个 key 调一次，让它只回一段 JSON。
+     失败了就当没问过（不阻断，也不当成「不支持」）。 */
+  async function askModelCaps(name) {
+    if (!Api || !Api.summarize) return null;
+    try {
+      var r = await Api.summarize(state.settings, [
+        { role: "system", content: "你只输出一个 JSON 对象，不要解释、不要代码块。" },
+        { role: "user", content: "下面这个模型是否支持这四项能力？模型名：" + name +
+          "。字段：vision=能接收图片输入；asr=能接收音频输入；tts=能输出语音；img=能生成图片。" +
+          "只输出形如 {\"vision\":true,\"asr\":false,\"tts\":false,\"img\":false} 的 JSON。" }
+      ], { maxTokens: 120 });
+      var t = String((r && r.text) || "");
+      /* 这一步也是真实调用，按「除对话外一切 AI 消耗都计入」的口径记账 */
+      if (r && r.usage) { try { recordUsage(null, r.usage, "", "caps"); } catch (e) { /* ignore */ } }
+      var m = t.match(/\{[\s\S]*\}/);
+      if (!m) return null;
+      var j = JSON.parse(m[0]);
+      return { vision: !!j.vision, asr: !!j.asr, tts: !!j.tts, img: !!j.img };
+    } catch (e) { return null; }
+  }
+
+  async function detectModelCaps(silent) {
+    var name = state.settings.model || "";
+    if (!name) { if (!silent) UI.toast("先在主模型里填一个模型名", true); return; }
+    var hit = capsOfName(name);
+    var caps = null;
+    if (hit) {
+      caps = { model: name, vision: !!hit.vision, asr: !!hit.asr, tts: !!hit.tts, img: !!hit.img, src: "内置表：" + hit.n };
+    } else {
+      if (!silent) UI.toast("表里没有，正在问模型自己…");
+      var asked = await askModelCaps(name);
+      /* 没问出结论时**不能**写成「四项全不支持」（10-19）：
+         那等于凭空把上传类型全关掉，用户只是打开设置看一眼就传不了图了。
+         写成 unknown，上传限制原样放开，界面如实说「没确认」。 */
+      caps = asked
+        ? Object.assign({ model: name, src: "模型自述" }, asked)
+        : { model: name, unknown: true, src: "未确认（上传类型暂不限制）" };
+    }
+    state.settings = Store.saveSettings({ modelCaps: caps });
+    renderCapsLine();
+    applyUploadTypes();
+    if (!silent) UI.toast("已记录：" + caps.src);
+  }
+
+  /* 模型名一变，下次进设置自动重测一次（用户不用记得点按钮）。
+     10-19：用户手动勾过就不再自动覆盖 —— 他比表更清楚自己的模型；而且自动检测对
+     表里没有的名字会实打实发一次请求，不该在「只是打开设置看看」时悄悄花钱。 */
+  function autoDetectIfStale() {
+    var c = state.settings.modelCaps;
+    if (!state.settings.model) return;
+    if (c && c.manual) return;
+    /* 同一个模型已经问过一次没结论了，别每次进设置都再发一次请求 */
+    if (c && c.unknown && c.model === state.settings.model) return;
+    if (c && c.model === state.settings.model && c.src) return;
+    detectModelCaps(true);
+  }
+
+  function bindCapsBtn() {
+    var b = document.getElementById("detectCapsBtn");
+    if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", function () { detectModelCaps(false); }); }
+  }
+
   function setupSettingsHome() {
+    bindCapsBtn();
     var body = document.getElementById("settingsBody");
     if (!body || body.dataset.sgReady) return;
     body.dataset.sgReady = "1";

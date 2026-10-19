@@ -64,6 +64,14 @@
       var s = String(url || "");
       if (!s) return null;
       try {
+        /* 走 Store 的桥封装（项目规矩：不直连 window.webapp）。
+           Store 还没挂上时退回 window.webapp，别让 live2D 因为加载顺序而读不到文件。 */
+        var St = window.Store;
+        if (St && St.hasBridge) {
+          if (!St.hasBridge("获取文件内容")) return null;
+          var r1 = St.callBridge("获取文件内容", s);
+          return r1 ? String(r1) : null;
+        }
         var w = window.webapp;
         if (!w || typeof w["获取文件内容"] !== "function") return null;
         var raw = w["获取文件内容"](s);
@@ -296,8 +304,10 @@
       try { info.prot = String(location.protocol); } catch (e) { /* ignore */ }
       try { info.href = String(location.href).slice(0, 72); } catch (e) { /* ignore */ }
       var hasBridgeRead = "无";
-      try { hasBridgeRead = (window.webapp && typeof window.webapp["获取文件内容"] === "function") ? "有" : "无"; }
-      catch (e) { hasBridgeRead = "无"; }
+      try {
+        if (window.Store && window.Store.hasBridge) hasBridgeRead = window.Store.hasBridge("获取文件内容") ? "有" : "无";
+        else hasBridgeRead = (window.webapp && typeof window.webapp["获取文件内容"] === "function") ? "有" : "无";
+      } catch (e) { hasBridgeRead = "无"; }
       return new Promise(function (resolve) {
         var done = false;
         var finish = function () {

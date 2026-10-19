@@ -46,15 +46,41 @@
       return base + (t.start - t.setAt);
     }
 
-    /* 这条备忘「现在」对应的时间：有故事时间就用故事时间，没有就退回现实时间 */
-    function nowFor(r) {
-      var sn = storyNow(r && r.sid);
-      return sn || Date.now();
+    /* ── 时间口径（10-19 修正）──────────────────────────────
+       用户在下拉里选的是「这条线的故事时间」（没开时间系统时就是现实时间）。
+       但比较必须放在同一套坐标系里，所以 due 一律【存现实毫秒】：
+         due = 选中的故事时间 − 偏移（偏移 = time.start − time.setAt）
+       判断到点用【现实现在】（冻结时用 frozenAt —— 它本身就是现实毫秒）。
+       以前是拿「按现实解析出来的 due」直接跟故事时间比：
+       偏移不为 0 时，故事在未来的线一建就响、故事在过去的线永远不响。 */
+    function sessOf(sid) {
+      sync();
+      var arr = Store.getSessions();
+      for (var i = 0; i < arr.length; i++) { if (arr[i].id === sid) return arr[i] || null; }
+      return null;
     }
-
+    function timeOf(sid) {
+      var s = sessOf(sid);
+      return (s && s.time) || null;
+    }
+    function offOf(sid) {
+      var t = timeOf(sid);
+      if (!t || typeof t.start !== "number" || typeof t.setAt !== "number") return null;
+      return t.start - t.setAt;
+    }
+    function realNow(sid) {
+      var t = timeOf(sid);
+      if (t && typeof t.frozenAt === "number") return t.frozenAt;
+      return Date.now();
+    }
     function isDue(r) {
       if (!r || r.done || !r.due) return false;
-      return nowFor(r) >= r.due;
+      return realNow(r.sid) >= r.due;
+    }
+    /* 显示用：把存的现实毫秒还原成「用户当初选的那个故事时间」 */
+    function fmtFor(r) {
+      var off = offOf(r && r.sid);
+      return fmt((r.due || 0) + (off || 0));
     }
 
     function dueCount() {
@@ -96,7 +122,7 @@
         if (!!a.done !== !!b.done) return a.done ? 1 : -1;
         return (a.due || 0) - (b.due || 0);
       });
-      arr.forEach(function (r, i) {
+      arr.forEach(function (r) {
         var row = document.createElement("div");
         row.className = "reminder-item" + (r.done ? " done" : "") + (isDue(r) ? " late" : "");
 
@@ -104,8 +130,10 @@
         cb.type = "checkbox";
         cb.checked = !!r.done;
         cb.addEventListener("change", function () {
-          arr[i].done = cb.checked;
-          save(arr);
+          /* 按 id 找，不按下标 —— 列表是排过序的，下标跟存储顺序对不上 */
+          var next = list();
+          next.forEach(function (x) { if (x.id === r.id) x.done = cb.checked; });
+          save(next);
           renderList();
           syncDot();
         });
@@ -116,11 +144,11 @@
         b.textContent = r.text;
         tx.appendChild(b);
         if (r.due) {
-          var sub = document.createElement("small");
+          var sm = document.createElement("small");
           var late = isDue(r);
-          sub.textContent = (late ? "已到时间 · " : "约定 ") + fmt(r.due) + (storyNow(r.sid) ? "（故事时间）" : "");
-          if (late) sub.className = "late";
-          tx.appendChild(sub);
+          sm.textContent = (late ? "已到时间 · " : "约定 ") + fmtFor(r) + (offOf(r.sid) === null ? "" : "（故事时间）");
+          if (late) sm.className = "late";
+          tx.appendChild(sm);
         }
 
         var del = document.createElement("button");
@@ -129,8 +157,8 @@
         del.setAttribute("aria-label", "删除");
         del.innerHTML = UI.iconSvg("close");
         del.addEventListener("click", function () {
-          var next = list();
-          next.splice(i, 1);
+          /* 同上：按 id 删。以前用排序后的 i 去 splice 原始顺序的数组，会删错条目 */
+          var next = list().filter(function (x) { return x.id !== r.id; });
           save(next);
           renderList();
           syncDot();
@@ -150,18 +178,22 @@
       if (!text) { UI.toast("先写点什么", true); return; }
       var asTime = $("#reminderAsTime") && $("#reminderAsTime").checked;
       var at = $("#reminderAt") ? String($("#reminderAt").value || "") : "";
+      var sid = state.sessionId || "";
       var due = 0;
       if (asTime) {
         if (!at) { UI.toast("先把约定时间选上", true); return; }
-        due = new Date(at).getTime();
-        if (!due || isNaN(due)) { UI.toast("这个时间看不懂", true); return; }
+        var picked = new Date(at).getTime();
+        if (!picked || isNaN(picked)) { UI.toast("这个时间看不懂", true); return; }
+        /* 下拉里选的是「故事时间」→ 换算成现实毫秒再存（见 offOf 那一大段注释）。
+           没开时间系统的线 offset 为 null，当作现实时间，原样存。 */
+        due = picked - (offOf(sid) || 0);
       }
       var arr = list();
       arr.push({
         id: "r_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
         text: text,
         due: due,
-        sid: state.sessionId || "",
+        sid: sid,
         done: false,
         createdAt: Date.now()
       });
