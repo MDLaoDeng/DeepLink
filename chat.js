@@ -1337,6 +1337,13 @@
     /* 角色相关字段没填齐 → 先别发（用户口径：格式化 / 关于「我」的几栏 / AI 筛选规则 / 对话名称不参与）。
        拦在「发消息」这一步、而不是进对话时：否则字段不全的老对话会直接打不开。 */
     const curSes = (window.DL && window.DL.session) ? window.DL.session() : null;
+    /* 混搭模式（10-20）：发第一条消息时解冻，离线那段不推进 */
+    try {
+      if (curSes && curSes.autoFreeze && Memory && Memory.isFrozen && Memory.isFrozen(curSes)) {
+        Memory.unfreezeTime(curSes);
+        Store.saveSessions(Store.getSessions());
+      }
+    } catch (e) { /* 解冻失败不影响发送 */ }
     const missF = (window.DL && window.DL.charMissingFields) ? window.DL.charMissingFields(curSes) : [];
     if (missF.length) {
       UI.toast("这个角色还差 " + missF.length + " 栏设定才能开始对话：" + missF.slice(0, 3).join("、") + (missF.length > 3 ? "…" : ""), true);
@@ -2044,8 +2051,64 @@
     return out;
   }
 
+  /* 搜索范围（10-20 用户要求）：主聊天 / 手机两个模块；再可选「全部 / 某个角色（全部线）/
+     某条线 / 某个群」。角色卡过滤与时间、内容筛选保持原样。 */
+  function fillHistScope() {
+    const sel = $("#histScope");
+    if (!sel) return;
+    const module = ($v("#histModule") || "chat");
+    const prev = sel.value || "all";
+    const sess = Store.getSessions();
+    const chs = Store.getCharacters();
+    const rows = ['<option value="all">全部</option>'];
+    const seenC = {};
+    if (module === "chat") {
+      sess.forEach((s) => {
+        if (!s || s.isGroup || s.phoneOnly) return;
+        const cid = s.characterId || "";
+        if (!cid || seenC[cid]) return;
+        seenC[cid] = 1;
+        const c = chs.filter((x) => x && x.id === cid)[0];
+        const nm = (c && ((c.fields && c.fields.aiName) || c.name)) || "角色";
+        rows.push('<option value="char:' + cid + '">角色：' + UI.escapeHtml(nm) + "（全部线）</option>");
+      });
+      sess.forEach((s) => {
+        if (!s) return;
+        if (s.isGroup) rows.push('<option value="group:' + s.id + '">群聊：' + UI.escapeHtml(s.title || "群聊") + "</option>");
+        else if (s.characterId) rows.push('<option value="line:' + s.id + '">线：' + UI.escapeHtml(s.title || "新对话") + "</option>");
+      });
+    } else {
+      sess.forEach((s) => {
+        if (!s || !(s.phone && s.phone.msgs && s.phone.msgs.length)) return;
+        if (s.isGroup) rows.push('<option value="group:' + s.id + '">群：' + UI.escapeHtml(s.title || "群聊") + "</option>");
+        else rows.push('<option value="line:' + s.id + '">联系人：' + UI.escapeHtml(s.title || "新对话") + "</option>");
+      });
+    }
+    sel.innerHTML = rows.join("");
+    const hit = Array.prototype.filter.call(sel.options, (o) => o.value === prev)[0];
+    sel.value = hit ? prev : "all";
+  }
+
+  function matchHistScope(s, scope) {
+    if (!scope || scope === "all") return true;
+    if (scope.indexOf("char:") === 0) return (s.characterId || "") === scope.slice(5);
+    if (scope.indexOf("line:") === 0) return s.id === scope.slice(5);
+    if (scope.indexOf("group:") === 0) return !!s.isGroup && s.id === scope.slice(6);
+    return true;
+  }
+
+  /* 手机消息 → 搜索用的文本（撤回 / 转账这些也照样能搜到） */
+  function phoneTextOf(m) {
+    try {
+      if (window.DL && DL.phone && DL.phone.msgText) return DL.phone.msgText(m) || "";
+    } catch (e) { /* 退回 text */ }
+    return String((m && m.text) || "");
+  }
+
   async function runHistorySearch() {
     const mode = state.histMode;
+    const module = ($v("#histModule") || "chat");
+    const scope = ($v("#histScope") || "all");
     const kw = $v("#histKeyword").trim();
     const from = parseDateStart($v("#histFrom"));
     const to = parseDateEnd($v("#histTo"));
@@ -2062,10 +2125,12 @@
        只是把长任务拆开跑。activeText(m) 也从「每条调两次」收敛成一次。 */
     for (let si = 0; si < sessions.length; si++) {
       const s = sessions[si];
-      const msgs = s.messages || [];
+      if (!s || !matchHistScope(s, scope)) continue;
+      /* 模块（10-20）：主聊天看 messages，手机看 phone.msgs */
+      const msgs = (module === "phone") ? ((s.phone && s.phone.msgs) || []) : (s.messages || []);
       for (let i = 0; i < msgs.length; i++) {
         const m = msgs[i];
-        const text = activeText(m);
+        const text = (module === "phone") ? phoneTextOf(m) : activeText(m);
         if (!text) continue;
         if (mode !== "content") {
           if (typeof m.ts !== "number") continue;
@@ -2073,7 +2138,7 @@
           if (to !== null && m.ts > to) continue;
         }
         if ((mode === "content" || mode === "both") && text.toLowerCase().indexOf(kwLow) < 0) continue;
-        out.push({ sessionId: s.id, title: s.title || "新对话", index: i, role: m.role, ts: m.ts, content: text });
+        out.push({ sessionId: s.id, title: s.title || "新对话", index: i, role: m.role, ts: m.ts, content: text, module: module });
       }
       if (si % 4 === 3) await new Promise(function (r) { setTimeout(r, 0); });
     }
@@ -2114,6 +2179,15 @@
       btn.appendChild(snip);
       btn.addEventListener("click", () => {
         UI.closeModal("searchModal");
+        /* 手机的结果（10-20）：切到那条线再打开手机，而不是去主聊天里找 */
+        if (it.module === "phone") {
+          state.sessionId = it.sessionId;
+          Store.setCurrentId(it.sessionId);
+          renderAll();
+          const pb = $("#phoneBtn");
+          if (pb) pb.click();
+          return;
+        }
         jumpToMessage(it.sessionId, it.index);
       });
       box.appendChild(btn);
@@ -2143,6 +2217,7 @@
     exitSelect();
     buildHistModes();
     syncHistFields();
+    fillHistScope();
     $("#histResults").innerHTML = "";
     UI.openModal("searchModal");
   }
@@ -2914,7 +2989,7 @@
     exitSelect: exitSelect, saveEdit: saveEdit, copySelected: copySelected,
     openDeleteDialog: openDeleteDialog, confirmDelete: confirmDelete,
     bindMessageGestures: bindMessageGestures,
-    runHistorySearch: runHistorySearch, openSearchModal: openSearchModal,
+    runHistorySearch: runHistorySearch, openSearchModal: openSearchModal, fillHistScope: fillHistScope,
     activeText: activeText, buildGroupSystemText: buildGroupSystemText,
     /* 本轮新增：快捷回复面板 + 继续说（continueFrom = 群聊里指定谁接着说） */
     bindQuickReply: bindQuickReply, continueLast: continueLast, continueFrom: continueFrom,

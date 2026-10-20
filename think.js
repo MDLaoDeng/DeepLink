@@ -81,7 +81,27 @@
       if (typeof t.digestAt !== "number") t.digestAt = 0;
       if (typeof t.readAt !== "number") t.readAt = 0;
       if (!t.tries || typeof t.tries !== "object") t.tries = {};
+      /* 思考对象（10-20）：会话级，默认只想着自己 */
+      if (!Array.isArray(t.about) || !t.about.length) t.about = ["self"];
       return t;
+    }
+
+    /* 可选对象：自己 / 用户 / 这条线相关的人（单线就是那个角色，群聊是全部成员） */
+    function whoOf(s) {
+      var out = [{ id: "self", label: "你自己" }, { id: "user", label: "用户" }];
+      try {
+        var chs = Store().getCharacters() || [];
+        var ids = [];
+        if (s && s.isGroup && Array.isArray(s.members)) ids = s.members;
+        else if (s && s.characterId) ids = [s.characterId];
+        ids.forEach(function (id) {
+          var c = chs.filter(function (x) { return x && x.id === id; })[0];
+          if (!c) return;
+          var nm = (c.fields && c.fields.aiName) || c.name || "角色";
+          out.push({ id: "c:" + id, label: nm });
+        });
+      } catch (e) { /* 读不到角色就只留自己 / 用户 */ }
+      return out;
     }
 
     function save() {
@@ -147,7 +167,8 @@
       "3. **必须符合这个人的性格**：学者会琢磨学习/研究上的事，爱哲思的人会想抽象的问题，" +
       "务实的想具体的事，敏感的人会反刍一句话的语气。不要写成通用感想。\n" +
       "4. 不要复述发生了什么，写「他怎么想这件事」。\n" +
-      "5. 只输出正文，不要标题、不要引号、不要列表符号。";
+      "5. 除了自己，也可以想别人：想别人时让人一眼看出是谁、怎么想他；不要提起没见过的人。\n" +
+      "6. 只输出正文，不要标题、不要引号、不要列表符号。";
 
     /* 生成某一天的思考。opts.src = world / mem / idle；opts.scene 可带当天剧情摘要 */
     async function genFor(sid, d, opts) {
@@ -173,6 +194,10 @@
       save();
 
       var m = metaOf(s);
+      /* 思考对象（10-20）：不只是想自己，也能想别人 —— 会话设置里可多选 */
+      var about = (opts && opts.about) || t.about || ["self"];
+      var who = whoOf(s).filter(function (w) { return about.indexOf(w.id) >= 0; })
+        .map(function (w) { return w.label; });
       var what = String((opts && opts.scene) || "").trim();
       var body = [
         "角色：" + m.name,
@@ -183,7 +208,8 @@
         (m.directive ? "额外注意：" + m.directive : ""),
         "日期：" + d,
         (what ? "这天发生了什么：" + what : "这天没什么特别的事。"),
-        "写这一天的心里话。"
+        "可以想的人：" + (who.length ? who.join("、") : "你自己"),
+        "写这一天的心里话。想别人时要让人看得出想的是谁。"
       ].filter(Boolean).join("\n");
 
       var usage = null;

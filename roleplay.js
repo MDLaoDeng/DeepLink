@@ -130,6 +130,26 @@
       input.id = "cf_" + key;
       l.appendChild(sp);
       l.appendChild(input);
+      /* 出生日期：滚轮只到 1900 年（picker.js 的年列表），公元元年那一档只能手输年份。
+         填 0 = 无限年龄（年龄栏禁用，但时间系统照常能开）。10-20 用户要求。 */
+      if (key === "birth") {
+        const yr = document.createElement("input");
+        yr.type = "text";
+        yr.id = "cf_birth_year";
+        yr.placeholder = "公元年份（1–9999；填 0 = 无限年龄）";
+        yr.setAttribute("inputmode", "numeric");
+        yr.style.marginTop = "6px";
+        yr.addEventListener("input", function () {
+          const inf = String(yr.value || "").trim().replace(/[^\d]/g, "") === "0";
+          const age = $("#cf_age");
+          if (age) {
+            age.disabled = inf;
+            if (inf) age.value = "";
+            age.placeholder = inf ? "无限年龄（不限制时段）" : "";
+          }
+        });
+        l.appendChild(yr);
+      }
       box.appendChild(l);
     });
     bindCharPhoneAvatar();
@@ -398,6 +418,15 @@
       }
       const t = window.Think.of(s);
       const list = window.Think.listOf(s) || [];
+      /* 思考对象（10-20）：会话级多选，候选只列这条线相关的人 */
+      const sel = $("#setThinkAbout");
+      if (sel && window.Think.whoOf) {
+        const who = window.Think.whoOf(s) || [];
+        const cur = t.about || ["self"];
+        sel.innerHTML = who.map(function (w) {
+          return '<option value="' + esc(w.id) + '"' + (cur.indexOf(w.id) >= 0 ? " selected" : "") + ">" + esc(w.label) + "</option>";
+        }).join("");
+      }
       let h = "";
       if (t && t.digest) h += '<div class="think-digest">' + esc(t.digest).replace(/\n/g, "<br>") + "</div>";
       h += list.length
@@ -605,6 +634,11 @@
       if (ch) {
         setVal("#charName", ch.name || "");
         CHAR_FIELDS.forEach(([key]) => setVal("#cf_" + key, (ch.fields && ch.fields[key]) || ""));
+        /* 出生年份单独一格（滚轮到不了公元元年）；0000 显示成 0，方便识别「无限年龄」 */
+        const bv = String((ch.fields && ch.fields.birth) || "");
+        const ym = /^(\d{4})-/.exec(bv);
+        setVal("#cf_birth_year", ym ? String(Number(ym[1])) : "");
+        syncAgeField(ch);
         avatarDraft.charPhone = ch.phoneAvatar || "";
         renderAvatarPreview("#cfPhAvPreview", avatarDraft.charPhone, "assistant", ch.avatar || "");
         syncPeriodField();
@@ -623,7 +657,31 @@
   function readCharacterForm() {
     const fields = {};
     CHAR_FIELDS.forEach(([key]) => { fields[key] = $v("#cf_" + key); });
+    /* 年份框优先覆盖滚轮选出来的年（10-20）：
+       填 0 → 0000-00-00（无限年龄）；填 1~9999 → 只换年份、月日沿用滚轮。 */
+    const raw = String($v("#cf_birth_year") || "").trim().replace(/[^\d]/g, "");
+    if (raw !== "") {
+      const y = Number(raw);
+      if (y === 0) {
+        fields.birth = "0000-00-00";
+        fields.age = "";                 /* 无限年龄，年龄栏作废 */
+      } else if (y >= 1 && y <= 9999) {
+        const m = /^\d{4}-(\d{1,2})-(\d{1,2})$/.exec(String(fields.birth || ""));
+        const mo = m ? m[1] : "01", dd = m ? m[2] : "01";
+        fields.birth = String(y).padStart(4, "0") + "-" + ("0" + mo).slice(-2) + "-" + ("0" + dd).slice(-2);
+      }
+    }
     return { name: $v("#charName").trim() || "未命名角色", fields };
+  }
+
+  /* 年龄栏与出生日期联动：0000-00-00 → 禁用并清空 */
+  function syncAgeField(ch) {
+    const age = $("#cf_age");
+    if (!age) return;
+    const inf = String((ch && ch.fields && ch.fields.birth) || "").slice(0, 4) === "0000";
+    age.disabled = inf;
+    age.placeholder = inf ? "无限年龄（不限制时段）" : "";
+    if (inf) age.value = "";
   }
 
   /* 把开场白放进这个角色的每条会话（10-20 用户口径：
@@ -1150,6 +1208,9 @@
       setVal("#setSessionRelation", s.relation || "");
       setVal("#setSessionShared", s.shared || "");
       setVal("#setSessionCognition", s.cognition || "");
+      /* 本线年龄 + 混搭模式（10-20） */
+      setVal("#setSessionAge", s.age == null ? "" : String(s.age));
+      setChecked("#setSessionAutoFreeze", !!s.autoFreeze);
       setChecked("#setSessionAutoBackup", !!s.autoBackup);
       /* 主动发消息：跟随全局 / 允许 / 不允许 */
       setVal("#setSessionAutoMsg", s.autoMsgOn === true ? "on" : (s.autoMsgOn === false ? "off" : ""));
@@ -1158,15 +1219,15 @@
       const nowMs = tlOn ? Memory.nowOf(s) : Date.now();
       setVal("#setSessionTime", tlOn ? toLocalInput(nowMs) : "");
       setChecked("#setSessionTimeSync", tlOn && Math.abs(Memory.timeOffset(s)) < 60000);
-      const rng = Memory && Memory.validRange ? Memory.validRange(characterFor(s)) : null;
+      const rng = Memory && Memory.validRange ? Memory.validRange(characterFor(s), s) : null;
       const tlLine = [];
       if (!tlOn) tlLine.push("当前：未启用（对话里走的就是现实时间）");
       else {
-        const ck = Memory.checkTime(characterFor(s), nowMs);
+        const ck = Memory.checkTime(characterFor(s), nowMs, s);
         tlLine.push("当前故事时间：" + Memory.fmtStory(nowMs, true) + (ck.ok ? "" : "　⚠️ 已超出角色的合法时段"));
       }
       if (rng) tlLine.push("角色合法时段：" + Memory.fmtStory(rng.from).slice(0, 10) + " ~ " + Memory.fmtStory(rng.to).slice(0, 10));
-      else tlLine.push("角色没填「出生日期」或「当前年龄」读不出数字 —— 时间不做限制");
+      else tlLine.push("角色没填「出生日期」→ 时间不做限制（出生日期填成 0 年 0 月 0 日也一样：无限年龄）");
       setText("#sessionTimeLine", tlLine.join("；"));
       setChecked("#setSessionStatusQuant", (typeof s.statusQuant === "boolean") ? s.statusQuant : (state.settings.statusQuant !== false));
       renderDiaryList(s);

@@ -61,7 +61,8 @@
        点它又把 expandChar 设回 ""，等于没变化 → 永远收不起来（真机反馈）。 */
     expandChar: null,   /* 列表里正在展开的角色（按角色分组：点角色就地展开它名下的线） */
     closeTimer: null,   /* 退出手机页的动画计时器（180ms 后才真正隐藏，连点要能取消） */
-    enterAnim: false    /* 进手机页时给列表播一次入场动画（播完自动关，免得每次重渲染都闪） */
+    enterAnim: false,   /* 进手机页时给列表播一次入场动画（播完自动关，免得每次重渲染都闪） */
+    pick: null          /* 多选转发（10-20）：null = 不在多选；{} = {消息id: true} */
   };
 
   function pad2n(n) { return (n < 10 ? "0" : "") + n; }
@@ -171,6 +172,13 @@
     }
     if (m.kind === "voice") return "（" + (m.role === "user" ? "我" : "你") + "发来一条语音，说的是：" + readableText(m.text) + "）";
     if (m.kind === "call") return "（" + (m.role === "user" ? "我们" : "我们") + "通了一次电话" + (m.text ? "，内容：" + readableText(m.text) : "") + "）";
+    /* 合并转发（10-20）：给模型看时要带说话人，不然分不清谁是谁 */
+    if (m.kind === "fwdmerge") {
+      var its = Array.isArray(m.items) ? m.items : [];
+      if (!its.length) return "（转发了一段聊天记录）";
+      return "（下面是一段转发的聊天记录，不是此刻正在说的话；每条前面的名字是当时的说话人）\n" +
+        its.map(function (x) { return "　" + (x.name || "某人") + "：" + String(x.text || x.snippet || ""); }).join("\n");
+    }
     if (m.kind === "sys") return "（系统提示：" + (m.text || "") + "）";
     return readableText(m.text);
   }
@@ -183,6 +191,7 @@
     if (m.kind === "image") return "[图片]";
     if (m.kind === "voice") return "[语音] " + (m.text || "");
     if (m.kind === "call") return "[通话]";
+    if (m.kind === "fwdmerge") return "[聊天记录] " + ((m.items && m.items.length) || 0) + " 条";
     /* 列表预览别把 [[s:xxx]] / [表情:名字] 原样露出来（10-19） */
     return String(m.text || "").replace(/\[\[s:[a-z0-9]+\]\]/g, "[表情]").replace(/\[表情:[^\]]+\]/g, "[表情]");
   }
@@ -968,6 +977,8 @@
   function renderChat() {
     var box = $("#phoneMsgs");
     if (!box) return;
+    renderAtBtn();                    /* 群聊才有 @（10-20） */
+    if (ps.pick) renderPickBar();     /* 多选态保留操作条 */
     /* 重建 DOM 会把 scrollTop 打回顶上，之后再也判断不出「刚才贴不贴底」——
        所以先记一笔，供后面的 scrollPhoneBottom() 决定要不要滚。 */
     wasAtBottom = atPhoneBottom();
@@ -1057,11 +1068,16 @@
       box.appendChild(item("修改这条", function () { editPhoneMsg(msg); }));
       box.appendChild(item("删除", function () { confirmDeletePhoneMsg(msg); }, true));
     }
+    /* 多选（10-20）：从这里进，勾几条再转发 / 合并转发 */
+    box.appendChild(item("多选（转发）", function () { enterPick(msg); }));
     openSheet("这条消息", box, closeSheet);
   }
 
   /* 撤回：不真删，改成一条「已撤回」的占位 ——
-     角色要能看见这个动作（msgText 会把原文一并交代），上下文里也留痕。 */
+     角色要能看见这个动作（msgText 会把原文一并交代），上下文里也留痕。
+     10-20 增强（用户口径）：
+       ① 还在生成 → 直接中断请求，本轮不再落库；
+       ② 已经生成出的对应回复 → 一起撤回（两分钟内紧跟的那条）； */
   function recallPhoneMsg(msg) {
     var list = Store.getSessions();
     var i = -1;
@@ -1070,6 +1086,31 @@
     var ph = phoneOf(list[i]);
     var at = ph.msgs.indexOf(msg);
     if (at < 0) return;
+
+    /* ① 生成中：中断 + 让旧回调作废（seq 加一，finally 里就不会再动新状态） */
+    if (ps.busy && ps.abort) {
+      try { ps.abort.abort(); } catch (e) { /* ignore */ }
+      ps.seq = (ps.seq || 0) + 1;
+      ps.busy = false;
+      ps.abort = null;
+      try { hideTyping(); } catch (e) { /* ignore */ }
+      try { setDisabled("#phoneSend", false); } catch (e) { /* ignore */ }
+    }
+
+    /* ② 紧跟其后的那条 AI 回复一起撤回（同一次交流，两分钟内） */
+    var next = ph.msgs[at + 1];
+    if (next && next.role === "assistant" && next.kind !== "recalled" &&
+      (next.ts || 0) - (msg.ts || 0) < 120000) {
+      ph.msgs[at + 1] = {
+        id: next.id || ("pm_" + Date.now().toString(36)),
+        role: "assistant",
+        kind: "recalled",
+        text: "",
+        origText: String(next.text || ""),
+        ts: next.ts || Date.now()
+      };
+    }
+
     ph.msgs[at] = {
       id: msg.id || ("pm_" + Date.now().toString(36)),
       role: "user",
@@ -1082,6 +1123,218 @@
     Store.saveSessions(list);
     renderChat();
     toast("已撤回");
+  }
+
+  /* ── 转发 / 合并转发 / 多选（10-20 用户要求）────────────────
+     转发对象：每个角色一行（进它的主线）、每个群一行；可多选。
+     合并转发：勾选多条 → 生成一张「聊天记录」卡片，点开看列表。
+     AI 要分得清谁是谁 —— 合并转发的每条都写成「名字：内容」，提示词里注明这是转发记录。 */
+  function fwdTargets() {
+    var out = [];
+    var chs = Store.getCharacters() || [];
+    var sess = Store.getSessions() || [];
+    var seen = {};
+    sess.forEach(function (s) {
+      if (!s || s.isGroup) return;
+      var cid = s.characterId || "";
+      if (!cid || seen[cid]) return;
+      seen[cid] = 1;
+      var ch = chs.filter(function (c) { return c && c.id === cid; })[0];
+      out.push({
+        kind: "char", id: cid,
+        name: (ch && ((ch.fields && ch.fields.aiName) || ch.name)) || "角色"
+      });
+    });
+    sess.forEach(function (s) {
+      if (!s || !s.isGroup) return;
+      out.push({ kind: "group", id: s.id, name: s.title || "群聊" });
+    });
+    return out;
+  }
+
+  function lineOfTarget(t) {
+    var sess = Store.getSessions() || [];
+    if (t.kind === "group") return sess.filter(function (s) { return s.id === t.id; })[0] || null;
+    var mine = sess.filter(function (s) { return !s.isGroup && (s.characterId || "") === t.id; });
+    return mine.filter(function (s) { return s.mainLine; })[0] || mine[0] || null;
+  }
+
+  function curPh() {
+    var s = sessionById(ps.sid);
+    return s ? phoneOf(s) : null;
+  }
+
+  /* 进入多选：给没有 id 的消息补一个，后面就靠 id 记选中 */
+  function enterPick(startMsg) {
+    var s = sessionById(ps.sid);
+    if (!s) return;
+    var ph = phoneOf(s);
+    ph.msgs.forEach(function (m, i) {
+      if (!m.id) m.id = "pm_" + Date.now().toString(36) + "_" + i;
+    });
+    Store.saveSessions(Store.getSessions());
+    ps.pick = {};
+    if (startMsg && startMsg.id) ps.pick[startMsg.id] = true;
+    renderChat();
+    renderPickBar();
+  }
+  function exitPick() {
+    ps.pick = null;
+    renderChat();
+    renderPickBar();
+  }
+  function pickCount() { return ps.pick ? Object.keys(ps.pick).length : 0; }
+  function pickedMsgs() {
+    var ph = curPh();
+    if (!ph || !ps.pick) return [];
+    return ph.msgs.filter(function (m) { return m.id && ps.pick[m.id]; });
+  }
+
+  /* 底部操作条：只在多选时出现 */
+  function renderPickBar() {
+    var host = $("#phoneChatView");
+    if (!host) return;
+    var bar = host.querySelector(".ph-pickbar");
+    if (!ps.pick) { if (bar) bar.remove(); return; }
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.className = "ph-pickbar";
+      host.appendChild(bar);
+    }
+    bar.innerHTML = "";
+    var n = pickCount();
+    var info = document.createElement("span");
+    info.className = "ph-pick-n";
+    info.textContent = "已选 " + n + " 条";
+    bar.appendChild(info);
+    function btn(label, fn, primary) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn " + (primary ? "primary" : "ghost");
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      bar.appendChild(b);
+    }
+    btn("转发", function () { if (!n) { toast("先选几条", true); return; } pickTargets(function (ts) { doForward(pickedMsgs(), ts); }); });
+    btn("合并转发", function () { if (!n) { toast("先选几条", true); return; } pickTargets(function (ts) { doMergeForward(pickedMsgs(), ts); }); });
+    btn("取消", exitPick);
+  }
+
+  /* @ 提醒（10-20）：只有群聊显示；点了选成员，把「@名字」插进输入框 */
+  function renderAtBtn() {
+    var comp = document.querySelector(".phone-composer");
+    if (!comp) return;
+    var s = sessionById(ps.sid);
+    var btn = comp.querySelector(".ph-at-btn");
+    if (!s || !s.isGroup) { if (btn) btn.remove(); return; }
+    if (btn) return;
+    btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "icon-btn ph-at-btn";
+    btn.setAttribute("aria-label", "提醒谁看");
+    btn.textContent = "@";
+    btn.addEventListener("click", openAtPicker);
+    comp.insertBefore(btn, comp.firstChild);
+  }
+
+  function openAtPicker() {
+    var s = sessionById(ps.sid);
+    if (!s || !s.isGroup) return;
+    var members = phoneGroupMembers(s);
+    if (!members.length) { toast("这个群还没有成员", true); return; }
+    var box = document.createElement("div");
+    box.className = "ph-set";
+    members.forEach(function (m) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn ghost";
+      b.style.display = "block";
+      b.style.width = "100%";
+      b.style.marginTop = "8px";
+      b.textContent = "@" + m.name;
+      b.addEventListener("click", function () {
+        var inp = $("#phoneInput");
+        if (inp) {
+          var cur = String(inp.value || "").replace(/\s+$/, "");
+          inp.value = (cur ? cur + " " : "") + "@" + m.name + " ";
+          try { inp.focus(); } catch (e) { /* ignore */ }
+        }
+        closeSheet();
+      });
+      box.appendChild(b);
+    });
+    openSheet("提醒谁看", box, closeSheet);
+  }
+
+  /* 选转发对象（可多选） */
+  function pickTargets(done) {
+    var ts = fwdTargets();
+    if (!ts.length) { toast("还没有可以转发的对象", true); return; }
+    var box = document.createElement("div");
+    box.className = "ph-set";
+    var chosen = {};
+    ts.forEach(function (t) {
+      var lab = document.createElement("label");
+      lab.className = "check-field";
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.addEventListener("change", function () {
+        if (cb.checked) chosen[t.kind + ":" + t.id] = t; else delete chosen[t.kind + ":" + t.id];
+      });
+      var sp = document.createElement("span");
+      sp.textContent = (t.kind === "group" ? "群 · " : "") + t.name;
+      lab.appendChild(cb); lab.appendChild(sp);
+      box.appendChild(lab);
+    });
+    openSheet("转发给", box, function () {
+      var list = Object.keys(chosen).map(function (k) { return chosen[k]; });
+      if (!list.length) { toast("至少选一个对象", true); return; }
+      done(list);
+    });
+  }
+
+  function speakerLabel(m, ph) {
+    if (m.role === "user") return "我";
+    if (m.speakerName) return String(m.speakerName);
+    var s = sessionById(ps.sid);
+    var ch = s ? characterFor(s) : null;
+    return (ch && ((ch.fields && ch.fields.aiName) || ch.name)) || "对方";
+  }
+
+  function doForward(msgs, targets) {
+    var ph = curPh();
+    var rows = (msgs || []).map(function (m) {
+      return { name: speakerLabel(m, ph), text: msgText(m) || previewOf(m) };
+    }).filter(function (x) { return x.text; });
+    if (!rows.length) { toast("没有可转发的内容", true); return; }
+    var n = 0;
+    targets.forEach(function (t) {
+      var line = lineOfTarget(t);
+      if (!line) return;
+      rows.forEach(function (x) {
+        pushMsg(line.id, { role: "user", kind: "text", text: (x.name === "我" ? "" : x.name + "：") + x.text, fwd: true });
+      });
+      n++;
+    });
+    exitPick();
+    toast(n ? ("已转发给 " + n + " 个对象") : "没转出去", !n);
+  }
+
+  function doMergeForward(msgs, targets) {
+    var ph = curPh();
+    var items = (msgs || []).map(function (m) {
+      return { name: speakerLabel(m, ph), text: msgText(m) || previewOf(m) };
+    }).filter(function (x) { return x.text; });
+    if (!items.length) { toast("没有可转发的内容", true); return; }
+    var n = 0;
+    targets.forEach(function (t) {
+      var line = lineOfTarget(t);
+      if (!line) return;
+      pushMsg(line.id, { role: "user", kind: "fwdmerge", items: items, text: "" });
+      n++;
+    });
+    exitPick();
+    toast(n ? ("已合并转发给 " + n + " 个对象") : "没转出去", !n);
   }
 
   function editPhoneMsg(msg) {
@@ -1209,6 +1462,7 @@
     else if (m.kind === "image") bubble = imageBubble(m);
     else if (m.kind === "voice") bubble = voiceBubble(m);
     else if (m.kind === "call") bubble = callBubble(m);
+    else if (m.kind === "fwdmerge") bubble = fwdMergeCard(m);
     else {
       bubble = document.createElement("div");
       bubble.className = "ph-bubble";
@@ -1236,6 +1490,19 @@
     col.appendChild(bubble);
     wrap.appendChild(col);
     try { if (UI.stickerize) UI.stickerize(col); } catch (e) { /* ignore */ }
+    /* 多选（10-20）：多选态下点一下切换选中，长按菜单让位 */
+    if (ps.pick) {
+      wrap.classList.add("ph-pickable");
+      if (m.id && ps.pick[m.id]) wrap.classList.add("ph-picked");
+      wrap.addEventListener("click", function (ev) {
+        if (!ps.pick) return;
+        ev.preventDefault(); ev.stopPropagation();
+        if (!m.id) return;
+        if (ps.pick[m.id]) delete ps.pick[m.id]; else ps.pick[m.id] = true;
+        renderChat(); renderPickBar();
+      });
+      return wrap;
+    }
     /* 长按气泡弹菜单（10-18）：对方的消息能重说/修改/删，自己的能撤回 */
     if (m.kind !== "sys" && m.kind !== "recalled") {
       bindLongPress(bubble, function () { openMsgMenu(m); });
@@ -1414,6 +1681,39 @@
     }
     return b;
   }
+  /* 合并转发卡片（10-20）：像微信的「聊天记录」，点开看列表（只读） */
+  function fwdMergeCard(m) {
+    var card = document.createElement("div");
+    card.className = "ph-fwd-merge";
+    var t = document.createElement("div");
+    t.className = "ph-fwd-title";
+    t.textContent = "聊天记录";
+    card.appendChild(t);
+    var sub = document.createElement("div");
+    sub.className = "ph-fwd-sub";
+    sub.textContent = "共 " + ((m.items && m.items.length) || 0) + " 条";
+    card.appendChild(sub);
+    var foot = document.createElement("div");
+    foot.className = "ph-fwd-foot";
+    foot.textContent = "聊天记录";
+    card.appendChild(foot);
+    card.addEventListener("click", function () {
+      var box = document.createElement("div");
+      box.className = "ph-set";
+      (m.items || []).forEach(function (x) {
+        var row = document.createElement("div");
+        row.className = "ph-fwd-row";
+        var nm = document.createElement("b");
+        nm.textContent = (x.name || "某人") + "：";
+        row.appendChild(nm);
+        row.appendChild(document.createTextNode(String(x.text || "")));
+        box.appendChild(row);
+      });
+      openSheet("聊天记录", box, closeSheet);
+    });
+    return card;
+  }
+
   function callBubble(m) {
     var b = document.createElement("div");
     b.className = "ph-callb";
@@ -1532,6 +1832,20 @@
     if (s && s.shared) t += "\n【共同经历】\n" + s.shared + "\n";
     var mt = Memory.memoryText ? Memory.memoryText(s && s.memory) : "";
     if (mt) t += "\n【群聊记忆】\n" + mt + "\n";
+    /* @ 提醒（10-20）：用户在最后一条里 @ 了谁，就让谁先说话 */
+    try {
+      var arr0 = (s && s.phone && s.phone.msgs) || [];
+      var lastU = "";
+      for (var i0 = arr0.length - 1; i0 >= 0; i0--) {
+        if (arr0[i0] && arr0[i0].role === "user" && arr0[i0].kind !== "recalled") {
+          lastU = String(arr0[i0].text || "");
+          break;
+        }
+      }
+      var at = [];
+      members.forEach(function (m) { if (lastU && lastU.indexOf("@" + m.name) >= 0) at.push(m.name); });
+      if (at.length) t += "\n【有人被 @】用户在最后一条里 @" + at.join("、") + "：这一轮先让 " + at.join("、") + " 回应，其他人非必要不插话。\n";
+    } catch (e) { /* ignore */ }
     t += "\n【规则】像真人发微信：口语、简短。每次让 1~3 位成员发言（谁说话、说几句由你按各自性格决定，可以有人不说话），" +
       "每条发言单独一行、用「名字：内容」开头，例如：\n小明：在啊\n小红：刚下课。\n" +
       "名字必须是上面列出的成员名。不要旁白、不要括号动作、不要替用户说话、不要用 Markdown。\n" + PH_STYLE_RULE;
@@ -1922,6 +2236,14 @@
         (missF.length > 3 ? "…" : "") + how, true);
       return;
     }
+    /* 混搭模式（10-20）：手机里发第一条消息也算「上线」，同样解冻 */
+    try {
+      var mm = (window.Memory || Memory);
+      if (ses && ses.autoFreeze && mm && mm.isFrozen && mm.isFrozen(ses)) {
+        mm.unfreezeTime(ses);
+        Store.saveSessions(Store.getSessions());
+      }
+    } catch (e) { /* ignore */ }
     pushMsg(sid, { role: "user", kind: "text", text: text });
     input.value = "";
     renderChat(); scrollPhoneBottom();
@@ -2860,6 +3182,14 @@
   });
   /* 返回键：app.js 的 onBackKey 会先问这里（和相机层同一套约定） */
   window.DL.phone = {
+    /* 回归测试 / 别处复用（10-20）：转发、合并转发、撤回、@ 的入口 */
+    open: function (sid) { ps.sid = sid; ps.view = "chat"; ps.pick = null; renderChat(); },
+    targets: function () { return fwdTargets(); },
+    msgText: function (m) { return msgText(m); },
+    recall: function (m) { return recallPhoneMsg(m); },
+    forward: function (msgs, ts) { return doForward(msgs, ts); },
+    mergeForward: function (msgs, ts) { return doMergeForward(msgs, ts); },
+    groupSys: function (sid) { var s = sessionById(sid); return s ? buildGroupSysPhone(s) : ""; },
     isOpen: function () {
       if (callState) return true;      /* 通话中：返回键先挂断 */
       var el = $("#phoneModal"); return !!(el && !el.hidden);

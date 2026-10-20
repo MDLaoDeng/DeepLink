@@ -2778,3 +2778,33 @@ body.no-image .ph-moment-img img { display: none; }
    窄屏下先把两侧按钮钉住不被挤压，间距从 8 收到 6，把宽度留给输入框。 */
 .phone-composer > .icon-btn, .phone-composer > .phone-send { flex: none; }
 .phone-composer .phone-input { margin: 0 6px; }
+
+/* ── 手机：多选转发 / 合并转发 / @（10-20）──────────────── */
+.ph-pickbar {
+  position: sticky; bottom: 0; left: 0; right: 0;
+  display: flex; align-items: center;
+  padding: 8px 10px; background-color: var(--panel);
+  border-top: 1px solid var(--border); z-index: 6;
+}
+.ph-pickbar .btn { margin-left: 8px; }
+.ph-pick-n { font-size: 13px; color: var(--text-dim); margin-right: auto; }
+.ph-pickable { cursor: pointer; }
+.ph-picked { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 10px; }
+
+/* 合并转发卡片：像微信的「聊天记录」 */
+.ph-fwd-merge {
+  width: 220px; max-width: 78vw; padding: 10px 12px;
+  background-color: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer;
+}
+.ph-fwd-title { font-size: 14px; color: var(--text); font-weight: 600; }
+.ph-fwd-sub { font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+.ph-fwd-foot {
+  font-size: 11px; color: var(--text-dim); margin-top: 8px;
+  padding-top: 6px; border-top: 1px solid var(--border);
+}
+.ph-fwd-row { font-size: 13px; color: var(--text); line-height: 1.55; margin-bottom: 8px; word-break: break-word; }
+.ph-fwd-row b { color: var(--accent); }
+
+/* 群聊里那个 @ */
+.ph-at-btn { font-size: 16px; font-weight: 600; color: var(--accent); }

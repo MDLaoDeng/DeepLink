@@ -281,22 +281,49 @@
     const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(v || "").trim());
     if (!m) return null;
     const y = Number(m[1]), mo = Number(m[2]), dd = Number(m[3]);
-    if (!(y >= 1900 && y <= 2200 && mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31)) return null;
-    return new Date(y, mo - 1, dd, 0, 0, 0, 0).getTime();
+    /* 0000-00-00 = 「无限年龄」标记（10-20 用户口径）：
+       没有具体出生日期，也就不限制时段，但时间系统照常能开。 */
+    if (y === 0) return null;
+    if (!(y >= 1 && y <= 9999 && mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31)) return null;
+    /* 不能 new Date(y, …)：0~99 会被当成 19xx，公元 1 年会变成 1901。必须 setFullYear。 */
+    const d = new Date(0);
+    d.setFullYear(y, mo - 1, dd);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
   }
-  /* 年龄字段可能写成「17」「17岁」「17 岁高三」—— 取第一段数字，读不出就当没填 */
-  function ageOf(ch) {
+  /* 年龄字段可能写成「17」「17岁」「17 岁高三」—— 取第一段数字，读不出就算没填。
+     10-20 三条新口径：
+       ① 会话级年龄（s.age）优先，且**不写回角色卡**；
+       ② 角色卡没填年龄、但填了出生日期 → 按当前时间推算（用户指出：没填也得能开时间系统）；
+       ③ 推算基准：开了时间系统用故事时间，没开用现实时间。 */
+  function ageOf(ch, s) {
+    const ses = s || null;
+    if (ses && ses.age != null && String(ses.age).trim() !== "") {
+      const n0 = Number((/(\d{1,3})/.exec(String(ses.age)) || [])[0]);
+      if (n0 >= 0 && n0 <= 200) return n0;
+    }
     const f = (ch && ch.fields) || {};
     const m = /(\d{1,3})/.exec(String(f.age || ""));
-    if (!m) return null;
-    const n = Number(m[1]);
-    return (n >= 0 && n <= 200) ? n : null;
+    if (m) {
+      const n = Number(m[1]);
+      if (n >= 0 && n <= 200) return n;
+    }
+    const b = parseYMD(f.birth);
+    if (b === null) return null;
+    const base = (ses && hasTimeline(ses)) ? nowOf(ses) : Date.now();
+    if (base < b) return 0;
+    const bd = new Date(b), nd = new Date(base);
+    let a = nd.getFullYear() - bd.getFullYear();
+    if (nd.getMonth() < bd.getMonth() ||
+      (nd.getMonth() === bd.getMonth() && nd.getDate() < bd.getDate())) a--;
+    return (a >= 0 && a <= 200) ? a : null;
   }
-  function validRange(ch) {
+  function validRange(ch, s) {
     const f = (ch && ch.fields) || {};
     const b = parseYMD(f.birth);
-    const a = ageOf(ch);
-    if (b === null || a === null) return null;
+    if (b === null) return null;          /* 无限年龄 / 没填出生日期 → 不限制时段 */
+    const a = ageOf(ch, s);
+    if (a === null) return null;
     return { from: addYears(b, a), to: addYears(b, a + 1) };
   }
 
@@ -393,8 +420,8 @@
     return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
   }
   /* 这个时间点合不合法（带角色时）。返回 { ok, from, to } */
-  function checkTime(ch, ms) {
-    const r = validRange(ch);
+  function checkTime(ch, ms, s) {
+    const r = validRange(ch, s);
     if (!r) return { ok: true, from: null, to: null };
     return { ok: ms >= r.from && ms < r.to, from: r.from, to: r.to };
   }
@@ -404,7 +431,7 @@
     const ms = nowOf(s);
     let t = "【当前时间】" + fmtStory(ms) + "（" + weekdayOf(ms) + "）—— 这是你们故事里的「现在」，" +
       "顺着它往下写，别倒退、也别跳到别的季节。";
-    const r = validRange(ch);
+    const r = validRange(ch, s);
     if (r) {
       t += "\n【时间范围】角色只可能处在这个区间内：" + fmtStory(r.from).slice(0, 10) + " 至 " +
         fmtStory(r.to).slice(0, 10) + "。写日期时不要越出这个范围。";

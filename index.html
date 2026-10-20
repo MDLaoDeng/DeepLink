@@ -759,6 +759,7 @@
       </label>
       <div id="sessionRoleWrap" class="settings-section">
         <h3>角色扮演 · 本对话 <span id="sessionLineBadge" class="pill">主线</span></h3>
+        <label class="field"><span>本线年龄（留空 = 用角色卡的；年龄随时间系统变化）</span><input id="setSessionAge" type="text" inputmode="numeric" placeholder="例：17（留空则按出生日期推算）"></label>
         <label class="field"><span>当前关系（本对话专属，随记忆自动更新）</span><textarea id="setSessionRelation" rows="2" placeholder="此刻两人的关系状态…"></textarea></label>
         <label class="field"><span>共同经历（本对话专属，随记忆自动更新）</span><textarea id="setSessionShared" rows="4" placeholder="两人共同经历的关键事件与约定…"></textarea></label>
         <label class="field"><span>当前场景（本对话专属，随对话自动更新）</span><textarea id="setSessionScene" rows="3" placeholder="此刻在哪、发生什么、什么氛围…"></textarea></label>
@@ -770,6 +771,7 @@
         <div id="sessionMemoryBox" class="memory-box"></div>
         <div class="mem-title">TA 的思考（只读，按故事日期）</div>
         <div id="sessionThinkBox" class="memory-box"></div>
+        <label class="field"><span>思考对象（可多选；默认只想着自己，也能想别人）</span><select id="setThinkAbout" multiple size="3"></select></label>
         <div class="char-actions">
           <button id="sessionThinkRead" class="btn ghost" type="button">读取</button>
           <button id="sessionThinkDigest" class="btn ghost" type="button">压缩</button>
@@ -818,8 +820,10 @@
           <button id="sessionTimeClear" class="btn ghost" type="button">关掉时间系统</button>
         </div>
         <div id="sessionTimeLine" class="hint"></div>
+        <label class="check-field"><input type="checkbox" id="setSessionAutoFreeze"><span>混搭模式：离线自动冻结时间，上线后发第一条消息时解冻（仅本线）</span></label>
         <p class="hint">设好之后，故事时间就按 1:1 跟着现实走。也可以在聊天框里直接写「（第二天）」「（到了约定时间）」把它推过去。
-          合法时段由角色的<b>出生日期 + 当前年龄</b>算出来（例：2011-02-01 出生、写着他 12 岁 → 只能落在 2023-02-01 ~ 2024-02-01 之间）；越界会被拒绝。</p>
+          合法时段由角色的<b>出生日期 + 年龄</b>算出来（例：2011-02-01 出生、写着他 12 岁 → 只能落在 2023-02-01 ~ 2024-02-01 之间）；
+          <b>没填年龄时会按出生日期自动推算</b>；出生日期填成 <b>0 年 0 月 0 日</b> 视为无限年龄，此时不做时段限制，但时间系统照常能开。</p>
 
         <div class="mem-title">离线原因（前提：开着时间系统）</div>
         <label class="field"><span>离开应用时按这条来写（只能选，想加去 设置 → 高级功能）</span><select id="setSessionReason"></select></label>
@@ -1433,6 +1437,19 @@
               <p><b>读了以后会不会说</b>：按性格来。有的会一股脑说出来，有的只自然流露一点，有的干脆不提。提示词里写明「提不提由你的性格决定」，不会强行让他汇报。</p>
               <p><b>花费</b>：记录、压缩、纠偏都是真实的模型调用，记在用量统计的「<b>TA 的思考</b>」一栏。</p>
             </div>
+            <div class="guide-sec">
+              <h4>二十二、6.2.4-test 这一版改了什么</h4>
+              <p><b>出生日期能填到公元元年了</b>：日期滚轮只到 1900 年，所以「你的出生日期」下面多了一个<b>年份输入框</b>——填 1~9999 覆盖滚轮选出来的年；<b>填 0</b> 就是「0 年 0 月 0 日」＝<b>无限年龄</b>：年龄栏会被禁用，但时间系统照常能开。</p>
+              <p><b>年龄会动了</b>：开了时间系统后，年龄按故事时间推算（满周岁才 +1）；<b>没填年龄也不影响</b>——只要有出生日期，就按日期推算，照样能算出合法时段。</p>
+              <p><b>本线年龄</b>：对话设置里多了一栏「本线年龄」，留空就用角色卡的；<b>只影响这条线，不写回角色卡</b>。填了就以它为准。</p>
+              <p><b>混搭模式</b>：时间设置下面那个勾选框。勾上之后<b>离开应用就冻结时间</b>，回来<b>发第一条消息时解冻</b>——离线那段时间不推进，也不用每次手动调。只对这一条线生效。</p>
+              <p><b>没开时间系统时的「（第二天）」</b>：记忆里不再据此编造具体日期，而是改写成「次日」「隔了几天」这种叙述，日期用当天。气泡里你写的原话不变。</p>
+              <p><b>手机能转发了</b>：长按任意消息 →「多选（转发）」→ 勾几条 → 点「转发」或「<b>合并转发</b>」→ 选对象（可多选，联系人和群都能选）。合并转发会生成一张「<b>聊天记录</b>」卡片，点开是列表；交给 AI 时每条都写成「名字：内容」，它会当成一段转发记录来读，不会当成此刻说的话。</p>
+              <p><b>群聊能 @ 了</b>：群聊输入框左边多一个「@」按钮，选谁就插一个「@名字」；被 @ 的人会先说话，其他人非必要不插话。</p>
+              <p><b>撤回更彻底了</b>：撤回自己那条时，如果对方已经回了，<b>那条回复也一起撤回</b>；如果还在生成，<b>直接中断请求</b>。内容界面上看不到，但 AI 知道「你撤回了什么」，会据此揣摩。</p>
+              <p><b>思考对象</b>：对话设置里能多选「TA 的思考」要想谁——自己、你、或者群里的某几个人。默认只想着自己。</p>
+              <p><b>搜索分成两边了</b>：搜索面板顶部多了「主聊天 / 手机」两选，下面可以再限定范围（全部 / 某个角色 / 某条线 / 某个群）。时间和关键词筛选照旧；点手机的结果会直接切到那条线并打开手机。</p>
+            </div>
           </div>
         </details>
         <div class="row-actions" style="justify-content:flex-start;margin-top:12px">
@@ -1760,6 +1777,17 @@
     </div>
     <div class="modal-body">
       <div id="searchModeSwitch" class="mode-switch"></div>
+      <label class="field" id="histModuleField">
+        <span>搜索哪边（10-20）</span>
+        <select id="histModule">
+          <option value="chat">主聊天</option>
+          <option value="phone">手机</option>
+        </select>
+      </label>
+      <label class="field" id="histScopeField">
+        <span>限定范围（可选；不选就是全部）</span>
+        <select id="histScope"></select>
+      </label>
       <label class="field" id="histKeywordField">
         <span>关键词</span>
         <input id="histKeyword" type="text" placeholder="搜索消息内容">
