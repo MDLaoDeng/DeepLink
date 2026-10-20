@@ -768,6 +768,17 @@
         <label class="field"><span>对我的认知（本对话专属，可手改）</span><textarea id="setSessionCognition" rows="5"></textarea></label>
         <div class="mem-title">记忆（本对话，只读）</div>
         <div id="sessionMemoryBox" class="memory-box"></div>
+        <div class="mem-title">TA 的思考（只读，按故事日期）</div>
+        <div id="sessionThinkBox" class="memory-box"></div>
+        <div class="char-actions">
+          <button id="sessionThinkRead" class="btn ghost" type="button">读取</button>
+          <button id="sessionThinkDigest" class="btn ghost" type="button">压缩</button>
+        </div>
+        <p class="hint">平时<b>只存不读</b>，不占对话上下文。每过<b>七个故事日</b>自动压缩一次（碎念留结论、带过程的留关键），压完让角色读一次，之后七天不再读。想让它现在就读，点「读取」。</p>
+        <label class="field"><span>纠偏（只改与设定冲突或明显离谱的推论，语气反复不算错）</span><textarea id="sessionThinkCorrect" rows="2" placeholder="例：他不会把这件事理解成背叛，他知道对方只是累了。"></textarea></label>
+        <div class="char-actions">
+          <button id="sessionThinkCorrectRun" class="btn ghost" type="button">AI 纠偏</button>
+        </div>
         <div class="mem-title">记忆纠偏</div>
         <label class="field"><span>写下要纠正 / 补充的内容，AI 会改到记忆里</span><textarea id="sessionCorrectInput" rows="3" placeholder="例：小满不是我大学同学，是高中同学；阿哲其实 27 岁，不是 25。"></textarea></label>
         <div class="char-actions">
@@ -1409,6 +1420,19 @@
               <p><b>模型也会发表情</b>：系统提示词里会把它<b>能用的表情名字</b>列给模型，它想逗你、害羞、无语时可以在单独一行写 <code>[表情:名字]</code>，渲染出来就是那张图。它看不见图，认的是<b>名字和意思</b>——所以表情的名字取得说得通很重要，配了视觉模型时程序会自动看图写一个。</p>
               <p><b>花费记在哪</b>：自动命名会调一次视觉模型，记在用量统计的「<b>表情包命名</b>」一栏。没配视觉模型就不调，直接用「表情1、表情2」这样的默认名。</p>
             </div>
+            <div class="guide-sec">
+              <h4>二十一、TA 的思考：角色自己记的日记</h4>
+              <p><b>只在「时间系统开着、且时间没被冻结」时工作</b>。没设故事时间的线不会记录——没有时间轴，就没有「哪一天」这回事。</p>
+              <p><b>什么时候记</b>：记忆更新之后、世界生成时、以及角色在后台主动找过你之后。其中<b>世界生成优先级最高</b>：某一天已经由剧情带出想法，记忆更新就不会给同一天再写一遍。</p>
+              <p><b>记什么</b>：按<b>他的性格</b>想事情，不是通用感想。学者会琢磨学习 / 研究上的事，爱哲思的人会想抽象的问题，敏感的人会反刍一句话的语气；允许跳跃、自问自答、无厘头。一天一条，同一天同一来源只记一次。</p>
+              <p><b>先只存不读</b>：平时这些想法<b>不进对话上下文</b>，既不影响角色说话，也不额外烧 token。</p>
+              <p><b>七天一循环</b>：每过<b>七个故事日</b>自动压缩一次——特别碎的只留结论，带过程的只留关键。压完让角色读一次，之后七天不再读；那一段会继续留在上下文里（相当于「他还记得自己前阵子在想什么」）。</p>
+              <p><b>在哪看</b>：对话设置里「<b>TA 的思考</b>」那一栏，按故事日期倒序列出，压缩过的那段单独置顶。<b>只能读不能改</b>。</p>
+              <p><b>想让它现在就读</b>：点「<b>读取</b>」，会立刻压缩一次并注入上下文。点「<b>压缩</b>」只压不读。</p>
+              <p><b>纠偏</b>：底下那个输入框写「哪里想得不对」，AI 会核对。但它<b>只改与角色设定冲突、或明显离谱的推论与观点</b>——语气、偏好、情绪本来就可以反复，不算错，不会因为「和前面不一样」就改。</p>
+              <p><b>读了以后会不会说</b>：按性格来。有的会一股脑说出来，有的只自然流露一点，有的干脆不提。提示词里写明「提不提由你的性格决定」，不会强行让他汇报。</p>
+              <p><b>花费</b>：记录、压缩、纠偏都是真实的模型调用，记在用量统计的「<b>TA 的思考</b>」一栏。</p>
+            </div>
           </div>
         </details>
         <div class="row-actions" style="justify-content:flex-start;margin-top:12px">
@@ -2036,6 +2060,7 @@
 <script src="media.js"></script>
 <script src="ui.js"></script>
 <script src="memory.js"></script>
+<script src="think.js"></script>
 <script src="app.js"></script>
 <script src="chat.js"></script>
 <script src="roleplay.js"></script>

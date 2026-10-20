@@ -230,6 +230,13 @@
         "场景只能是各自所在的地方（比如他那边在加班、你这边刚回家），需要见面就当作还没见。");
     }
     if (_emojiHint) { L.push(""); L.push(_emojiHint); }
+    /* 「TA 的思考」：只有压缩后读过、且还在七天内，才带这一段（先只存不读） */
+    try {
+      if (window.Think && window.Think.readBlock) {
+        const tb = window.Think.readBlock(s);
+        if (tb) { L.push(""); L.push(tb); }
+      }
+    } catch (e) { /* 思考读不出来不影响对话 */ }
     return L.join("\n").trim();
   }
 

@@ -789,6 +789,7 @@
     /* 6.2.2 新增两类：这两件事都是真实的模型调用，以前混在「其它 / 记忆压缩」里看不清 */
     { id: "sticker", name: "表情包命名" },
     { id: "caps", name: "模型能力检测" },
+    { id: "think", name: "TA 的思考" },
     { id: "other", name: "其它" }
   ];
   function catName(id) { const c = USAGE_CATS.filter((x) => x.id === id)[0]; return c ? c.name : id; }

@@ -382,6 +382,32 @@
     /* 这里只铺「记忆摘要」：认知在正上方有独立输入框，再塞进来就是同段文字看两遍。
        （角色弹窗 / 设置里的总览没有独立认知框，那两处仍带认知。） */
     el.innerHTML = s ? memHtml(Memory.ensureMemory(s), null) : "";
+    renderSessionThink(s);
+  }
+
+  /* 「TA 的思考」（10-20）：只读。按故事日期倒序，压缩过的那段单独置顶。
+     富文本走 <br> 换行就够 —— 这里不允许编辑，也不需要 Markdown。 */
+  function renderSessionThink(s) {
+    const box = $("#sessionThinkBox");
+    if (!box) return;
+    const esc = (v) => (UI.escapeHtml ? UI.escapeHtml(String(v == null ? "" : v)) : String(v == null ? "" : v));
+    try {
+      if (!s || !window.Think || !window.Think.enabled || !window.Think.enabled(s)) {
+        box.innerHTML = '<p class="hint">只在「时间系统开着、且时间没被冻结」时工作。</p>';
+        return;
+      }
+      const t = window.Think.of(s);
+      const list = window.Think.listOf(s) || [];
+      let h = "";
+      if (t && t.digest) h += '<div class="think-digest">' + esc(t.digest).replace(/\n/g, "<br>") + "</div>";
+      h += list.length
+        ? list.map(function (x) {
+            return '<div class="think-day"><span class="think-date">' + esc(x.d) +
+              '</span><div class="think-text">' + esc(x.t).replace(/\n/g, "<br>") + "</div></div>";
+          }).join("")
+        : '<p class="hint">还没有记录。聊几天、或跑一次世界生成，就会自己攒起来。</p>';
+      box.innerHTML = h;
+    } catch (e) { box.innerHTML = ""; }
   }
 
   function renderCharMemory() {
@@ -600,6 +626,31 @@
     return { name: $v("#charName").trim() || "未命名角色", fields };
   }
 
+  /* 把开场白放进这个角色的每条会话（10-20 用户口径：
+     「角色卡有开场白，点保存后角色就输出开场白，该角色的每条会话都会有开场白」）。
+     · 只给还没有 intro 消息的线插；插在最前面（开场白本来就是第一句），时间戳取现有第一条 −1
+     · 已经有 intro 的线跳过，重复点保存也不会多出一条
+     · 返回插入了几条会话 */
+  function applyIntroToSessions(ch) {
+    if (!ch || !ch.id) return 0;
+    const intro = String(ch.intro || "");
+    if (!intro.trim()) return 0;
+    const list = Store.getSessions() || [];
+    let n = 0;
+    list.forEach(function (s) {
+      if (!s || (s.characterId || "") !== ch.id) return;
+      const msgs = s.messages || [];
+      if (msgs.some(function (m) { return m && m.intro; })) return;
+      const firstTs = (msgs.length && msgs[0] && typeof msgs[0].ts === "number") ? msgs[0].ts : Date.now();
+      s.messages = [{ role: "assistant", content: intro, ts: firstTs - 1, intro: true }].concat(msgs);
+      s.introDone = true;
+      s.updatedAt = Date.now();
+      n++;
+    });
+    if (n) Store.saveSessions(list);
+    return n;
+  }
+
   function saveCharacter() {
     const ch = curChar();
     if (!ch) { UI.toast("请先选择或新建一个角色", true); return; }
@@ -621,6 +672,9 @@
     cf.rule = $v("#charFilterRule").trim();
     cf.every = readFilterEvery();
     saveChar(ch);
+    /* 开场白（10-20）：保存后这个角色的每条线都补上它（已有的不重复插） */
+    let introN = 0;
+    try { introN = applyIntroToSessions(ch); } catch (e) { introN = 0; }
     /* 草稿（导入酒馆卡来的）**在这一刻才落库** —— 用户口径：导入不自动保存，必须手点「保存设定」。
        落库同时把这条线切过去，并按需补一条主线对话。 */
     if (charDraft) {
@@ -631,7 +685,7 @@
       const mine = Store.getSessions().filter(function (s) { return (s.characterId || "") === ch.id; });
       if (!mine.length) newSession();
     }
-    UI.toast("角色已保存");
+    UI.toast(introN ? ("角色已保存，开场白已放进 " + introN + " 条会话") : "角色已保存");
     renderCharList();
     renderCharBar();
     const s = session();
@@ -1449,7 +1503,10 @@
       "3. 越具体越好：在哪儿、做了什么、吃了什么、碰见谁、说了哪句话、有没有想起对方。" +
       "**别写「过得还行」「挺忙的」这种空话。**\n" +
       "4. 贴合角色设定、当前关系与共同经历；用**第三人称平铺直叙**（这是旁白，不是角色对用户说话）。\n" +
-      "5. 不要 Markdown 标题、不要加粗、不要列表符号，只靠「序号 + 日期」起头分段。";
+      "5. 不要 Markdown 标题、不要加粗、不要列表符号，只靠「序号 + 日期」起头分段。\n" +
+      "6. **每一天的末尾另起一行**，用 〖想法〗…〖/想法〗 包住角色当天的内心（1~3 句，第一人称、口语）。" +
+      "这段是「TA 的思考」，随他的性格走：学者会琢磨学习 / 研究上的事，爱哲思的人会想抽象的问题，" +
+      "敏感的人会反刍一句话的语气；允许跳跃、自问自答、无厘头。不要在想法里复述剧情，也不要写成旁白。";
 
     const tline = (Memory.timeLine ? Memory.timeLine(ch, s) : "");
     /* 离线原因（10-17）：会话里选的那条（有锁定就按锁定的算）——让 AI 知道用户为什么不在。
@@ -1472,8 +1529,9 @@
         "空档期：" + fromTxt + " 到 " + toTxt + "，共 " + days + " 天。" +
         "请**逐天**写，每天把早 / 午 / 下午 / 晚都交代到，别只写三段概括。"
     ].join("\n");
-    /* 天数越多、写得越细，给的额度越大（上限兜住成本） */
-    const maxTokens = Math.max(900, Math.min(2600, 500 + days * 300));
+    /* 天数越多、写得越细，给的额度越大（上限兜住成本）。
+       10-20：每天多了一段〖想法〗，额度按天再放宽一点。 */
+    const maxTokens = Math.max(900, Math.min(3600, 500 + days * 420));
     const res = await Api.summarize(state.settings, [
       { role: "system", content: sys },
       { role: "user", content: body }
@@ -1483,8 +1541,13 @@
   }
   /* 采纳：作为一条「补写」消息放进这条线的末尾（用户看得见，也能删） */
   function applyWorld(sid, text) {
-    const txt = String(text || "").trim();
+    let txt = String(text || "").trim();
     if (!sid || !txt) return;
+    /* 先把〖想法〗抽出来记进「TA 的思考」，剩下的才是剧情正文（10-20）。
+       用户口径：世界生成优先级高于记忆更新 —— 这里落下的思考，当天记忆更新不会再写一遍。 */
+    try {
+      if (window.Think && window.Think.absorbWorld) txt = window.Think.absorbWorld(sid, txt);
+    } catch (e) { /* 想法没抽出来也不能影响剧情采纳 */ }
     const list = Store.getSessions();
     const i = list.findIndex((x) => x.id === sid);
     if (i < 0) return;
@@ -1689,6 +1752,7 @@
     /* 给回归测试用的纯函数（也方便以后别处复用） */
     htmlToText: htmlToText, fillPhoneFromWorld: fillPhoneFromWorld,
     charMissingFields: charMissingFields, renderCharReadyHint: renderCharReadyHint,
+    applyIntroToSessions: applyIntroToSessions,
     newCharacter: newCharacter, openPresetPicker: openPresetPicker, usePreset: usePreset,
     updateCognitionNow: updateCognitionNow,
     updateRelationSharedNow: updateRelationSharedNow, mergeGroupShared: mergeGroupShared,

@@ -1285,6 +1285,16 @@
         if (cx && typeof maybeAutoWash === "function") maybeAutoWash(cs, cx);
         if (cx && typeof maybeAutoScene === "function") maybeAutoScene(cs, cx);
         if (cx && typeof maybeDailyRefresh === "function") maybeDailyRefresh(cs, cx);
+        /* 「TA 的思考」（10-20）：记忆更新后补当天那条；攒够七个故事日就压一次并让角色读。
+           世界生成已经写过的那天，这里不会重复写（见 think.js 的 genFor）。 */
+        try {
+          if (window.Think && window.Think.enabled && window.Think.enabled(cs)) {
+            const td = window.Think.dayStr(window.Think.nowOf(cs));
+            window.Think.genFor(sid, td, { src: "mem" }).then(function () {
+              return window.Think.tick(sid);
+            }).catch(function () { /* 思考写不出来不影响对话 */ });
+          }
+        } catch (e) { /* ignore */ }
         if (typeof maybeAutoBackup === "function") maybeAutoBackup(cs, "gen");
       }
       if (el && state.settings.ttsAutoRead && Media.capable("tts", state.settings)) {

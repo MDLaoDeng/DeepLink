@@ -481,6 +481,36 @@
      做法是「白名单重建」——解析成 DOM，只保留认识的标签和属性，其余连内容一起丢。
      绝不对原始字符串直接 innerHTML：那等于把角色卡当代码执行。
      原卡的 CSS 也一律不带进来（只保留结构），否则会污染整个界面。 */
+  /* 酒馆卡里常带行内样式（颜色、字号）。全丢会让作者做的排版消失，
+     全留又是注入面 —— 所以只放行这几个属性，值里出现 url(/expression/javascript: 一律丢。 */
+  const RICH_CSS_OK = ["color", "background-color", "font-size", "font-weight", "font-style",
+    "text-align", "text-decoration", "line-height", "font-family", "letter-spacing"];
+  function safeStyle(v) {
+    const s = String(v || "");
+    if (!s) return "";
+    const out = [];
+    s.split(";").forEach(function (one) {
+      const i = one.indexOf(":");
+      if (i < 0) return;
+      const k = one.slice(0, i).trim().toLowerCase();
+      const val = one.slice(i + 1).trim();
+      if (RICH_CSS_OK.indexOf(k) < 0) return;
+      if (!val || /[<>\\{}]|url\s*\(|expression|javascript:/i.test(val)) return;
+      if (val.length > 60) return;
+      out.push(k + ":" + val);
+    });
+    return out.join(";");
+  }
+  /* <font color="red"> 是酒馆卡的老写法，映射成 span 的 color */
+  function safeColor(v) {
+    const c = String(v || "").trim();
+    if (!c) return "";
+    if (/^#[0-9a-f]{3,8}$/i.test(c)) return c;
+    if (/^[a-z]{3,20}$/i.test(c)) return c;
+    if (/^rgba?\(\s*[\d\s.,%]{3,40}\)$/i.test(c)) return c;
+    return "";
+  }
+
   const RICH_TAGS = {
     P: 1, BR: 1, B: 1, STRONG: 1, I: 1, EM: 1, U: 1, S: 1, DEL: 1, SUB: 1, SUP: 1,
     H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
@@ -508,6 +538,15 @@
       if (node.nodeType !== 1) return;
       const tag = String(node.tagName || "").toUpperCase();
       if (RICH_DROP[tag]) return;                       /* 整块丢弃 */
+      /* <font color> 单独处理：它不在白名单里，但直接拆壳会把颜色丢掉 */
+      if (tag === "FONT") {
+        const c = safeColor(node.getAttribute("color"));
+        if (c) out.push('<span style="color:' + escapeHtml(c) + '">');
+        const kf = node.childNodes;
+        for (let i = 0; i < kf.length; i++) walk(kf[i]);
+        if (c) out.push("</span>");
+        return;
+      }
       if (!RICH_TAGS[tag]) {                            /* 不认识的标签：拆壳留字 */
         const kids = node.childNodes;
         for (let i = 0; i < kids.length; i++) walk(kids[i]);
@@ -527,12 +566,15 @@
         const src = String(node.getAttribute("src") || "").trim();
         /* 只放行网络图与内联图；本机路径、file:// 一律不渲染 */
         if (/^https?:\/\//i.test(src) || /^data:image\//i.test(src)) {
-          out.push('<img class="dl-rich-img" src="' + escapeHtml(src) + '" alt="">');
+          /* alt 保留（10-20）：图挂了还能看到作者写的说明 */
+          const alt = String(node.getAttribute("alt") || "").slice(0, 120);
+          out.push('<img class="dl-rich-img" src="' + escapeHtml(src) + '" alt="' + escapeHtml(alt) + '">');
         }
         return;
       }
       const lower = tag.toLowerCase();
-      out.push("<" + lower + ">");
+      const st = safeStyle(node.getAttribute("style"));
+      out.push("<" + lower + (st ? ' style="' + escapeHtml(st) + '"' : "") + ">");
       const kids = node.childNodes;
       for (let i = 0; i < kids.length; i++) walk(kids[i]);
       out.push("</" + lower + ">");
@@ -540,12 +582,16 @@
     return out.join("");
   }
 
-  /* 像不像一段富文本：至少两个块/强调标签才算，避免「<3」这种误判成 HTML */
+  /* 像不像一段富文本：至少两个标签，或者**一个自闭合标签**（br / hr / img）也算。
+     10-20 修：酒馆卡里「一句话 + 一个 <br>」很常见，阈值卡 2 会被当成普通文本，
+     结果把 &lt;br&gt; 原样显示出来。 */
   function looksRich(src) {
     const s = String(src || "");
     if (s.indexOf("<") < 0) return false;
-    const m = s.match(/<\/?(p|div|h[1-6]|br|b|strong|i|em|u|ul|ol|li|blockquote|hr|table|span|details|summary)\b[^>]*>/gi);
-    return !!(m && m.length >= 2);
+    const m = s.match(/<\/?(p|div|h[1-6]|br|hr|img|b|strong|i|em|u|ul|ol|li|blockquote|table|span|details|summary|font)\b[^>]*>/gi);
+    if (!m || !m.length) return false;
+    if (m.length >= 2) return true;
+    return /^<\s*(br|hr|img|font)\b/i.test(m[0]);
   }
 
   function renderRich(src) {
