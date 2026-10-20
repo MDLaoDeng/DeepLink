@@ -2808,3 +2808,22 @@ body.no-image .ph-moment-img img { display: none; }
 
 /* 群聊里那个 @ */
 .ph-at-btn { font-size: 16px; font-weight: 600; color: var(--accent); }
+
+/* 气泡旁的浮层菜单（10-20：替掉原来那个大弹窗） */
+.ph-bubmenu {
+  position: fixed; z-index: 70;
+  background-color: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  padding: 4px; min-width: 132px;
+}
+.ph-bubmenu-item {
+  display: block; width: 100%; text-align: left;
+  padding: 10px 12px; border: 0;
+  background-color: transparent;
+  color: var(--text); font-size: 14px;
+  border-radius: 8px; cursor: pointer;
+}
+.ph-bubmenu-item:active { background-color: var(--panel-2); }
+.ph-bubmenu-item.danger { color: #e05353; }

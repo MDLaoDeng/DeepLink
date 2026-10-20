@@ -291,19 +291,35 @@
     d.setHours(0, 0, 0, 0);
     return d.getTime();
   }
-  /* 年龄字段可能写成「17」「17岁」「17 岁高三」—— 取第一段数字，读不出就当没填。
-     10-20 口径（用户纠正）：**不做任何推算**。
-       合法时段就是「出生日期 + 这个年龄」那一年（例：2012-02-10 出生、年龄 12
-       → 只能落在 2024-02-10 ~ 2025-02-10）。年龄或出生日期缺一个，就算不出时段，
-       也就不允许开时间系统（除非是无限年龄：birth = 0000-00-00）。
-     会话级年龄（s.age）优先，但不写回角色卡。 */
+  /* 两个日期之间满了几周岁（不满则退一岁） */
+  function yearsBetween(birthMs, nowMs) {
+    if (typeof birthMs !== "number" || !isFinite(nowMs)) return null;
+    if (nowMs < birthMs) return 0;
+    const bd = new Date(birthMs), nd = new Date(nowMs);
+    let a = nd.getFullYear() - bd.getFullYear();
+    if (nd.getMonth() < bd.getMonth() ||
+      (nd.getMonth() === bd.getMonth() && nd.getDate() < bd.getDate())) a--;
+    return (a >= 0 && a <= 200) ? a : null;
+  }
+  /* 年龄（10-20 最终口径）：
+       · 无限年龄（birth = 0000-00-00）→ 没有年龄，也不限制
+       · **开了时间系统** → 年龄跟着故事时间走（满周岁才 +1），
+         所以「年龄更新 → 合法时段跟着更新」，两者是一套东西，不冲突
+       · **没开时间系统** → 只读填写的值（会话级优先），绝不按出生日期瞎推
+     注意：设定时间那一刻还没 time，走的是「填写值」分支 —— 所以初始时间必须落在
+     「出生日期 + 填写的年龄」那一年里，这就是那条硬规则。 */
   function ageOf(ch, s) {
-    const ses = s || null;
-    if (ses && ses.age != null && String(ses.age).trim() !== "") {
-      const n0 = Number((/(\d{1,3})/.exec(String(ses.age)) || [])[0]);
+    const f = (ch && ch.fields) || {};
+    if (String(f.birth || "").slice(0, 4) === "0000") return null;
+    const b = parseYMD(f.birth);
+    if (b !== null && s && hasTimeline(s)) {
+      const a = yearsBetween(b, nowOf(s));
+      if (a !== null) return a;
+    }
+    if (s && s.age != null && String(s.age).trim() !== "") {
+      const n0 = Number((/(\d{1,3})/.exec(String(s.age)) || [])[0]);
       if (n0 >= 0 && n0 <= 200) return n0;
     }
-    const f = (ch && ch.fields) || {};
     const m = /(\d{1,3})/.exec(String(f.age || ""));
     if (!m) return null;
     const n = Number(m[1]);
@@ -937,6 +953,6 @@
     emojiReadable, msgText,
     /* 故事时间轴（10-15）：主对话 / 手机 / 世界生成 / 摘要都读它 */
     hasTimeline, timeOffset, nowOf, storyAt, fmtStory, fmtStoryShort, weekdayOf,
-    validRange, checkTime, canTimeline, timeLine, parseYMD, addYears, ageOf, tryJumpTime, DAY_MS, fmtHM,
+    validRange, checkTime, canTimeline, yearsBetween, timeLine, parseYMD, addYears, ageOf, tryJumpTime, DAY_MS, fmtHM,
     markLeft, awayGap, rebaseTime, holdTime, isFrozen, freezeTime, unfreezeTime };
 })();

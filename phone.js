@@ -119,6 +119,37 @@
   /* 删一条手机消息（10-18 用户要求）。
      如果它绑了主聊天那条「线下」消息，一起删掉 —— 两边是同一次对话的两面，
      只删一边会留下孤儿。 */
+  /* 删除单条（10-20 用户口径：**只删手机里这条**，不再连带删主聊天） */
+  function deletePhoneMsgOne(msg) {
+    var list = Store.getSessions();
+    var i = -1;
+    for (var k = 0; k < list.length; k++) { if (list[k].id === ps.sid) { i = k; break; } }
+    if (i < 0 || !msg) return false;
+    var ph = phoneOf(list[i]);
+    var at = ph.msgs.indexOf(msg);
+    if (at < 0) return false;
+    ph.msgs.splice(at, 1);
+    list[i].updatedAt = Date.now();
+    Store.saveSessions(list);
+    return true;
+  }
+  function deletePhoneMsgs(arr) {
+    if (!arr || !arr.length) return 0;
+    var list = Store.getSessions();
+    var i = -1;
+    for (var k = 0; k < list.length; k++) { if (list[k].id === ps.sid) { i = k; break; } }
+    if (i < 0) return 0;
+    var ph = phoneOf(list[i]);
+    var n = 0;
+    arr.forEach(function (m) {
+      var at = ph.msgs.indexOf(m);
+      if (at >= 0) { ph.msgs.splice(at, 1); n++; }
+    });
+    list[i].updatedAt = Date.now();
+    Store.saveSessions(list);
+    return n;
+  }
+
   function deletePhoneMsg(sid, msg) {
     var list = Store.getSessions();
     var i = -1;
@@ -1036,6 +1067,42 @@
     el.addEventListener("mouseleave", stop);
   }
 
+  /* 气泡旁的浮层菜单（10-20 用户口径：不要那个大弹窗，改成贴着我长按的那条气泡）。
+     定位用 getBoundingClientRect + fixed；上方放不下就翻到下方。 */
+  function closeBubbleMenu() {
+    var el = document.querySelector(".ph-bubmenu");
+    if (el) el.parentNode.removeChild(el);
+    document.removeEventListener("click", closeBubbleMenu, true);
+  }
+  function showBubbleMenu(anchor, items) {
+    closeBubbleMenu();
+    if (!anchor || !items || !items.length) return;
+    var box = document.createElement("div");
+    box.className = "ph-bubmenu";
+    items.forEach(function (it) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "ph-bubmenu-item" + (it.danger ? " danger" : "");
+      b.textContent = it.label;
+      b.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        closeBubbleMenu();
+        try { it.fn(); } catch (e) { /* ignore */ }
+      });
+      box.appendChild(b);
+    });
+    document.body.appendChild(box);
+    var r = anchor.getBoundingClientRect();
+    var bw = box.offsetWidth || 140, bh = box.offsetHeight || 120;
+    var top = r.top - bh - 8;
+    if (top < 8) top = Math.min(r.bottom + 8, window.innerHeight - bh - 8);
+    var left = r.left + r.width / 2 - bw / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - bw - 8));
+    box.style.top = top + "px";
+    box.style.left = left + "px";
+    setTimeout(function () { document.addEventListener("click", closeBubbleMenu, true); }, 0);
+  }
+
   /* 删之前问一句：手机消息删了两边一起没，得让人有反悔的机会 */
   function confirmDeletePhoneMsg(msg) {
     UI.confirmDialog("删除消息", "这条消息会一起从主聊天那边删掉，删了没法恢复。确定吗？").then(function (ok) {
@@ -1217,6 +1284,15 @@
     }
     btn("转发", function () { if (!n) { toast("先选几条", true); return; } pickTargets(function (ts) { doForward(pickedMsgs(), ts); }); });
     btn("合并转发", function () { if (!n) { toast("先选几条", true); return; } pickTargets(function (ts) { doMergeForward(pickedMsgs(), ts); }); });
+    btn("删除", function () {
+      if (!n) { toast("先选几条", true); return; }
+      UI.confirmDialog("删除消息", "选中的 " + n + " 条会从手机聊天里删掉，删了没法恢复。确定吗？").then(function (ok) {
+        if (!ok) return;
+        var c = deletePhoneMsgs(pickedMsgs());
+        exitPick();
+        toast(c ? ("已删除 " + c + " 条") : "没删掉");
+      });
+    }, true);
     btn("取消", exitPick);
   }
 
@@ -1503,9 +1579,26 @@
       });
       return wrap;
     }
-    /* 长按气泡弹菜单（10-18）：对方的消息能重说/修改/删，自己的能撤回 */
+    /* 长按（10-20 用户口径，对齐主聊天）：
+       AI 消息 → 直接进多选（在里面选删除 / 转发 / 合并转发）
+       我的消息 → 气泡旁浮出菜单：撤回 / 多选 / 删除本条（删除要确认，撤回不要） */
     if (m.kind !== "sys" && m.kind !== "recalled") {
-      bindLongPress(bubble, function () { openMsgMenu(m); });
+      bindLongPress(bubble, function () {
+        if (m.role !== "user") { enterPick(m); return; }
+        showBubbleMenu(bubble, [
+          { label: "撤回", fn: function () { recallPhoneMsg(m); } },
+          { label: "多选", fn: function () { enterPick(m); } },
+          {
+            label: "删除本条", danger: true,
+            fn: function () {
+              UI.confirmDialog("删除这条消息", "只删手机里的这一条，删了没法恢复。确定吗？").then(function (ok) {
+                if (!ok) return;
+                if (deletePhoneMsgOne(m)) { renderChat(); toast("已删除"); }
+              });
+            }
+          }
+        ]);
+      });
     }
     return wrap;
   }
