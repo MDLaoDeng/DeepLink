@@ -1061,6 +1061,8 @@
       b.addEventListener("click", function () { closeSheet(); fn(); });
       return b;
     }
+    /* 多选放第一项（10-20：两种消息都能多选，用户消息长按弹的就是这个菜单） */
+    box.appendChild(item("多选（转发 / 合并转发）", function () { enterPick(msg); }));
     if (isUser) {
       box.appendChild(item("撤回这条", function () { recallPhoneMsg(msg); }, true));
     } else {
@@ -1068,8 +1070,6 @@
       box.appendChild(item("修改这条", function () { editPhoneMsg(msg); }));
       box.appendChild(item("删除", function () { confirmDeletePhoneMsg(msg); }, true));
     }
-    /* 多选（10-20）：从这里进，勾几条再转发 / 合并转发 */
-    box.appendChild(item("多选（转发）", function () { enterPick(msg); }));
     openSheet("这条消息", box, closeSheet);
   }
 
@@ -1844,7 +1844,9 @@
       }
       var at = [];
       members.forEach(function (m) { if (lastU && lastU.indexOf("@" + m.name) >= 0) at.push(m.name); });
-      if (at.length) t += "\n【有人被 @】用户在最后一条里 @" + at.join("、") + "：这一轮先让 " + at.join("、") + " 回应，其他人非必要不插话。\n";
+      if (at.length) t += "\n【有人被 @】用户在最后一条里 @" + at.join("、") + "，意思是「这条是提醒 " + at.join("、") +
+        " 看的」，**不是点名让他先发言**。谁接话按各自性格来：被提醒的人通常会回应（毕竟是在叫他），" +
+        "但别写成「被点到名就站起来回答」那种生硬感。\n";
     } catch (e) { /* ignore */ }
     t += "\n【规则】像真人发微信：口语、简短。每次让 1~3 位成员发言（谁说话、说几句由你按各自性格决定，可以有人不说话），" +
       "每条发言单独一行、用「名字：内容」开头，例如：\n小明：在啊\n小红：刚下课。\n" +

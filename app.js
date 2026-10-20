@@ -459,11 +459,18 @@
     const s = session();
     if (!s) return false;
     const ch = characterFor(s);
-    const ck = Memory.checkTime(ch, ms);
+    /* 硬规则（10-20 用户口径）：出生日期 + 年龄都必须有，否则算不出合法时段，不准开时间系统。
+       唯一例外是无限年龄（出生日期填 0000-00-00）—— 那时不做时段限制。 */
+    const can = (Memory.canTimeline ? Memory.canTimeline(ch, s) : { ok: true });
+    if (!can.ok) {
+      UI.toast("开不了时间系统：" + can.why + "。先在角色卡里补上；确实要无限年龄，就把出生年份填 0", true);
+      return false;
+    }
+    const ck = Memory.checkTime(ch, ms, s);
     if (!ck.ok) {
       UI.toast("这个时间不合角色设定：只能落在 " + Memory.fmtStory(ck.from).slice(0, 10) +
         " ~ " + Memory.fmtStory(ck.to).slice(0, 10) +
-        " 之间（由出生日期 + 当前年龄算出来）。请把角色的年龄或出生日期改到能覆盖这个时间。", true);
+        " 之间（出生日期 + 年龄定出的那一年）。要放宽就改年龄或出生日期。", true);
       return false;
     }
     Store.updateSession(s.id, { time: { start: ms, setAt: Date.now(), leftAt: Date.now() } });

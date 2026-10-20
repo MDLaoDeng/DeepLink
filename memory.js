@@ -291,11 +291,12 @@
     d.setHours(0, 0, 0, 0);
     return d.getTime();
   }
-  /* 年龄字段可能写成「17」「17岁」「17 岁高三」—— 取第一段数字，读不出就算没填。
-     10-20 三条新口径：
-       ① 会话级年龄（s.age）优先，且**不写回角色卡**；
-       ② 角色卡没填年龄、但填了出生日期 → 按当前时间推算（用户指出：没填也得能开时间系统）；
-       ③ 推算基准：开了时间系统用故事时间，没开用现实时间。 */
+  /* 年龄字段可能写成「17」「17岁」「17 岁高三」—— 取第一段数字，读不出就当没填。
+     10-20 口径（用户纠正）：**不做任何推算**。
+       合法时段就是「出生日期 + 这个年龄」那一年（例：2012-02-10 出生、年龄 12
+       → 只能落在 2024-02-10 ~ 2025-02-10）。年龄或出生日期缺一个，就算不出时段，
+       也就不允许开时间系统（除非是无限年龄：birth = 0000-00-00）。
+     会话级年龄（s.age）优先，但不写回角色卡。 */
   function ageOf(ch, s) {
     const ses = s || null;
     if (ses && ses.age != null && String(ses.age).trim() !== "") {
@@ -304,27 +305,32 @@
     }
     const f = (ch && ch.fields) || {};
     const m = /(\d{1,3})/.exec(String(f.age || ""));
-    if (m) {
-      const n = Number(m[1]);
-      if (n >= 0 && n <= 200) return n;
-    }
-    const b = parseYMD(f.birth);
-    if (b === null) return null;
-    const base = (ses && hasTimeline(ses)) ? nowOf(ses) : Date.now();
-    if (base < b) return 0;
-    const bd = new Date(b), nd = new Date(base);
-    let a = nd.getFullYear() - bd.getFullYear();
-    if (nd.getMonth() < bd.getMonth() ||
-      (nd.getMonth() === bd.getMonth() && nd.getDate() < bd.getDate())) a--;
-    return (a >= 0 && a <= 200) ? a : null;
+    if (!m) return null;
+    const n = Number(m[1]);
+    return (n >= 0 && n <= 200) ? n : null;
   }
   function validRange(ch, s) {
     const f = (ch && ch.fields) || {};
     const b = parseYMD(f.birth);
     if (b === null) return null;          /* 无限年龄 / 没填出生日期 → 不限制时段 */
     const a = ageOf(ch, s);
-    if (a === null) return null;
+    if (a === null) return null;          /* 没填年龄 → 算不出时段 */
     return { from: addYears(b, a), to: addYears(b, a + 1) };
+  }
+  /* 这条线能不能开时间系统（10-20）：
+     · 无限年龄（0000-00-00）→ 可以，不做限制
+     · 出生日期 + 年龄都填了 → 可以，时段按上面那条算
+     · 缺一个 → 不可以，先回去补 */
+  function canTimeline(ch, s) {
+    const f = (ch && ch.fields) || {};
+    const inf = String(f.birth || "").slice(0, 4) === "0000";
+    if (inf) return { ok: true, why: "", infinite: true };
+    const b = parseYMD(f.birth);
+    if (b === null) return { ok: false, why: "角色卡还没填「出生日期」" };
+    const a = ageOf(ch, s);
+    if (a === null) return { ok: false, why: "角色卡还没填「年龄」" };
+    const r = validRange(ch, s);
+    return { ok: true, why: "", infinite: false, from: r.from, to: r.to };
   }
 
   function timeOffset(s) {
@@ -931,6 +937,6 @@
     emojiReadable, msgText,
     /* 故事时间轴（10-15）：主对话 / 手机 / 世界生成 / 摘要都读它 */
     hasTimeline, timeOffset, nowOf, storyAt, fmtStory, fmtStoryShort, weekdayOf,
-    validRange, checkTime, timeLine, parseYMD, addYears, ageOf, tryJumpTime, DAY_MS, fmtHM,
+    validRange, checkTime, canTimeline, timeLine, parseYMD, addYears, ageOf, tryJumpTime, DAY_MS, fmtHM,
     markLeft, awayGap, rebaseTime, holdTime, isFrozen, freezeTime, unfreezeTime };
 })();

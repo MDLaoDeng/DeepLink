@@ -1227,7 +1227,7 @@
         tlLine.push("当前故事时间：" + Memory.fmtStory(nowMs, true) + (ck.ok ? "" : "　⚠️ 已超出角色的合法时段"));
       }
       if (rng) tlLine.push("角色合法时段：" + Memory.fmtStory(rng.from).slice(0, 10) + " ~ " + Memory.fmtStory(rng.to).slice(0, 10));
-      else tlLine.push("角色没填「出生日期」→ 时间不做限制（出生日期填成 0 年 0 月 0 日也一样：无限年龄）");
+      else tlLine.push("还没法算合法时段：出生日期和年龄都要填；出生日期填 0 年 0 月 0 日 = 无限年龄（不限制）");
       setText("#sessionTimeLine", tlLine.join("；"));
       setChecked("#setSessionStatusQuant", (typeof s.statusQuant === "boolean") ? s.statusQuant : (state.settings.statusQuant !== false));
       renderDiaryList(s);
