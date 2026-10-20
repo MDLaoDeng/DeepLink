@@ -1598,9 +1598,13 @@
     if (action === "rollback") { rollbackTo(i); return; }
   }
 
-  /* ── 回溯到该时间点（10-16 用户要求）──────────────────
-     把故事时间拨回这条消息所在的时刻，并**丢弃它之后的消息**（用户口径）。
-     同时把记忆水位线压低 —— 否则压缩会认为「这段时间已经总结过」，新内容永远进不了记忆。 */
+  /* ── 回溯（10-20 改版：**不丢东西，改成开一条支线**）────────────
+     以这条消息的时刻为界：
+       · 新建一条支线（原名 + 数字），只带这条及之前的主聊天消息、以及之前发的手机消息
+       · 记忆 / 认知 / 关系 / 共同经历 / 场景 **按「回溯点前 20 条」重新生成**
+         （后 20 条只作比对材料：让 AI 知道哪些事发生在之后、必须排除）
+       · 原线原封不动保留；新线是支线，用户想转正自己去点「设为主线」
+     时间单位全程毫秒（消息 ts、手机消息 ts、故事时间都是 Date.now）。 */
   async function rollbackTo(i) {
     const s = session();
     if (!s) return;
@@ -1610,24 +1614,134 @@
     if (!M || !M.hasTimeline(s)) { UI.toast("这条对话没开时间系统，回溯用不了", true); return; }
     const t = s.time;
     const offset = t.start - t.setAt;
-    const base = (typeof msg.ts === "number" && msg.ts > 0) ? msg.ts : Date.now();
-    const target = base + offset;
+    const base = (typeof msg.ts === "number" && msg.ts > 0) ? msg.ts : Date.now();  /* 回溯点的现实毫秒 */
+    const target = base + offset;                                                    /* 回溯点的故事毫秒 */
     const after = s.messages.length - (i + 1);
-    const ok = await UI.confirmDialog("回溯到此刻",
-      "故事时间会回到 " + M.fmtStory(target) + "，" + (after > 0 ? ("这条之后的 " + after + " 条消息会被丢弃") : "这条已经是最后一条") + "。丢弃后不可恢复，确定吗？");
+    const ok = await UI.confirmDialog("回溯到这里（新建支线）",
+      "会新建一条支线，只保留这条及之前的 " + (i + 1) + " 条消息，故事时间回到 " + M.fmtStory(target) +
+      "。原线" + (after ? "（后面那 " + after + " 条）" : "") + "原样保留，不动。确定吗？");
     if (!ok) return;
-    const keep = s.messages.slice(0, i + 1);
-    let mem = s.memory;
-    if (mem && typeof mem.coveredUntil === "number" && mem.coveredUntil > target) {
-      mem = Object.assign({}, mem, { coveredUntil: target });
+
+    /* 还在生成 → 直接中断（用户口径 5） */
+    if (state.busy && state.abort) { try { state.abort.abort(); } catch (e) { /* ignore */ } }
+    state.busy = false;
+
+    const list = Store.getSessions();
+    const baseTitle = String(s.title || "新对话").replace(/\s+\d+$/, "");
+    const taken = {};
+    list.forEach((x) => { if ((x.characterId || "") === (s.characterId || "")) taken[String(x.title || "")] = 1; });
+    let n = 2, title = baseTitle + " " + n;
+    while (taken[title]) { n++; title = baseTitle + " " + n; }
+
+    const clone = JSON.parse(JSON.stringify(s));
+    clone.id = "s_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    clone.title = title;
+    clone.mainLine = false;          /* 支线：想转正自己点「设为主线」 */
+    clone.pinned = false;
+    clone.createdAt = Date.now();
+    clone.updatedAt = Date.now();
+    clone.introDone = true;
+    clone.usage = null;
+    clone.messages = clone.messages.slice(0, i + 1);
+    /* 手机消息：截到回溯点之前（毫秒直接比；没有 ts 的留着） */
+    if (clone.phone && Array.isArray(clone.phone.msgs)) {
+      clone.phone.msgs = clone.phone.msgs.filter((m) => !m || typeof m.ts !== "number" || m.ts <= base);
     }
-    Store.updateSession(s.id, {
-      messages: keep,
-      time: { start: target, setAt: Date.now(), marker: "回溯", markerAt: Date.now() },
-      memory: mem || s.memory
-    });
-    UI.toast("已回溯到 " + M.fmtStory(target));
-    if (window.DL.renderAll) window.DL.renderAll();
+    /* TA 的思考：只留回溯日及之前的；压缩块越界就作废 */
+    const cutDay = M.fmtStory(target).slice(0, 10);
+    if (clone.think && typeof clone.think === "object") {
+      if (Array.isArray(clone.think.days)) clone.think.days = clone.think.days.filter((d) => d && d.d && d.d <= cutDay);
+      if (clone.think.digestTo && clone.think.digestTo > cutDay) {
+        clone.think.digest = "";
+        clone.think.digestTo = "";
+        clone.think.readText = "";
+        clone.think.readAt = 0;
+        clone.think.digestAt = 0;
+      }
+    }
+    /* 记忆先清空占位，水位线压到回溯点（否则压缩会跳过新内容） */
+    clone.memory = { days: [], weeks: [], months: [], coveredUntil: target };
+    clone.time = { start: target, setAt: Date.now(), leftAt: Date.now() };
+    list.push(clone);
+    Store.saveSessions(list);
+
+    state.sessionId = clone.id;
+    Store.setCurrentId(clone.id);
+    renderAll();
+    UI.toast("已新建支线「" + title + "」，正在重建记忆…");
+
+    try { await rebuildForked(clone.id, s.id, i, target); } catch (e) {
+      UI.toast("记忆重建失败：" + (e && e.message ? e.message : e) + "（新线已经建好，记忆还是空的）", true);
+    }
+  }
+
+  /* 按「回溯点前 20 条」重建新线的记忆 / 认知 / 关系 / 共同经历 / 场景。
+     后 20 条只作比对材料，不进结果。花费记在「回溯重建」。 */
+  async function rebuildForked(newSid, oldSid, i, target) {
+    const list = Store.getSessions();
+    const oldS = list.filter((x) => x.id === oldSid)[0];
+    const newS = list.filter((x) => x.id === newSid)[0];
+    if (!oldS || !newS || !state.settings.apiKey) return;
+    const msgs = oldS.messages || [];
+    const up = msgs.slice(Math.max(0, i - 19), i + 1);
+    const down = msgs.slice(i + 1, i + 21);
+    const fmt = (arr) => arr.map((m) => ((m.role === "user" ? "我" : "TA") + "：" + activeText(m))).join("\n");
+    const oldFiles =
+      "【旧记忆】\n" + (Memory.memoryText ? Memory.memoryText(oldS.memory) : "（空）") +
+      "\n【旧认知】\n" + (oldS.cognition || "（空）") +
+      "\n【旧关系】\n" + (oldS.relation || "（空）") +
+      "\n【旧共同经历】\n" + (oldS.shared || "（空）") +
+      "\n【旧场景】\n" + (oldS.scene || "（空）");
+
+    const sys = "你在为一条「回溯出来的支线」重建记忆文件。\n" +
+      "这条线只发生到【回溯点】为止：回溯点之后的事**都不存在**，绝不能写进任何一项。\n" +
+      "输入会给你：回溯点之前的 20 条对话（真正要用的）、回溯点之后的 20 条（**只用来判断哪些事发生在之后、必须排除**）、以及原线的旧文件（可能混进了之后的内容）。\n" +
+      "输出一个 JSON 对象，键固定为：memory / cognition / relation / shared / scene。\n" +
+      "要求：\n" +
+      "1. memory：第三人称、条目化的记忆摘要，只写回溯点之前的关键事件、情绪变化、设定与承诺，400 字内；\n" +
+      "2. cognition：只写「用户这个人」的稳定特质（偏好、性格、雷点、习惯），不写剧情；\n" +
+      "3. relation：一句话概括此刻的关系；shared：条目化列出共同经历（只到回溯点为止）；\n" +
+      "4. scene：此刻在哪、在做什么、氛围，150 字内；\n" +
+      "5. 旧文件只作参考：里面提到回溯点之后的事，一律删掉；没有依据的不要编；\n" +
+      "6. 只输出这个 JSON 对象，不要解释、不要代码块。";
+
+    const user = "【回溯点】" + Memory.fmtStory(target) +
+      "\n\n【回溯点之前的对话】\n" + (fmt(up) || "（没有）") +
+      "\n\n【回溯点之后的对话（只用于排除，不要写进结果）】\n" + (fmt(down) || "（没有）") +
+      "\n\n" + oldFiles;
+
+    const r = await Api.summarize(state.settings, [
+      { role: "system", content: sys },
+      { role: "user", content: user }
+    ], { maxTokens: 1200 });
+    if (r && r.usage) recordUsage(newSid, r.usage, newS.characterId, "fork");
+
+    let obj = null;
+    try {
+      const raw = String((r && r.text) || "").replace(/```json/gi, "").replace(/```/g, "").trim();
+      const a = raw.indexOf("{"), b = raw.lastIndexOf("}");
+      obj = JSON.parse(raw.slice(a, b + 1));
+    } catch (e) { obj = null; }
+    if (!obj) return;
+
+    const list2 = Store.getSessions();
+    const live = list2.filter((x) => x.id === newSid)[0];
+    if (!live) return;
+    const mem = Memory.ensureMemory(live);
+    const day = Memory.fmtStory(target).slice(0, 10);
+    if (obj.memory) mem.days = [{ d: day, t: String(obj.memory) }];
+    mem.coveredUntil = target;
+    if (obj.cognition) live.cognition = String(obj.cognition);
+    if (obj.relation) live.relation = String(obj.relation);
+    if (obj.shared) live.shared = String(obj.shared);
+    if (obj.scene) live.scene = String(obj.scene);
+    live.updatedAt = Date.now();
+    Store.saveSessions(list2);
+    if (live.id === state.sessionId) {
+      try { fillSessionForm(session()); } catch (e) { /* ignore */ }
+      renderAll();
+    }
+    UI.toast("支线记忆已重建");
   }
 
   function openMessageMenu(i) {
@@ -2990,6 +3104,7 @@
     openDeleteDialog: openDeleteDialog, confirmDelete: confirmDelete,
     bindMessageGestures: bindMessageGestures,
     runHistorySearch: runHistorySearch, openSearchModal: openSearchModal, fillHistScope: fillHistScope,
+    rollbackTo: rollbackTo,
     activeText: activeText, buildGroupSystemText: buildGroupSystemText,
     /* 本轮新增：快捷回复面板 + 继续说（continueFrom = 群聊里指定谁接着说） */
     bindQuickReply: bindQuickReply, continueLast: continueLast, continueFrom: continueFrom,

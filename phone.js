@@ -119,34 +119,13 @@
   /* 删一条手机消息（10-18 用户要求）。
      如果它绑了主聊天那条「线下」消息，一起删掉 —— 两边是同一次对话的两面，
      只删一边会留下孤儿。 */
-  /* 删除单条（10-20 用户口径：**只删手机里这条**，不再连带删主聊天） */
+  /* 删除单条（10-20 用户口径：**连带删主聊天里绑定的那条**，和原来一样） */
   function deletePhoneMsgOne(msg) {
-    var list = Store.getSessions();
-    var i = -1;
-    for (var k = 0; k < list.length; k++) { if (list[k].id === ps.sid) { i = k; break; } }
-    if (i < 0 || !msg) return false;
-    var ph = phoneOf(list[i]);
-    var at = ph.msgs.indexOf(msg);
-    if (at < 0) return false;
-    ph.msgs.splice(at, 1);
-    list[i].updatedAt = Date.now();
-    Store.saveSessions(list);
-    return true;
+    return deletePhoneMsg(ps.sid, msg);
   }
   function deletePhoneMsgs(arr) {
-    if (!arr || !arr.length) return 0;
-    var list = Store.getSessions();
-    var i = -1;
-    for (var k = 0; k < list.length; k++) { if (list[k].id === ps.sid) { i = k; break; } }
-    if (i < 0) return 0;
-    var ph = phoneOf(list[i]);
     var n = 0;
-    arr.forEach(function (m) {
-      var at = ph.msgs.indexOf(m);
-      if (at >= 0) { ph.msgs.splice(at, 1); n++; }
-    });
-    list[i].updatedAt = Date.now();
-    Store.saveSessions(list);
+    (arr || []).forEach(function (m) { if (deletePhoneMsg(ps.sid, m)) n++; });
     return n;
   }
 
