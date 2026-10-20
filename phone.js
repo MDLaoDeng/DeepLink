@@ -1269,7 +1269,9 @@
     if (!bar) {
       bar = document.createElement("div");
       bar.className = "ph-pickbar";
-      host.appendChild(bar);
+      /* 插在输入框**之前**：多选条要顶在输入框的位置上（原来 appendChild 会跑到输入框下面） */
+      var comp = host.querySelector(".phone-composer");
+      if (comp) host.insertBefore(bar, comp); else host.appendChild(bar);
     }
     bar.innerHTML = "";
     var n = pickCount();
@@ -1581,7 +1583,9 @@
     col.appendChild(bubble);
     wrap.appendChild(col);
     try { if (UI.stickerize) UI.stickerize(col); } catch (e) { /* ignore */ }
-    /* 多选（10-20）：多选态下点一下切换选中，长按菜单让位 */
+    /* 多选（10-20）：多选态下点一下切换选中，长按菜单让位。
+       用**捕获阶段**：先于气泡内部的点击（合并转发卡片 / 图片放大 / 语音播放）执行，
+       stopPropagation 才能真的把它们拦下来 —— 挂冒泡阶段会「既打开又取消选中」。 */
     if (ps.pick) {
       wrap.classList.add("ph-pickable");
       if (m.id && ps.pick[m.id]) wrap.classList.add("ph-picked");
@@ -1591,7 +1595,7 @@
         if (!m.id) return;
         if (ps.pick[m.id]) delete ps.pick[m.id]; else ps.pick[m.id] = true;
         renderChat(); renderPickBar();
-      });
+      }, true);
       return wrap;
     }
     /* 长按（10-20 用户口径，对齐主聊天）：
@@ -1810,6 +1814,8 @@
     foot.textContent = "聊天记录";
     card.appendChild(foot);
     card.addEventListener("click", function () {
+      /* 多选态：这一下是「选中 / 取消选中这条」，不该顺带打开列表 */
+      if (ps.pick) return;
       var box = document.createElement("div");
       box.className = "ph-set";
       (m.items || []).forEach(function (x) {
@@ -3298,6 +3304,8 @@
   window.DL.phone = {
     /* 回归测试 / 别处复用（10-20）：转发、合并转发、撤回、@ 的入口 */
     open: function (sid) { ps.sid = sid; ps.view = "chat"; ps.pick = null; renderChat(); },
+    /* 直接进某条会话的手机聊天（历史搜索点到手机结果时用这个，别用 #phoneBtn 那个只会进列表的） */
+    openLine: function (sid) { return openPhoneFor(sid); },
     targets: function () { return fwdTargets(); },
     msgText: function (m) { return msgText(m); },
     recall: function (m) { return recallPhoneMsg(m); },

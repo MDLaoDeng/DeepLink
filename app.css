@@ -2781,10 +2781,13 @@ body.no-image .ph-moment-img img { display: none; }
 
 /* ── 手机：多选转发 / 合并转发 / @（10-20）──────────────── */
 .ph-pickbar {
-  position: sticky; bottom: 0; left: 0; right: 0;
+  /* 由 phone.js 用 insertBefore 插在输入框之前，按普通流占位就行。
+     原来是 position: sticky; bottom: 0 —— 父容器不是滚动容器，粘不住，
+     还会把消息区压矮一截（10-20 修）。 */
+  position: relative; flex: none;
   display: flex; align-items: center;
   padding: 8px 10px; background-color: var(--panel);
-  border-top: 1px solid var(--border); z-index: 6;
+  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); z-index: 6;
 }
 .ph-pickbar .btn { margin-left: 8px; }
 .ph-pick-n { font-size: 13px; color: var(--text-dim); margin-right: auto; }

@@ -1566,6 +1566,7 @@
       "4. 贴合角色设定、当前关系与共同经历；用**第三人称平铺直叙**（这是旁白，不是角色对用户说话）。\n" +
       "5. 不要 Markdown 标题、不要加粗、不要列表符号，只靠「序号 + 日期」起头分段。\n" +
       "6. **每一天的末尾另起一行**，用 〖想法〗…〖/想法〗 包住角色当天的内心（1~3 句，第一人称、口语）。" +
+      "**起止标记和正文写在同一行**（`〖想法〗内容〖/想法〗`），不要换行拆开，否则解析会漏。" +
       "这段是「TA 的思考」，随他的性格走：学者会琢磨学习 / 研究上的事，爱哲思的人会想抽象的问题，" +
       "敏感的人会反刍一句话的语气；允许跳跃、自问自答、无厘头。不要在想法里复述剧情，也不要写成旁白。";
 
@@ -1814,6 +1815,8 @@
     htmlToText: htmlToText, fillPhoneFromWorld: fillPhoneFromWorld,
     charMissingFields: charMissingFields, renderCharReadyHint: renderCharReadyHint,
     applyIntroToSessions: applyIntroToSessions,
+    /* 给 app.js 的三个按钮用：只重绘「TA 的思考」那一块，不碰其它未保存的输入 */
+    renderSessionThink: renderSessionThink,
     newCharacter: newCharacter, openPresetPicker: openPresetPicker, usePreset: usePreset,
     updateCognitionNow: updateCognitionNow,
     updateRelationSharedNow: updateRelationSharedNow, mergeGroupShared: mergeGroupShared,

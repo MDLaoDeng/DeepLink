@@ -367,10 +367,13 @@
     s.time.leftAt = (typeof ms === "number") ? ms : Date.now();
     return true;
   }
-  /* 这次进来「隔了多久」（毫秒）。没开时间系统 / 没有锚点 → null */
+  /* 这次进来「隔了多久」（毫秒）。没开时间系统 / 没有锚点 → null。
+     冻结中（混搭模式 / 手动冻结）→ 也算「没有所隔时间」：
+     冻结的语义就是「离线那段不算」，再让外面按 leftAt 去补剧情就自相矛盾了。 */
   function awayGap(s, nowMs) {
     const t = s && s.time;
     if (!t || typeof t.leftAt !== "number") return null;
+    if (typeof t.frozenAt === "number") return null;
     const now = (typeof nowMs === "number") ? nowMs : Date.now();
     return Math.max(0, now - t.leftAt);
   }
@@ -574,10 +577,14 @@
        { ok:true, ms, label }  = 可以推，ms 是新的「故事现在」 */
   function tryJumpTime(s, ch, text) {
     if (!s) return null;
-    const base = hasTimeline(s) ? nowOf(s) : Date.now();
+    /* 没开时间系统的线：不推时间，也**不能顺手给它开一条时间轴**。
+       否则用户随手写一句「（第二天）」，这条线就悄悄有了故事时间（10-20 审查发现）。 */
+    if (!hasTimeline(s)) return null;
+    const base = nowOf(s);
     const r = parseTimeJump(text, base, { recent: recentLine(s) });
     if (!r) return null;
-    const ck = checkTime(ch, r.ms);
+    /* 第三个参数不能省：年龄跟着故事时间走，判据得用这条线的 s（省了会拿"设定时年龄"算旧区间） */
+    const ck = checkTime(ch, r.ms, s);
     if (!ck.ok) return { ok: false, label: r.label, from: ck.from, to: ck.to };
     return { ok: true, ms: r.ms, label: r.label };
   }

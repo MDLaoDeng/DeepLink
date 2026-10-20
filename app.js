@@ -364,7 +364,9 @@
     }
     const ms = Memory.nowOf(s);
     const ch = characterFor(s);
-    const ck = Memory.checkTime(ch, ms);
+    /* 第三个参数不能省：年龄跟着故事时间走，省了就退化成「设定时年龄」的旧区间，
+       于是时钟红标误报越界、而发送那边认为合法（10-20 审查发现的两套判据）。 */
+    const ck = Memory.checkTime(ch, ms, s);
     const frozen = Memory.isFrozen ? Memory.isFrozen(s) : false;
     txt.textContent = Memory.fmtHM(ms);
     el.classList.toggle("out", !ck.ok);
@@ -683,8 +685,31 @@
     } catch (e) { return false; }
   }
 
+  /* 混搭模式的兜底（10-20 修）：Android 上进程被回收时 visibilitychange 不一定触发，
+     「离开」那一步没跑到、frozenAt 还是空的 —— 离线那段就会被算进故事里。
+     启动时按 leftAt 补一刀，把故事时间停在上次离开那一刻（不是现在）。 */
+  function catchUpAutoFreeze() {
+    try {
+      if (!Memory || !Memory.isFrozen) return;
+      const list = Store.getSessions() || [];
+      let hit = false;
+      const now = Date.now();
+      list.forEach((s) => {
+        if (!s || !s.autoFreeze || !s.time || typeof s.time.start !== "number") return;
+        if (Memory.isFrozen(s)) return;
+        const left = s.time.leftAt;
+        /* 只补「确实离开过」的：不满 5 分钟不算，免得应用内切一下前后台就冻上 */
+        if (typeof left !== "number" || now - left < 5 * 60000) return;
+        s.time.frozenAt = left;
+        hit = true;
+      });
+      if (hit) Store.saveSessions(list);
+    } catch (e) { /* 补冻失败不影响启动 */ }
+  }
+
   function openWorldCheck() {
     try {
+      catchUpAutoFreeze();          /* 先把「没来得及冻」的线补上，下面才不会误判 */
       if (state.settings.worldGen === false) return;
       const s = session();
       const now = Date.now();
@@ -697,6 +722,11 @@
       const missW = (window.DL && window.DL.charMissingFields) ? window.DL.charMissingFields(s) : [];
       if (missW.length) { state.settings = Store.saveSettings({ lastSeenAt: now }); return; }
       if (!hasAnyMemory(s)) { state.settings = Store.saveSettings({ lastSeenAt: now }); return; }
+      /* ③ 冻结中的线（混搭模式离开自动冻结 / 手动冻结）：离线那段按约定不算，
+            不该再弹「补这段剧情」。原来只看 leftAt，冻结标志完全看不见（10-20 修）。 */
+      if (Memory && Memory.isFrozen && Memory.isFrozen(s)) {
+        state.settings = Store.saveSettings({ lastSeenAt: now }); return;
+      }
       /* 「所隔时间」优先取这条会话自己的离线锚点（退出那一刻按秒记下的），
          没有才退回全局 lastSeenAt —— 全局那个最后一次保存就可能被刷新掉。 */
       const gap = (Memory && Memory.awayGap) ? Memory.awayGap(s, now) : null;
@@ -1344,6 +1374,8 @@
     }
     UI.toast("正在整理这些天的想法…");
     const t = await window.Think.readNow(s.id);
+    /* 只重绘「TA 的思考」那一块：整表 fillSessionForm 会把用户还没保存的其它输入框冲掉 */
+    try { if (window.DL.renderSessionThink) window.DL.renderSessionThink(session()); } catch (e) { /* ignore */ }
     renderAll();
     UI.toast(t ? "读完了；此后七天不再自动读" : "还没有可读的思考", !t);
   }
@@ -1355,6 +1387,7 @@
     }
     UI.toast("正在压缩…");
     const t = await window.Think.digest(s.id);
+    try { if (window.DL.renderSessionThink) window.DL.renderSessionThink(session()); } catch (e) { /* ignore */ }
     renderAll();
     UI.toast(t ? "压缩好了（置顶显示）" : "没有新的想法要压，或者压缩失败", !t);
   }
@@ -1369,6 +1402,7 @@
     UI.toast("正在核对…");
     const t = await window.Think.correct(s.id, note);
     setVal("#sessionThinkCorrect", "");
+    try { if (window.DL.renderSessionThink) window.DL.renderSessionThink(session()); } catch (e) { /* ignore */ }
     renderAll();
     UI.toast(t ? "已纠偏" : "AI 认为不用改（或请求失败）", !t);
   }

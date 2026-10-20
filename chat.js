@@ -1659,11 +1659,20 @@
         clone.think.digestAt = 0;
       }
     }
-    /* 记忆先清空占位，水位线压到回溯点（否则压缩会跳过新内容） */
+    /* 记忆先清空占位，水位线压到回溯点（否则压缩会跳过新内容）。
+       认知 / 关系 / 共同经历 / 场景也一起清空：这些是从原线深拷贝来的，里面全是
+       **回溯点之后**的内容，重建失败时留着它们比空着更糟（10-20 修）。 */
     clone.memory = { days: [], weeks: [], months: [], coveredUntil: target };
+    clone.cognition = "";
+    clone.relation = "";
+    clone.shared = "";
+    clone.scene = "";
     clone.time = { start: target, setAt: Date.now(), leftAt: Date.now() };
     list.push(clone);
-    Store.saveSessions(list);
+    const okSaved = Store.saveSessions(list);
+    if (okSaved === false) {
+      UI.toast("支线已经在内存里建好了，但没写进本机存储（空间可能不够）—— 先导出备份，再清一次缓存", true);
+    }
 
     state.sessionId = clone.id;
     Store.setCurrentId(clone.id);
@@ -2293,11 +2302,15 @@
       btn.appendChild(snip);
       btn.addEventListener("click", () => {
         UI.closeModal("searchModal");
-        /* 手机的结果（10-20）：切到那条线再打开手机，而不是去主聊天里找 */
+        /* 手机的结果（10-20）：切到那条线再打开手机
+           —— 10-20 修：原来点 #phoneBtn 只会停在联系人列表，这里直接进那条线的手机聊天 */
         if (it.module === "phone") {
           state.sessionId = it.sessionId;
           Store.setCurrentId(it.sessionId);
           renderAll();
+          try {
+            if (window.DL && DL.phone && DL.phone.openLine) { DL.phone.openLine(it.sessionId); return; }
+          } catch (e) { /* 没有这个出口就退回列表页 */ }
           const pb = $("#phoneBtn");
           if (pb) pb.click();
           return;

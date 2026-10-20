@@ -63,9 +63,12 @@
       return new Date(ms).toISOString().slice(0, 10);
     }
 
-    /* 前提：时间系统开着 + 没冻结 + 用户没关这个功能 */
+    /* 前提：时间系统开着 + 没冻结 + 用户没关这个功能。
+       群聊不记：思考是「一个人」按自己性格写的，群聊里没有唯一的「他」；
+       而且群聊的系统提示词不走 buildSystemText，记了也永远读不到 —— 白花钱。 */
     function enabled(s) {
-      if (!s || !s.time || typeof s.time.start !== "number") return false;
+      if (!s || s.isGroup) return false;
+      if (!s.time || typeof s.time.start !== "number") return false;
       if (frozenOf(s)) return false;
       if (state.settings && state.settings.thinkOn === false) return false;
       return true;
@@ -124,6 +127,19 @@
       return null;
     }
 
+    /* 只留最近 MAX_KEEP 天。修剪时**先丢已经压进 digest 的**（它们的信息已经在 digest 里），
+       实在不够再丢最老的 —— 别把还没压缩的碎念直接扔掉，那等于永久丢内容。 */
+    function trimDays(t) {
+      var over = t.days.length - MAX_KEEP;
+      if (over <= 0) return;
+      var cut = t.digestTo || "";
+      for (var i = 0; i < t.days.length && over > 0;) {
+        if (cut && t.days[i] && t.days[i].d && t.days[i].d <= cut) { t.days.splice(i, 1); over--; }
+        else i++;
+      }
+      if (over > 0) t.days.splice(0, over);
+    }
+
     /* 记一天的思考。同一天已有内容时**追加**（不同时机各写一句，本来就是碎念） */
     function add(s, d, text, src) {
       var t = of(s);
@@ -137,8 +153,7 @@
         if (src === "world") hit.src = "world";
       } else {
         t.days.push({ d: d, t: v, src: src || "mem" });
-        /* 只留最近 60 天，避免无限长 */
-        if (t.days.length > MAX_KEEP) t.days.splice(0, t.days.length - MAX_KEEP);
+        trimDays(t);
       }
       return true;
     }
@@ -236,14 +251,30 @@
       return true;
     }
 
-    /* 世界生成那批文本 → 抽出〖想法〗并按天入列。返回剥掉想法之后的剧情文本 */
+    /* 世界生成那批文本 → 抽出〖想法〗并按天入列。返回剥掉想法之后的剧情文本。
+       ⚠️ 这里必须**先整段抽**再按天归位：提示词要求想法「另起一行」，
+          逐行匹配时起头那行没有结束标记、结束那行没有起头标记，两边都对不上，
+          结果一条也抽不出来、标记还留在正文里（10-20 审查发现的坑）。 */
+    var THINK_RE = /[〖【\[]\s*想法\s*[〗】\]]?\s*([\s\S]*?)\s*[〖【\[]\s*\/\s*想法\s*[〗】\]]/g;
+
     function absorbWorld(sid, worldText) {
       var s = live(sid);
       if (!s) return String(worldText || "");
       var txt = String(worldText || "");
       if (!txt) return txt;
-      /* 段：以「序号 + 日期」起头，一天一段（和 app.js 的 worldParts 同一条规则） */
-      var lines = txt.split(/\r?\n/);
+
+      /* 1) 所有想法整段抽出（允许跨行、一行多个），正文里换成占位符，行结构不动 */
+      var marks = [];
+      var body = txt.replace(THINK_RE, function (all, inner) {
+        var v = String(inner || "").trim();
+        if (!v) return "";
+        marks.push(v);
+        return "[[TK" + (marks.length - 1) + "]]";
+      });
+      if (!marks.length) return txt;      /* 没有想法：正文一个字都不动 */
+
+      /* 2) 按「序号 + 日期」切天，占位符归到它所在的那天 */
+      var lines = body.split(/\r?\n/);
       var out = [];
       var curDate = "";
       var curThink = [];
@@ -273,16 +304,18 @@
             }
           }
         }
-        var mk = /[〖【\[]\s*想法\s*[〗】\]]?([\s\S]*?)[〖【\[]\s*\/\s*想法\s*[〗】\]]/.exec(ln);
-        if (mk) {
-          curThink.push(mk[1].trim());
-          ln = ln.replace(mk[0], "").replace(/\s+$/, "");
-        }
+        /* 占位符 → 归到当天（跨行的想法这时已经被拼回一段了） */
+        ln = ln.replace(/\[\[TK(\d+)\]\]/g, function (all, k) {
+          var v = marks[Number(k)];
+          if (v) curThink.push(v);
+          return "";
+        }).replace(/\s+$/, "");
+        if (!ln.trim()) continue;         /* 抽完只剩空行：不留空壳 */
         out.push(ln);
       }
       flushDay();
       if (any) save();
-      return out.join("\n");
+      return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
     }
 
     /* 7 个故事日压一次：碎的留结论、带过程的留关键 */
@@ -439,7 +472,8 @@
       if (!s2) return "";
       var t2 = of(s2);
       t2.digest = text;
-      if (t2.readText) t2.readText = text;
+      /* 纠偏也算「读过这一次」：否则刚改完可能正好跨过七天，改后的内容反而注入不进去 */
+      if (t2.readText) { t2.readText = text; t2.readAt = nowOf(s2); }
       save();
       return text;
     }
@@ -453,6 +487,8 @@
 
     window.Think = {
       enabled: enabled, of: of, add: add, genFor: genFor, digest: digest, tick: tick,
+      /* whoOf 必须挂出来：roleplay.js 的「思考对象」多选框靠它填候选（漏了就一直空白） */
+      whoOf: whoOf,
       readBlock: readBlock, readNow: readNow, correct: correct, listOf: listOf,
       absorbWorld: absorbWorld, dayStr: dayStr, nowOf: nowOf
     };
