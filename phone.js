@@ -1103,6 +1103,30 @@
     setTimeout(function () { document.addEventListener("click", closeBubbleMenu, true); }, 0);
   }
 
+  /* 朗读 / 搜索 / 复制（10-20：手机用户菜单要对齐主聊天那套） */
+  function speakPhoneMsg(m) {
+    try {
+      if (!Media || !Media.speak) { toast("朗读不可用", true); return; }
+      var t = msgText(m);
+      if (!t) { toast("这条没有可读的文字", true); return; }
+      Media.speak(t, voiceSet());
+    } catch (e) { toast("朗读失败", true); }
+  }
+  function searchPhoneText(m) {
+    var t = msgText(m);
+    if (!t) return;
+    try {
+      if (D.openSearchModal) D.openSearchModal();
+      var kw = $("#histKeyword");
+      if (kw) kw.value = String(t).slice(0, 40);
+      var mod = $("#histModule");
+      if (mod) mod.value = "phone";
+      if (D.fillHistScope) D.fillHistScope();
+      var sc = $("#histScope");
+      if (sc) sc.value = "line:" + ps.sid;
+    } catch (e) { /* ignore */ }
+  }
+
   /* 删之前问一句：手机消息删了两边一起没，得让人有反悔的机会 */
   function confirmDeletePhoneMsg(msg) {
     UI.confirmDialog("删除消息", "这条消息会一起从主聊天那边删掉，删了没法恢复。确定吗？").then(function (ok) {
@@ -1402,11 +1426,23 @@
       return { name: speakerLabel(m, ph), text: msgText(m) || previewOf(m) };
     }).filter(function (x) { return x.text; });
     if (!items.length) { toast("没有可转发的内容", true); return; }
+    /* 来源（10-20）：卡片上写清楚是从谁那儿转来的，AI 和人都好分辨 */
+    var srcName = "";
+    try {
+      var s0 = sessionById(ps.sid);
+      if (s0) {
+        if (s0.isGroup) srcName = s0.title || "群聊";
+        else {
+          var c0 = characterFor(s0);
+          srcName = (c0 && ((c0.fields && c0.fields.aiName) || c0.name)) || "";
+        }
+      }
+    } catch (e) { srcName = ""; }
     var n = 0;
     targets.forEach(function (t) {
       var line = lineOfTarget(t);
       if (!line) return;
-      pushMsg(line.id, { role: "user", kind: "fwdmerge", items: items, text: "" });
+      pushMsg(line.id, { role: "user", kind: "fwdmerge", items: items, text: "", from: srcName });
       n++;
     });
     exitPick();
@@ -1586,6 +1622,10 @@
       bindLongPress(bubble, function () {
         if (m.role !== "user") { enterPick(m); return; }
         showBubbleMenu(bubble, [
+          { label: "修改", fn: function () { editPhoneMsg(m); } },
+          { label: "朗读", fn: function () { speakPhoneMsg(m); } },
+          { label: "搜索", fn: function () { searchPhoneText(m); } },
+          { label: "复制", fn: function () { UI.copyText(msgText(m)).then(function (ok) { toast(ok ? "已复制" : "复制失败", !ok); }); } },
           { label: "撤回", fn: function () { recallPhoneMsg(m); } },
           { label: "多选", fn: function () { enterPick(m); } },
           {
@@ -1780,7 +1820,7 @@
     card.className = "ph-fwd-merge";
     var t = document.createElement("div");
     t.className = "ph-fwd-title";
-    t.textContent = "聊天记录";
+    t.textContent = m.from ? ("与「" + m.from + "」的聊天记录") : "聊天记录";
     card.appendChild(t);
     var sub = document.createElement("div");
     sub.className = "ph-fwd-sub";
