@@ -1378,6 +1378,27 @@
       }
     } catch (e) { /* 时间调整失败不影响发消息 */ }
 
+    /* 关系剖析（10-21）：设置里那个按钮撤了，改成在助手线里说一句触发。
+       命中的话：用户这句照常入库，然后直接把报告作为回复写进对话，不再走普通请求。 */
+    try {
+      const aid = (window.DL && window.DL.tinglanId) || "c_tinglan";
+      const isAsst = (s.characterId || "") === aid;
+      if (isAsst && /关系(剖析|分析)|剖析(一下)?关系|分析(一下)?关系|关系(怎么样|如何)/.test(String(text || ""))) {
+        const tl = Store.getSessions();
+        const k = tl.findIndex((x) => x.id === sid);
+        if (k >= 0) {
+          tl[k].messages = tl[k].messages || [];
+          tl[k].messages.push({ role: "user", content: text, variants: [text], vi: 0, ts: Date.now() });
+          tl[k].updatedAt = Date.now();
+          Store.saveSessions(tl);
+          renderMessages();
+        }
+        UI.toast("正在读这条线的记忆，写一份关系剖析…");
+        await window.DL.runAssistantSummary(sid);
+        return;
+      }
+    } catch (e) { /* 识别失败就当普通消息走 */ }
+
     const userMsg = {
       role: "user",
       content: text,

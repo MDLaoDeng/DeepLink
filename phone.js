@@ -805,6 +805,9 @@
     });
     function addRow(charId) {
       if (seen[charId]) return;
+      /* 听澜是内置助手，不进手机联系人：它不是能"打电话、发表情"的角色（10-21 用户口径，
+         以前漏了这条，助手直接变成手机里一个普通联系人）。 */
+      if (charId === ((window.DL && window.DL.tinglanId) || "c_tinglan")) return;
       seen[charId] = 1;
       var lines = [];
       for (var i = 0; i < sess.length; i++) { if (!sess[i].isGroup && (sess[i].characterId || "") === charId) lines.push(sess[i]); }
@@ -976,9 +979,15 @@
       });
     }
     var s = ps.sid ? sessionById(ps.sid) : null;
-    var mine = !!(s && (s.messages || []).some(function (m) { return m && m.role === "user"; }));
-    var show = !!(s && ps.view === "chat" && !mine && !state.busy);
-    var said = !!(s && (s.messages || []).some(function (m) { return m && m.role === "assistant"; }));
+    /* 判定要看「当前这一页」的消息：手机页看 phone.msgs，主聊天才看 messages。
+       以前只查 messages —— 手机里明明聊过，按钮还挂在气泡上方挡着（10-21 修）。
+       撤回的不算说过话。 */
+    var msgs = [];
+    if (s) msgs = (ps.view === "chat") ? ((phoneOf(s) || {}).msgs || []) : (s.messages || []);
+    var live = msgs.filter(function (m) { return m && m.kind !== "recalled"; });
+    var mine = live.some(function (m) { return m.role === "user"; });
+    var said = live.some(function (m) { return m.role === "assistant"; });
+    var show = !!(s && ps.view === "chat" && !mine && !ps.busy);
     var label = btn.querySelector("span:last-child");
     if (label) label.textContent = said ? "再说一次" : "生成第一句话";
     btn.hidden = !show;
@@ -988,6 +997,7 @@
     var box = $("#phoneMsgs");
     if (!box) return;
     renderAtBtn();                    /* 群聊才有 @（10-20） */
+    syncPhoneOpening();               /* 空消息时下面会提前 return，这里必须先定一次显隐 */
     if (ps.pick) renderPickBar();     /* 多选态保留操作条 */
     /* 重建 DOM 会把 scrollTop 打回顶上，之后再也判断不出「刚才贴不贴底」——
        所以先记一笔，供后面的 scrollPhoneBottom() 决定要不要滚。 */

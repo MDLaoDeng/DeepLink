@@ -1258,6 +1258,24 @@ body.tts-on .act-btn.read-act { display: inline-flex; }
 #settingsBody.sg[data-sg="storage"] .settings-section[data-group="storage"],
 #settingsBody.sg[data-sg="about"] .settings-section[data-group="about"] { display: block; }
 
+/* 设置子页的进出动画（10-21 用户要求）：进 = 右侧轻推 + 淡入，退 = 左移淡出。
+   只作用在「当前显示的那一节」上，不动整页，切组才不会有整屏闪动。 */
+@-webkit-keyframes sg-page-in { from { opacity: 0; -webkit-transform: translateX(16px); } to { opacity: 1; -webkit-transform: none; } }
+@keyframes sg-page-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@-webkit-keyframes sg-page-out { from { opacity: 1; -webkit-transform: none; } to { opacity: 0; -webkit-transform: translateX(-12px); } }
+@keyframes sg-page-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(-12px); } }
+#settingsBody.sg .settings-section {
+  -webkit-animation: sg-page-in .2s cubic-bezier(.22, .8, .24, 1) both;
+  animation: sg-page-in .2s cubic-bezier(.22, .8, .24, 1) both;
+}
+#settingsBody.sg.sg-out .settings-section {
+  -webkit-animation: sg-page-out .15s ease-in both;
+  animation: sg-page-out .15s ease-in both;
+}
+
+/* 「关于」不再弹层：内容直接平铺在设置页里（10-21），去掉弹层自带的内边距 */
+.about-inline .modal-body { padding: 0; }
+
 /* 底部给右下角悬浮的「连接自检」留位，别压住「保存」 */
 #settingsBody { padding-bottom: 74px; }
 .modal-sheet { position: relative; }
@@ -1290,9 +1308,16 @@ body.tts-on .act-btn.read-act { display: inline-flex; }
   background-color: var(--panel-2); border: 1px solid transparent; border-radius: 12px; }
 .reason-item > span { flex: 1; min-width: 0; font-size: 14px; color: var(--text); word-break: break-all; }
 .reason-item .r-del { flex: none; margin-left: 8px; }
-.reason-add { display: flex; align-items: center; }
-.reason-add > *:not(:last-child) { margin-right: 8px; }
-.reason-add input { flex: 1; min-width: 0; }
+/* 抽屉底部的「加一条」（10-21 改）：原来只有一个输入框 + 按钮横排，
+   用户看不出这是要他填东西。现在先给一句说明，再一行输入。 */
+.reason-add { display: block; }
+.reason-lead { margin: 0 0 8px; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+.reason-row { display: flex; align-items: center; }
+.reason-row input { flex: 1; min-width: 0; margin-right: 8px; }
+.reason-row .btn { flex: none; }
+.reason-row input { padding: 11px 12px; border-radius: 12px;
+  border: 1px solid var(--border); background-color: var(--panel-2); color: var(--text); font-size: 14px; }
+.reason-row input:focus { outline: none; border-color: var(--accent); }
 /* 「存储」区：一行总览 + 每类一条占比横条。
    （Chrome 83 的 flex 不能用 gap，元素间距一律走 margin） */
 .storage-sum { font-size: 14px; color: var(--text); margin-bottom: 10px; }
@@ -1720,11 +1745,15 @@ body.no-image .gen-img-wrap img { display: none !important; }
 
 /* ── 关于 ──────────────────────────────────────── */
 .about-hero { display: flex; flex-direction: column; align-items: center; padding: 6px 0 14px; }
-.about-hero-img { width: 108px; height: 108px; border-radius: 16px; object-fit: cover; box-shadow: var(--shadow); }
+.about-hero-img {
+  /* 圆角必须跟图标本身一致（新图标 32%）：原来写死 16px，
+     在圆角方块外面又套了个更方的框，看着像「方框里嵌了个圆角块」（10-21 修） */
+  width: 76px; height: 76px; border-radius: 24px; object-fit: cover;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .18);
+}
 .about-name {
-  margin-top: 10px; font-size: 17px; font-weight: 700; letter-spacing: .5px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
-  -webkit-background-clip: text; background-clip: text; color: transparent;
+  /* 原来是渐变手写体，跟整页字体不是一套（10-21 去掉） */
+  margin-top: 8px; font-size: 15px; font-weight: 600; letter-spacing: .2px; color: var(--text);
 }
 .about-menu { display: flex; flex-direction: column; }
 .about-menu > *:not(:last-child) { margin-bottom: 8px; }

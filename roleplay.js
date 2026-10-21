@@ -1231,7 +1231,6 @@
       setText("#sessionTimeLine", tlLine.join("；"));
       setChecked("#setSessionStatusQuant", (typeof s.statusQuant === "boolean") ? s.statusQuant : (state.settings.statusQuant !== false));
       renderDiaryList(s);
-      setText("#sessionSummaryOut", s.summaryText ? s.summaryText : "");
       setText("#sessionLineBadge", s.mainLine ? "主线" : "支线");
       renderBackupLine(s);
       renderSessionMemory();
@@ -1456,7 +1455,7 @@
     const el = $("#sessionDiaryList");
     if (!el) return;
     const list = diaryOf(s);
-    if (!list.length) { el.textContent = "还没有日记。"; return; }
+    if (!list.length) { el.textContent = "还没有记录。上面写一句，点「记下今天」就会列在这里。"; return; }
     el.innerHTML = "";
     list.slice(-3).reverse().forEach((d) => {
       const p = document.createElement("div");
@@ -1487,11 +1486,14 @@
     return Store.getSessions().find((x) => x.id === id) || null;
   }
 
-  /* ── 助手总结：关系剖析报告（只在用户点的时候跑一次）──── */
-  async function runAssistantSummary() {
-    const s = session();
+  /* ── 助手总结：关系剖析报告（10-21 起改为「在助手线里说一句」触发）────
+     设置里的按钮撤了，所以结果不再写进那个框，而是**作为一条助手消息落进对话**。 */
+  async function runAssistantSummary(sid, opts) {
+    const list0 = Store.getSessions();
+    const s = sid ? list0.filter(function (x) { return x.id === sid; })[0] : session();
     if (!s) return;
-    const out = $("#sessionSummaryOut");
+    /* 设置里那个输出框已经撤了（10-21）：统一走「报告变成一条助手消息」这条路 */
+    const out = null;
     if (!state.settings.apiKey) { UI.toast("请先在「设置」里填写 API Key", true); return; }
     if (out) out.textContent = "正在读这条线的记忆…";
     try {
@@ -1535,8 +1537,24 @@
       const text = (res && res.text) ? res.text : "（模型没有给出内容）";
       Store.updateSession(s.id, { summaryText: text });
       if (out) out.textContent = text;
+      /* 没有输出框（按钮已撤）→ 报告直接变成一条助手消息 */
+      if (!out && (!opts || opts.asMessage !== false)) {
+        const list = Store.getSessions();
+        const i = list.findIndex(function (x) { return x.id === s.id; });
+        if (i >= 0) {
+          list[i].messages = list[i].messages || [];
+          list[i].messages.push({ role: "assistant", content: text, ts: Date.now() });
+          list[i].updatedAt = Date.now();
+          Store.saveSessions(list);
+          try {
+            if (s.id === state.sessionId && window.DL && window.DL.renderAll) window.DL.renderAll();
+          } catch (e2) { /* ignore */ }
+        }
+      }
     } catch (e) {
-      if (out) out.textContent = "生成失败：" + (e && e.message ? e.message : e);
+      const msg = "生成失败：" + (e && e.message ? e.message : e);
+      if (out) out.textContent = msg;
+      else UI.toast(msg, true);
     }
   }
 

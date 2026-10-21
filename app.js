@@ -92,8 +92,13 @@
   let lastViewH = 0;
   function syncViewportHeight() {
     const vv = window.visualViewport;
-    const h = Math.round((vv && vv.height) ? vv.height : window.innerHeight);
+    let h = Math.round((vv && vv.height) ? vv.height : window.innerHeight);
     if (!(h > 0)) return;
+    /* 键盘收起后有些机型的 visualViewport.height 不还原，页面就永远矮一截
+       （手机页下面留一大片空白，就是这条）。没有输入焦点时不允许比 innerHeight 小太多。 */
+    const aeNow = document.activeElement;
+    const typingNow = !!(aeNow && (aeNow.tagName === "INPUT" || aeNow.tagName === "TEXTAREA"));
+    if (!typingNow && window.innerHeight > h + 40) h = Math.round(window.innerHeight);
     const shrank = lastViewH > 0 && h < lastViewH - 40; /* 缩小一大截 ≈ 键盘弹起 */
     /* 贴底判断必须在「改高度之前」做：改完 clientHeight 变小，
        同一位置会被算成「离底很远」，本来贴着底的人也会被误判成在翻历史。
@@ -940,7 +945,20 @@
     UI.toast("已把这条对话设为主线");
   }
 
-  function openAbout() {
+  /* 「关于」不再单开弹层（10-21 用户口径：没必要那么大阵仗）：
+     弹层的 body 整体**移动**进设置页「关于」那一节，空壳扔掉。
+     用移动不用克隆 —— 克隆会出现两份 #aboutVersion，#aboutVersion 的填充会写错地方。 */
+  function mountAboutInline() {
+    const host = document.getElementById("aboutInline");
+    const modal = document.getElementById("aboutModal");
+    if (!host || !modal) return;
+    const body = modal.querySelector(".modal-body");
+    if (body) host.appendChild(body);
+    if (modal.parentNode) modal.parentNode.removeChild(modal);
+    fillAbout();
+  }
+
+  function fillAbout() {
     const pv = packagedVersion();
     const cv = CONFIG.APP_VERSION || "";
     /* 只拿「版名」和前端版本比：打包版名（"4.5.2"）与版号（"452"）是两码事，
@@ -948,7 +966,6 @@
     const pn = packagedName();
     const same = !pn || !cv || pn === cv;
     setText("#aboutVersion", "v" + cv + (pv ? ("（打包 " + pv + (same ? "" : "（与代码版本不一致，可能忘了重新打包）") + "）") : ""));
-    UI.openModal("aboutModal");
   }
 
   /* 侧栏开关顺带同步 aria-hidden：它是 <aside aria-hidden="true"> 起步的，
@@ -998,8 +1015,10 @@
   }
 
   /* 启动自检：这些 id 缺任何一个都可能让界面部分失灵 */
-  const REQUIRED_IDS = "cameraModal camStage camVideo camCanvas camShutter camClose camAttach camRetake camTextInput camEdit charSplitAgain charSplitRoleOnly charReadyHint plusBtn plusCamera plusFile plusMenu headMenu headMenuSet worldView worldViewBack worldViewBody attachmentBar audioInput avatarInput chatTitle customSearchField deleteCancel deleteList deleteOk dialogCancel dialogOk dialogText dialogTitle passModal passTitle passNote passInput passConfirmWrap passConfirm passOk passCancel pickModal pickTitle pickList replayIntroBtn resetSettingsBtn dataUsageLine dropHint editCancel editSave editText editTitle effortSelect effortWrap fileInput histFrom histKeyword histKeywordField histResults histSearchBtn histModule histScope histTimeField histTo imgChip imgToggle input main menuBtn messages micBtn modeBtn modeSwitch modelBadge modelPanel modelPanelList modelSwitchBtn msgMenuList rowMenuModal rowMenuList rowMenuTitle newChatBtn openSearchBtn openSettingsBtn openThemesBtn saveSettingsBtn scrim searchModeSwitch searchToggle selectBar selectCancel selectCopy selectCount selectDelete selfTestBtn selfTestOut sendBtn sessionBtn sessionList sessionPromptReset sessionPromptSave msetAsr msetImg msetMain msetTts msetVision providerNowLine setAsrEnabled setAsrLang setAvatarAiClear setAvatarAiPick setAvatarAiPreview setAvatarUserClear setAvatarUserPick setAvatarUserPreview setCustomKey setCustomUrl setImgEnabled setImgSize setImgToImg setPhoneShareImg setMainCompat setInstances setSearchProvider setSessionAlias setSessionAvatarAiClear setSessionAvatarAiPick setSessionAvatarAiPreview setSessionAvatarUserClear setSessionAvatarUserPick setSessionAvatarUserPreview setSessionFollow setSessionPrompt setSessionTempVal setSessionTemperature setSessionTitle setSessionTopP setSessionTopPVal setSessionScene setSessionSceneEvery setSessionAge setSessionRelation setSessionShared setSessionCognition setSessionAutoBackup sessionRoleWrap sessionMemoryBox charMemoryBox setMemoryList sessionLineBadge sessionCognitionUpdate sessionRelationUpdate sessionReCompress sessionThinkBox sessionThinkRead sessionThinkDigest sessionThinkCorrect sessionThinkCorrectRun setSessionAutoFreeze setThinkAbout sessionCorrectInput sessionCorrectRun sessionBackupNow sessionRestoreBackup sessionSetMain setSystemPrompt setTavilyKey setTempVal setTemperature setTopP setTopPVal setTtsAuto setTtsEnabled setTtsVoice setVideoEnabled setVideoBaseUrl setVideoKey setVideoModel setVideoMode setVideoRatio setVideoSize setVideoDuration setVideoFps setVideoCreatePath setVideoStatusPath setVideoResultField setVideoPollMs setVideoPollMax setVideoTemplate setMusicEnabled setMusicBaseUrl setMusicKey setMusicModel setMusicDuration setMusicFormat setMusicWithLyrics setMusicCreatePath setMusicStatusPath setMusicResultField setMusicPollMs setMusicPollMax setMusicTemplate setVisionEnabled sidebar stopBtn tavilyField themeGrid thinkToggle toasts characterBtn charBar characterModal charList charNewBtn charForm charEmpty charTools charName charSave charFilterRule charFilterEvery charFilterAI charFilterNow charFilterState charSplitBtn charSplitHelp charSplitHint charSplitPanel charSplitInput charSplitRun charSplitCancel charSplitState openAboutBtn aboutModal aboutVersion openDataBtn dataModal exportScope exportCharWrap exportCharSel exportSessionWrap exportSessionSel exportKeys exportDownload exportCopy importText importFileBtn importTextBtn importFileInput importClipBtn exportShare clearCacheBtn setNoImage setNotifyTasks introModal introTree introDots introNext introPrev introSkip guideTree setImgToText setImgExpireTurns charUsageLine usageModal usageGlobal usageSessions usageChars openUsageBtn setRoleplayEnabled setMyName setMyPersona setMyAppearance setMyBackground setMyLikes setAssistantCompress setCompressModel setTokenWarn setBgKeep sessionMakeShortcut sessionRemoveShortcut charMakeShortcut charRemoveShortcut exportNoImg setLockEnabled setLockNote setLockChange setLockCode setLockState lockScreen lockPassBox lockInput lockOk lockForgot lockErr lockRecoverBox recInput recOk recAi recBack recErr recNote lockQuizBox quizNote quizQ quizA quizOk quizBack quizErr lockResetBox resetNote resetPass1 resetPass2 resetOk resetBack resetErr lockDeadBox deadNote deadOk codeScreen codeText codeCopy codeOk setDailyUpdate setWorldGen setStatusQuant setAutoMessage setAutoMessagePhone setAdoptFormat setBgPreview setBgPick setBgAi setBgClear bgInput setBgBlur setBgBlurVal setBgBright setBgBrightVal setUsagePriceMode setUsagePriceHit setUsagePriceIn setUsagePriceOut setPhoneWarn resetUsageBtn usageCats setSessionFormat setSessionTtsVoice setSessionBgPreview setSessionBgPick setSessionBgAi setSessionBgClear setSessionBgFollow chatBg charImportBtn charImportInput phoneBtn phoneTopBtn phoneModal phoneClock phoneListView phoneCloseBtn phoneList phoneChatView phoneBack phoneTitle phoneMsgs phoneActCall phoneActTransfer phoneActLoc phoneActImg phoneActVoice phoneActVoiceLabel phoneMore phoneSetBtn phoneInput phoneSend phoneSheet phoneSheetTitle phoneSheetBody phoneSheetCancel phoneSheetOk phoneCall phoneCallAvatar phoneCallName phoneCallState phoneCallTimer phoneCallSaid phoneCallTalk phoneCallTalkLabel phoneCallHang phoneImgInput phoneMomentsView phoneMoments phoneMomentsBack phoneMomentsPost phoneMomentsClose phoneMomentImg newGroupBtn groupModal reminderDot reminderModal reminderText reminderAsTime reminderTimeField reminderAt reminderAddBtn reminderList groupName groupMembers groupImport groupCancel groupOk setSessionStatusQuant setSessionDiary sessionDiarySave sessionDiaryClear sessionDiaryList sessionSummaryRun sessionSummaryOut worldModal worldText worldSkip worldRegen worldAdopt setAutoMessageMin setLive2dEnabled setLive2dModel live2dUploadBtn live2dFolderInput live2dUploadState live2dTestBtn live2dTestOut phoneActVideo phoneActAvatar phoneCallCam phoneCallCamLabel phoneCallStage phoneCallCanvas phoneCallFallback charPresetBtn presetModal presetList setSplashAnim setSplashText setSplashSub setSplashImage setSplashAvatar phoneTypingBar quickBtn quickPanel qpList qpRefresh qpClose qpCount sessionClockText sessionClockLive setSessionAutoMsg setSessionTime setSessionTimeSync sessionTimeApply sessionTimeNow sessionTimeClear sessionTimeLine setPhoneBgPreview setPhoneBgPick setPhoneBgClear setPhoneBgBlur setPhoneBgBlurVal setPhoneBgBright setPhoneBgBrightVal charImportAI charImportUser groupCogSection setPeerCogOn peerCogList peerCogUpdate peerCogState groupSyncBtn groupSyncState updateCheckBtn updateState settingsHome settingsBack settingsTitle settingsBody personaPick personaCount personaFields personaNewBtn personaDelBtn personaApplyBtn personaSplitInput personaSplitRun personaSplitAgain personaSplitState sideTabs sidePaneAsst sidePaneRole sidePanePhone sessionListAsst phoneCharList phoneAddSheet phoneAddBtn phoneAddCancel phAddMoment phAddContact freezeAskModal freezeAskOn freezeAskNever freezeAskStay freezeAskGo reasonDrawer reasonMask reasonClose reasonList reasonNewInput reasonAddBtn openReasonBtn setSessionReason setReasonLock sessionReasonExit charUpgradeRow charUpgradeBtn upgradeModal upgradeMeet upgradeCancel upgradeOk".split(" ");
-  function missingIds() { return REQUIRED_IDS.filter((id) => !document.getElementById(id)); }
+  const REQUIRED_IDS = "cameraModal camStage camVideo camCanvas camShutter camClose camAttach camRetake camTextInput camEdit charSplitAgain charSplitRoleOnly charReadyHint plusBtn plusCamera plusFile plusMenu headMenu headMenuSet worldView worldViewBack worldViewBody attachmentBar audioInput avatarInput chatTitle customSearchField deleteCancel deleteList deleteOk dialogCancel dialogOk dialogText dialogTitle passModal passTitle passNote passInput passConfirmWrap passConfirm passOk passCancel pickModal pickTitle pickList replayIntroBtn resetSettingsBtn dataUsageLine dropHint editCancel editSave editText editTitle effortSelect effortWrap fileInput histFrom histKeyword histKeywordField histResults histSearchBtn histModule histScope histTimeField histTo imgChip imgToggle input main menuBtn messages micBtn modeBtn modeSwitch modelBadge modelPanel modelPanelList modelSwitchBtn msgMenuList rowMenuModal rowMenuList rowMenuTitle newChatBtn openSearchBtn openSettingsBtn openThemesBtn saveSettingsBtn scrim searchModeSwitch searchToggle selectBar selectCancel selectCopy selectCount selectDelete selfTestBtn selfTestOut sendBtn sessionBtn sessionList sessionPromptReset sessionPromptSave msetAsr msetImg msetMain msetTts msetVision providerNowLine setAsrEnabled setAsrLang setAvatarAiClear setAvatarAiPick setAvatarAiPreview setAvatarUserClear setAvatarUserPick setAvatarUserPreview setCustomKey setCustomUrl setImgEnabled setImgSize setImgToImg setPhoneShareImg setMainCompat setInstances setSearchProvider setSessionAlias setSessionAvatarAiClear setSessionAvatarAiPick setSessionAvatarAiPreview setSessionAvatarUserClear setSessionAvatarUserPick setSessionAvatarUserPreview setSessionFollow setSessionPrompt setSessionTempVal setSessionTemperature setSessionTitle setSessionTopP setSessionTopPVal setSessionScene setSessionSceneEvery setSessionAge setSessionRelation setSessionShared setSessionCognition setSessionAutoBackup sessionRoleWrap sessionMemoryBox charMemoryBox setMemoryList sessionLineBadge sessionCognitionUpdate sessionRelationUpdate sessionReCompress sessionThinkBox sessionThinkRead sessionThinkDigest sessionThinkCorrect sessionThinkCorrectRun setSessionAutoFreeze setThinkAbout sessionCorrectInput sessionCorrectRun sessionBackupNow sessionRestoreBackup sessionSetMain setSystemPrompt setTavilyKey setTempVal setTemperature setTopP setTopPVal setTtsAuto setTtsEnabled setTtsVoice setVideoEnabled setVideoBaseUrl setVideoKey setVideoModel setVideoMode setVideoRatio setVideoSize setVideoDuration setVideoFps setVideoCreatePath setVideoStatusPath setVideoResultField setVideoPollMs setVideoPollMax setVideoTemplate setMusicEnabled setMusicBaseUrl setMusicKey setMusicModel setMusicDuration setMusicFormat setMusicWithLyrics setMusicCreatePath setMusicStatusPath setMusicResultField setMusicPollMs setMusicPollMax setMusicTemplate setVisionEnabled sidebar stopBtn tavilyField themeGrid thinkToggle toasts characterBtn charBar characterModal charList charNewBtn charForm charEmpty charTools charName charSave charFilterRule charFilterEvery charFilterAI charFilterNow charFilterState charSplitBtn charSplitHelp charSplitHint charSplitPanel charSplitInput charSplitRun charSplitCancel charSplitState  aboutVersion openDataBtn dataModal exportScope exportCharWrap exportCharSel exportSessionWrap exportSessionSel exportKeys exportDownload exportCopy importText importFileBtn importTextBtn importFileInput importClipBtn exportShare clearCacheBtn setNoImage setNotifyTasks introModal introTree introDots introNext introPrev introSkip guideTree setImgToText setImgExpireTurns charUsageLine usageModal usageGlobal usageSessions usageChars openUsageBtn setRoleplayEnabled setMyName setMyPersona setMyAppearance setMyBackground setMyLikes setAssistantCompress setCompressModel setTokenWarn setBgKeep sessionMakeShortcut sessionRemoveShortcut charMakeShortcut charRemoveShortcut exportNoImg setLockEnabled setLockNote setLockChange setLockCode setLockState lockScreen lockPassBox lockInput lockOk lockForgot lockErr lockRecoverBox recInput recOk recAi recBack recErr recNote lockQuizBox quizNote quizQ quizA quizOk quizBack quizErr lockResetBox resetNote resetPass1 resetPass2 resetOk resetBack resetErr lockDeadBox deadNote deadOk codeScreen codeText codeCopy codeOk setDailyUpdate setWorldGen setStatusQuant setAutoMessage setAutoMessagePhone setAdoptFormat setBgPreview setBgPick setBgAi setBgClear bgInput setBgBlur setBgBlurVal setBgBright setBgBrightVal setUsagePriceMode setUsagePriceHit setUsagePriceIn setUsagePriceOut setPhoneWarn resetUsageBtn usageCats setSessionFormat setSessionTtsVoice setSessionBgPreview setSessionBgPick setSessionBgAi setSessionBgClear setSessionBgFollow chatBg charImportBtn charImportInput phoneBtn phoneTopBtn phoneModal phoneClock phoneListView phoneCloseBtn phoneList phoneChatView phoneBack phoneTitle phoneMsgs phoneActCall phoneActTransfer phoneActLoc phoneActImg phoneActVoice phoneActVoiceLabel phoneMore phoneSetBtn phoneInput phoneSend phoneSheet phoneSheetTitle phoneSheetBody phoneSheetCancel phoneSheetOk phoneCall phoneCallAvatar phoneCallName phoneCallState phoneCallTimer phoneCallSaid phoneCallTalk phoneCallTalkLabel phoneCallHang phoneImgInput phoneMomentsView phoneMoments phoneMomentsBack phoneMomentsPost phoneMomentsClose phoneMomentImg newGroupBtn groupModal reminderDot reminderModal reminderText reminderAsTime reminderTimeField reminderAt reminderAddBtn reminderList groupName groupMembers groupImport groupCancel groupOk setSessionStatusQuant setSessionDiary sessionDiarySave sessionDiaryClear sessionDiaryList worldModal worldText worldSkip worldRegen worldAdopt setAutoMessageMin setLive2dEnabled setLive2dModel live2dUploadBtn live2dFolderInput live2dUploadState live2dTestBtn live2dTestOut phoneActVideo phoneActAvatar phoneCallCam phoneCallCamLabel phoneCallStage phoneCallCanvas phoneCallFallback charPresetBtn presetModal presetList setSplashAnim setSplashText setSplashSub setSplashImage setSplashAvatar phoneTypingBar quickBtn quickPanel qpList qpRefresh qpClose qpCount sessionClockText sessionClockLive setSessionAutoMsg setSessionTime setSessionTimeSync sessionTimeApply sessionTimeNow sessionTimeClear sessionTimeLine setPhoneBgPreview setPhoneBgPick setPhoneBgClear setPhoneBgBlur setPhoneBgBlurVal setPhoneBgBright setPhoneBgBrightVal charImportAI charImportUser groupCogSection setPeerCogOn peerCogList peerCogUpdate peerCogState groupSyncBtn groupSyncState updateCheckBtn updateState settingsHome settingsBack settingsTitle settingsBody personaPick personaCount personaFields personaNewBtn personaDelBtn personaApplyBtn personaSplitInput personaSplitRun personaSplitAgain personaSplitState sideTabs sidePaneAsst sidePaneRole sidePanePhone sessionListAsst phoneCharList phoneAddSheet phoneAddBtn phoneAddCancel phAddMoment phAddContact freezeAskModal freezeAskOn freezeAskNever freezeAskStay freezeAskGo reasonDrawer reasonMask reasonClose reasonList reasonNewInput reasonAddBtn openReasonBtn setSessionReason setReasonLock sessionReasonExit charUpgradeRow charUpgradeBtn upgradeModal upgradeMeet upgradeCancel upgradeOk".split(" ");
+  /* filter(Boolean)：上面这串用空格分隔，手工删条目时容易留下连续空格 →
+     会多出一个空字符串条目，自检永远报「缺一个元素」。这里直接剔掉。 */
+  function missingIds() { return REQUIRED_IDS.filter((id) => !!id && !document.getElementById(id)); }
 
   /* ── 空值安全的表单读写（元素缺失时不再抛异常）──── */
   const $v = (sel) => { const el = $(sel); return el ? String(el.value == null ? "" : el.value) : ""; };
@@ -1060,8 +1079,15 @@
 
   function bgUrl(val) {
     if (!val) return "";
-    if (String(val).slice(0, 5) === "data:") return String(val);
-    try { return Store.imageURL({ imgRef: val }) || ""; } catch (e) { return ""; }
+    const v = String(val);
+    if (v.slice(0, 5) === "data:") return v;
+    /* 随包资源（avatars/tinglan.png 这类相对路径）不是外置文件名，当 imgRef 去查文件必然查不到，
+       以前直接返回空串 → 预设角色和听澜的头像全空。解析不出来就原样当 URL 用（浏览器能直接加载）。 */
+    try {
+      const u = Store.imageURL({ imgRef: v });
+      if (u) return u;
+    } catch (e) { /* 落到下面的回退 */ }
+    return v;
   }
   /* 头像外置（10-19）：跟背景同一套 —— 有桥就存文件，读的时候统一解析。
      头像以前是整段 base64 塞进 settings，六处头像字段叠起来能把 localStorage 顶到配额。 */
@@ -1513,6 +1539,13 @@
       /* 1.5) 手机层（.phone-layer，同样不在 .modal 里）：通话中先挂断，其次聊天 → 列表 → 关闭 */
       const ph = window.DL && window.DL.phone;
       if (ph && typeof ph.isOpen === "function" && ph.isOpen()) { ph.close(); return; }
+      /* 1.8) 设置子页：返回键先退回设置首页，别一脚踩到底（10-21 用户要求）。
+             设置页本身是整页浮层，不插这条会被下面「关掉当前弹窗」直接关回主界面。 */
+      const sbody = document.getElementById("settingsBody");
+      if (sbody && sbody.classList.contains("sg")) {
+        const backBtn = document.getElementById("settingsBack");
+        if (backBtn) { backBtn.click(); return; }
+      }
       /* 2) 任意打开着的弹窗 */
       const mid = topOpenModalId();
       if (mid) { UI.closeModal(mid); return; }
@@ -2212,8 +2245,10 @@
       try {
         await L2.attach(cv, url);
         const ch = (L2.channel && L2.channel()) || "";
-        if (out) out.textContent = (envInfo ? envInfo + "\n\n" : "") + "成功：模型已渲染（" + url + "）" +
-          (ch ? "，取数通道：" + ch : "") + "。若这里看得见人物，手机视频通话就能用。";
+        if (out) out.textContent = (envInfo ? envInfo + "\n\n" : "") +
+          "已加载模型（" + url + "）" + (ch ? "，取数通道：" + ch : "") +
+          "\n\n注意：「加载成功」只说明 model3.json、moc、贴图都读到了，**不代表画得对**——以预览区为准。\n" +
+          "如果看到的是色块、被拉伸的碎片，说明这套运行时在这台机器的 WebGL 上渲染错乱，视频通话会自动退回首帧静态图（不影响聊天）。";
       } catch (e) {
         const ch = (L2.channel && L2.channel()) || "";
         if (out) out.textContent = (envInfo ? envInfo + "\n\n" : "") + "失败：" + (e && e.message ? e.message : e) +
@@ -2434,7 +2469,6 @@
       renderAll();
     });
     on("#openUsageBtn", "click", () => { renderUsageStats(); UI.closeModal("settingsModal"); UI.openModal("usageModal"); });
-    on("#openAboutBtn", "click", openAbout);
     on("#updateCheckBtn", "click", () => { checkUpdate(true).catch(() => { /* 已在界面上报过 */ }); });
     on("#characterBtn", "click", openCharacterModal);
     on("#charNewBtn", "click", newCharacter);
@@ -2469,7 +2503,7 @@
       btn.addEventListener("click", () => resetGroup(btn.getAttribute("data-reset")));
     });
     on("#resetSettingsBtn", "click", resetAllSettings);
-    on("#replayIntroBtn", "click", () => { UI.closeModal("aboutModal"); openIntro(); });
+    on("#replayIntroBtn", "click", () => { openIntro(); });
     on("#importClipBtn", "click", () => {
       const txt = Store.callBridge("获取粘贴内容");
       if (!txt) { UI.toast("这里拿不到剪贴板，请手动粘贴", true); return; }
@@ -2540,7 +2574,6 @@
     on("#sessionCorrectRun", "click", runMemoryCorrect);
     on("#sessionDiarySave", "click", sessionDiarySave);
     on("#sessionDiaryClear", "click", sessionDiaryClear);
-    on("#sessionSummaryRun", "click", runAssistantSummary);
     on("#worldSkip", "click", worldSkip);
     on("#worldRegen", "click", worldRegen);
     on("#worldAdopt", "click", worldAdopt);
@@ -2856,6 +2889,7 @@
       window.__dlReady = true;
       loadWorkspace();
       bootMark("读工作区");
+      mountAboutInline();          /* 「关于」内容搬进设置页（弹层已删，10-21） */
       /* 版本变了（更新过）→ 清一次页面缓存，避免还在用旧页面。
          注意：这一步是「清完就重载」的（见 clearCacheIfVersionChanged 的注释），
          返回 true 说明马上要 reload —— 后面的渲染没必要再跑，直接收工。 */
@@ -3014,6 +3048,8 @@
     applyPhoneBackground: applyPhoneBackground,
     /* 头像解析：存的是文件路径就换成可用 URL（10-19） */
     avatarUrl: bgUrl,
+    /* 内置助手的固定 id（手机页要把它排除在联系人之外） */
+    tinglanId: TINGLAN_ID,
     applyChatBackground: applyChatBackground,
     /* 世界生成的「触发判定」：init 里 1500ms 会自动调一次，这里也挂出来以便测试确定性触发 */
     openWorldCheck: openWorldCheck,

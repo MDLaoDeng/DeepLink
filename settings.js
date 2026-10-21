@@ -2823,7 +2823,21 @@
   function sgHome() {
     var body = document.getElementById("settingsBody");
     if (!body) return;
+    /* 退出子页也走一小段（10-21 用户要求：进出都要有动画，不能啪一下） */
+    if (body.classList.contains("sg") && !body.classList.contains("sg-out")) {
+      body.classList.add("sg-out");
+      setTimeout(function () {
+        body.classList.remove("sg-out");
+        body.classList.remove("sg");
+        body.removeAttribute("data-sg");
+        setText("#settingsTitle", "设置");
+        setHidden("#settingsBack", false);
+        body.scrollTop = 0;
+      }, 150);
+      return;
+    }
     body.classList.remove("sg");
+    body.classList.remove("sg-out");
     body.removeAttribute("data-sg");
     setText("#settingsTitle", "设置");
     setHidden("#settingsBack", false);

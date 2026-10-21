@@ -722,9 +722,10 @@
         <p class="hint">统计口径：键值类数据（对话 / 角色 / 设置…）按字符估算，1 字符≈2 字节；图片按原生读到的真实文件大小；只算 App 自己写入的数据，不含安装包本体与系统缓存。</p>
       </div>
 
-      <div class="settings-section">
-        <h3>关于</h3>
-        <div class="row-actions"><button id="openAboutBtn" class="btn" type="button"><span data-icon="information-outline"></span>关于该应用</button></div>
+      <div class="settings-section" data-group="about">
+        <!-- 「关于」不再弹层：内容由 app.js 的 mountAboutInline 从原弹层整体搬进来（10-21 用户口径）。
+             不写 h3，分组靠 data-group —— 上面就是 hero（图标 + 名字），再加个标题就重复了。 -->
+        <div id="aboutInline" class="about-inline"></div>
       </div>
 
       <div class="row-actions" id="settingsFoot">
@@ -844,13 +845,7 @@
           <button id="sessionDiaryClear" class="btn ghost" type="button">清空日记</button>
         </div>
         <div id="sessionDiaryList" class="hint"></div>
-
-        <div class="mem-title">助手总结</div>
-        <p class="hint">让助手读一遍这条线的记忆，写一份关系剖析。只在你要的时候才跑，不会自动花钱。</p>
-        <div class="char-actions">
-          <button id="sessionSummaryRun" class="btn ghost" type="button">生成关系剖析</button>
-        </div>
-        <div id="sessionSummaryOut" class="summary-box"></div>
+        <p class="hint">要关系剖析不在这里：去侧栏「助手」跟听澜说一句要一份就行（10-21 用户口径，按钮已撤）。</p>
       </div>
       <div class="settings-section">
         <h3>头像</h3>
@@ -1612,11 +1607,14 @@
       <h2>默认离线原因</h2>
       <button id="reasonClose" class="icon-btn" type="button" aria-label="关闭"><span data-icon="close"></span></button>
     </div>
-    <p class="hint">你离开应用时挑一条，世界生成 / 角色主动找你就会按它来写。可无限添加，会话里的那份只能从这里选。</p>
+    <p class="hint">你离开应用时挑一条，世界生成 / 角色主动找你就会按它来写。会话里那份只能从这里选。</p>
     <div id="reasonList" class="reason-list"></div>
     <div class="reason-add">
-      <input id="reasonNewInput" type="text" placeholder="如：去上班了 / 睡着了 / 手机没电">
-      <button id="reasonAddBtn" class="btn primary" type="button">添加</button>
+      <p class="reason-lead">在下面填一条你平时离开的理由，填完点「添加」。比如「去写作业了」，以后离开时就能直接选它。</p>
+      <div class="reason-row">
+        <input id="reasonNewInput" type="text" placeholder="例：去写作业了 / 睡着了 / 在补课">
+        <button id="reasonAddBtn" class="btn primary" type="button">添加</button>
+      </div>
     </div>
   </div>
 </div>
