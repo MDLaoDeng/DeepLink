@@ -2247,6 +2247,7 @@
         const ch = (L2.channel && L2.channel()) || "";
         if (out) out.textContent = (envInfo ? envInfo + "\n\n" : "") +
           "已加载模型（" + url + "）" + (ch ? "，取数通道：" + ch : "") +
+          "\n渲染状态：" + ((L2.diag && L2.diag()) || "（没有诊断信息）") +
           "\n\n注意：「加载成功」只说明 model3.json、moc、贴图都读到了，**不代表画得对**——以预览区为准。\n" +
           "如果看到的是色块、被拉伸的碎片，说明这套运行时在这台机器的 WebGL 上渲染错乱，视频通话会自动退回首帧静态图（不影响聊天）。";
       } catch (e) {

@@ -266,12 +266,13 @@
       var t = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, t);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      /* 不用 mipmap：部分安卓驱动在 generateMipmap 之后采样会出错误颜色（整块色斑），
+         而且 mipmap 对 2D 立绘没有收益（总是 1:1 附近采样）。10-21 修。 */
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-      gl.generateMipmap(gl.TEXTURE_2D);
       return t;
     }
 
@@ -393,8 +394,10 @@
            加 { stencil: true, depth: true } 之后画面**一模一样**（同一模型前后截图字节级相同），
            反而更容易把渲染进程卡住（视频通话回落静态兜底）。所以维持不带 stencil。
            若真机上人物仍然「烂成一锅粥」，再从这里入手（换 OpenGL/WebGL 后端或换库）。 */
-        gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: true })
-          || canvas.getContext("experimental-webgl");
+        /* 必须带 stencil：Cubism 2.1 的遮罩（头发压脸、眼睛遮挡）全靠 stencil，
+           没有的话遮罩区会被画成实心色块 —— 就是"烂成一锅粥"那个样子。10-21 补。 */
+        var glOpts = { alpha: true, premultipliedAlpha: true, stencil: true, depth: true, antialias: false, preserveDrawingBuffer: false };
+        gl = canvas.getContext("webgl", glOpts) || canvas.getContext("experimental-webgl", glOpts);
       } catch (e) { gl = null; }
       if (!gl) return Promise.reject(new Error("WebGL 不可用"));
 
@@ -473,6 +476,13 @@
                所以必须在这些参数设完之后、model.update() 之前跑。 */
             if (cur.physics) cur.physics.update(model);
             if (typeof model.setMatrix === "function") model.setMatrix(matrix);
+            /* 每帧显式设 viewport 并清屏：canvas 尺寸变了（视频通话会改）而 viewport 不会自动跟着变，
+               表现就是画面被按旧尺寸裁成一块一块的。10-21 补。 */
+            try {
+              gl.viewport(0, 0, canvas.width, canvas.height);
+              gl.clearColor(0, 0, 0, 0);
+              gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            } catch (e2) { /* ignore */ }
             model.update();
             model.draw();
           } catch (e) {
@@ -533,6 +543,22 @@
       if (dur > 0 && c.mt >= dur) c.mv = null;
     }
     /* 点一下画面：插播一段 tap_body 动作（没有就在返回 false，调用方不用管） */
+    /* 渲染诊断（10-21）：真机上"色块"分不清是 stencil 没要到、viewport 没跟上、
+       还是驱动采样出错。把这几项打出来，一趟真机就能定性。 */
+    function diag() {
+      if (!cur || !cur.gl) return "（当前没有在渲染的模型）";
+      var g = cur.gl;
+      var out = [];
+      try { out.push("画布 " + g.drawingBufferWidth + "×" + g.drawingBufferHeight); } catch (e) { /* ignore */ }
+      try { out.push("stencil " + g.getParameter(g.STENCIL_BITS) + " 位"); } catch (e) { /* ignore */ }
+      try { out.push("depth " + g.getParameter(g.DEPTH_BITS) + " 位"); } catch (e) { /* ignore */ }
+      try {
+        var er = g.getError();
+        out.push("GL 错误 " + (er === 0 ? "无" : er));
+      } catch (e) { /* ignore */ }
+      return out.join(" · ");
+    }
+
     function tap() {
       var c = cur;
       if (!c || c.dead || !c.motions || !c.motions.tap || !c.motions.tap.length) return false;
@@ -546,7 +572,7 @@
        不必真的建出 WebGL 上下文。 */
     D.live2d = {
       capable: capable, attach: attach, detach: detach, defaultModel: DEFAULT_MODEL,
-      tap: tap, createPhysics: createPhysics, probe: probe,
+      tap: tap, createPhysics: createPhysics, probe: probe, diag: diag,
       readBytes: readBytes,
       channel: function () { return lastChannel; }
     };

@@ -987,12 +987,10 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
   background-color: var(--scrim);
   opacity: 0; pointer-events: none; transition: opacity .3s ease;
 }
-/* 蒙层轻模糊：透出底下的内容但不抢戏。只给「浮窗式」弹窗加 ——
-   设置/用量/导入导出是整页实色底（var(--bg)），模糊它纯属白烧 GPU。 */
-.modal:not(#settingsModal):not(#usageModal):not(#dataModal) {
-  -webkit-backdrop-filter: blur(3px);
-  backdrop-filter: blur(3px);
-}
+/* 蒙层不再做背景模糊（10-21：真机反馈"页面有点卡"）。
+   原因：backdrop-filter 每帧都要把下层重新模糊一遍，安卓 WebView 上打开 / 关闭
+   任何浮窗弹窗都会掉帧，而 3px 的模糊肉眼几乎看不出收益。
+   改用纯半透明遮罩（--scrim 本来就够深），省掉一整层 GPU 合成。 */
 .modal.show { opacity: 1; pointer-events: auto; }
 /* 二级浮层（从别的界面里再弹出来的东西）统一抬到 400。
    背景：.modal 基础层级是 60，而这几个界面已经比 60 高了 ——
@@ -1312,12 +1310,33 @@ body.tts-on .act-btn.read-act { display: inline-flex; }
    用户看不出这是要他填东西。现在先给一句说明，再一行输入。 */
 .reason-add { display: block; }
 .reason-lead { margin: 0 0 8px; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
-.reason-row { display: flex; align-items: center; }
-.reason-row input { flex: 1; min-width: 0; margin-right: 8px; }
-.reason-row .btn { flex: none; }
-.reason-row input { padding: 11px 12px; border-radius: 12px;
-  border: 1px solid var(--border); background-color: var(--panel-2); color: var(--text); font-size: 14px; }
-.reason-row input:focus { outline: none; border-color: var(--accent); }
+/* 自研输入条（10-21）：不用原生 input 的外观，做成一整个胶囊 ——
+   左边文字、右边按钮，聚焦时整个胶囊描边变色，不再是「方框 + 方块按钮」。 */
+.reason-composer {
+  display: flex; align-items: center;
+  padding: 5px 5px 5px 15px;
+  background-color: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  transition: border-color .18s ease;
+}
+.reason-composer:focus-within { border-color: var(--accent); }
+.reason-composer input {
+  flex: 1; min-width: 0;
+  padding: 9px 0; border: 0; outline: none; border-radius: 0;
+  background-color: transparent; color: var(--text);
+  font-size: 14px; line-height: 1.4;
+  -webkit-appearance: none; appearance: none;
+  box-shadow: none;
+}
+.reason-composer input::placeholder { color: var(--text-mute); }
+.reason-add-btn {
+  flex: none; margin-left: 6px;
+  padding: 8px 15px; border: 0; border-radius: 18px;
+  background-color: var(--accent); color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.reason-add-btn:active { opacity: .82; }
 /* 「存储」区：一行总览 + 每类一条占比横条。
    （Chrome 83 的 flex 不能用 gap，元素间距一律走 margin） */
 .storage-sum { font-size: 14px; color: var(--text); margin-bottom: 10px; }
