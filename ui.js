@@ -134,14 +134,35 @@
   }
 
   /* 把文本里的表情字符 / [[s:id]] 换成图片。只在气泡里跑，pre、code 里跳过。 */
+  /* ── 表情正则缓存（OPT-07）──────────────────────────────────
+     以前每条气泡都重编译一遍：48 个字符交替 + 逐个转义 + new RegExp。
+     一屏 20 条气泡就是 20 次编译，纯浪费。按「表情字符清单」做 key 缓存，
+     表情包变了才重建。re 带 g 标志，但只用于 String.replace（replace 结束会把
+     lastIndex 归零），复用是安全的。 */
+  var emojiCache = { key: "", re: null, charMap: null, alts: null };
+
+  function emojiCompiled(pack) {
+    const charMap = {};
+    const alts = [];
+    pack.forEach((it) => { if (it.e && it.src) { charMap[it.e] = it; alts.push(it.e); } });
+    const key = alts.join("|");
+    if (emojiCache.key === key && emojiCache.re) return emojiCache;
+    /* 长的放前面，避免短字符先匹配掉半个组合 */
+    alts.sort((x, y) => y.length - x.length);
+    const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const src = "\\[\\[s:[a-z0-9]+\\]\\]|\\[表情:[^\\]]+\\]" + (alts.length ? "|" + alts.map(esc).join("|") : "");
+    emojiCache = { key: key, re: new RegExp("(" + src + ")", "g"), charMap: charMap, alts: alts };
+    return emojiCache;
+  }
+
   function stickerize(root) {
     if (!root) return;
     const pack = (window.CONFIG && window.CONFIG.EMOJI_PACK) || [];
     const stickers = (window.DL && window.DL.state && window.DL.state.settings && window.DL.state.settings.stickers) || [];
     if (!pack.length && !stickers.length) return;
-    const charMap = {};
-    const alts = [];
-    pack.forEach((it) => { if (it.e && it.src) { charMap[it.e] = it; alts.push(it.e); } });
+    const compiled = emojiCompiled(pack);
+    const charMap = compiled.charMap;
+    const alts = compiled.alts;
     if (!alts.length && !stickers.length) return;
     const stickMap = {};
     stickers.forEach((st) => { if (st && st.id) stickMap[st.id] = st; });
@@ -151,11 +172,8 @@
       if (!x || x.slice(0, 5) === "data:") return x;
       try { return (window.DL && window.DL.avatarUrl && window.DL.avatarUrl(x)) || ""; } catch (e) { return ""; }
     };
-    /* 长的放前面，避免短字符先匹配掉半个组合 */
-    alts.sort((x, y) => y.length - x.length);
-    const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const src = "\\[\\[s:[a-z0-9]+\\]\\]|\\[表情:[^\\]]+\\]" + (alts.length ? "|" + alts.map(esc).join("|") : "");
-    const re = new RegExp("(" + src + ")", "g");
+    const re = compiled.re;
+    re.lastIndex = 0;      /* 复用同一个正则，保险起见每次从头开始 */
 
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
     const jobs = [];
@@ -281,7 +299,12 @@
       closeActMenus();
       if (!open) bar.classList.add("open");
     });
-    const list = msg.role === "user" ? ACTIONS.user : ACTIONS.assistant;
+    /* 开场白那条：只留「修改 / 朗读 / 复制」。
+       它是角色卡带来的第一句，重说、回溯、删除都没有意义（删了还找不回来）。 */
+    const all = msg.role === "user" ? ACTIONS.user : ACTIONS.assistant;
+    const list = msg.intro ? all.filter(function (a) {
+      return a[0] === "edit" || a[0] === "read" || a[0] === "copy";
+    }) : all;
     list.forEach((a) => bar.appendChild(actionBtn(a[0], a[1], a[2])));
     return bar;
   }
@@ -793,6 +816,30 @@
       sv.textContent = "保存";
       wrap.appendChild(sv);
       bubble.appendChild(wrap);
+    } else if (msg.video) {
+      /* 对话里生成的视频：给原生控件，能播能全屏，不自造播放器 */
+      const wrap = document.createElement("div");
+      wrap.className = "gen-video-wrap";
+      const v = document.createElement("video");
+      v.className = "gen-video";
+      v.src = msg.video;
+      v.controls = true;
+      v.playsInline = true;
+      v.setAttribute("webkit-playsinline", "true");
+      v.preload = "metadata";
+      wrap.appendChild(v);
+      bubble.appendChild(wrap);
+    } else if (msg.audio) {
+      /* 对话里生成的音乐：同上，用原生音频控件 */
+      const wrap = document.createElement("div");
+      wrap.className = "gen-audio-wrap";
+      const a = document.createElement("audio");
+      a.className = "gen-audio";
+      a.src = msg.audio;
+      a.controls = true;
+      a.preload = "metadata";
+      wrap.appendChild(a);
+      bubble.appendChild(wrap);
     } else if (msg.imageDesc) {
       const note = document.createElement("div");
       note.className = "img-expired";
@@ -802,8 +849,15 @@
 
     const content = document.createElement("div");
     content.className = "content";
-    content.innerHTML = msg.content ? renderMarkdown(msg.content) : "";
-    grayParens(content);
+    /* 带块级 HTML 的内容进影子根渲染（卡里的样式出不来、脚本不执行，见 card.js）。
+       判定交给 Card.shouldUseCard：有 html 标记的必走，没标记的要求成对闭合，
+       免得模型「讲解 HTML」时被误当卡片（那样 Markdown 和旁白灰化都会失效）。 */
+    if (window.Card && Card.shouldUseCard(msg)) {
+      content.appendChild(Card.render(msg.content));
+    } else {
+      content.innerHTML = msg.content ? renderMarkdown(msg.content) : "";
+      grayParens(content);
+    }
     bubble.appendChild(content);
 
     /* 状态量化：折叠框放在气泡下方（默认收起，点开是各项数值条） */
@@ -947,6 +1001,18 @@
       frame = null; delayTimer = null;
       lastPaintAt = Date.now();
       rBody.textContent = reasoningText;
+      /* 流式期间已经在输出块级 HTML：先剥标签给纯文字预览。
+         否则用户盯着的是被转义的 &lt;div&gt;，生成结束又整块突变卡片。
+         完整卡片交给生成结束后的 renderMessages（那时内容才稳定）。 */
+      if (window.Card && Card.isHtml(contentText)) {
+        const preview = contentText
+          .replace(/<style[\s\S]*?<\/style>/gi, "")
+          .replace(/<[^>]*>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        contentBox.textContent = preview || "正在生成…";
+        return;
+      }
       contentBox.innerHTML = (contentText ? renderMarkdown(contentText) : "") +
         (started ? '<span class="cursor"></span>' : "");
     }
@@ -1006,6 +1072,10 @@
         if (!started) { det.classList.remove("thinking"); rLabel.textContent = "已完成思考"; }
         else { rLabel.textContent = "已完成思考"; }
         contentBox.innerHTML = contentText ? renderMarkdown(contentText) : "";
+        /* 收尾这一帧是最终显示态，把正常渲染的两步补上（旁白染灰 + 表情换图）。
+           流式中间那帧（上面 paint 里）不补 —— 每帧都跑就会把 90ms 节流省下的性能全吃掉。 */
+        try { grayParens(contentBox); } catch (e) { /* ignore */ }
+        try { stickerize(contentBox); } catch (e) { /* ignore */ }
         if (!reasoningText && det.parentNode) det.parentNode.removeChild(det);
         return { content: contentText, reasoning: reasoningText, sources };
       }
@@ -1428,9 +1498,17 @@
     const box = $("#messages");
     return box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   }
-  function scrollToBottom() {
+  /* instant=true：流式跟随用。临时把 CSS 的 scroll-behavior 置成 auto，
+     否则 scrollTop 赋值会走平滑动画，下一段 delta 到来时位置还在半路，
+     isNearBottom() 会判成「没贴底」→ 从此不再跟随（长回答停在半空）。 */
+  function scrollToBottom(instant) {
     const box = $("#messages");
+    if (!box) return;
+    if (!instant) { box.scrollTop = box.scrollHeight; return; }
+    const prev = box.style.scrollBehavior;
+    box.style.scrollBehavior = "auto";
     box.scrollTop = box.scrollHeight;
+    box.style.scrollBehavior = prev;
   }
 
   async function copyText(text) {

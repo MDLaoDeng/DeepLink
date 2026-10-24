@@ -6,14 +6,44 @@
     return { signal: ctrl.signal, done: () => clearTimeout(timer) };
   }
 
-  async function fetchJson(url, options, timeoutMs) {
-    const t = withTimeout(timeoutMs || 12000);
+  /* signal：调用方的取消信号（用户点「停止」）。
+     Chrome 83 没有 AbortSignal.any，这里手工并两个信号：任一触发就中断。
+     收尾时两个监听都要摘掉，否则反复搜索会一直累积监听。 */
+  async function fetchJson(url, options, timeoutMs, signal) {
+    const ms = timeoutMs || 12000;
+    const t = withTimeout(ms);
+    let ctl = null, onTimeout = null, onOuter = null;
+    const stop = function () { try { ctl.abort(); } catch (e) { /* ignore */ } };
+    const outerOk = signal && typeof signal.addEventListener === "function";
+    if (outerOk) {
+      ctl = new AbortController();
+      onTimeout = stop;
+      onOuter = stop;
+      t.signal.addEventListener("abort", onTimeout);
+      if (signal.aborted) stop();
+      else signal.addEventListener("abort", onOuter);
+    }
+    const useSignal = ctl ? ctl.signal : t.signal;
     try {
-      const res = await fetch(url, Object.assign({ signal: t.signal }, options || {}));
+      const res = await fetch(url, Object.assign({ signal: useSignal }, options || {}));
       if (!res.ok) throw new Error("HTTP " + res.status);
       return await res.json();
+    } catch (err) {
+      /* M4：AbortError 有两个来源，必须分开 ——
+         · 用户点停止 → 保持 AbortError，上层按「已停止」静默处理
+         · 自己超时   → 改名 TimeoutError，上层要如实报错，别冒充用户操作 */
+      if (err && err.name === "AbortError" && !(signal && signal.aborted)) {
+        const te = new Error("请求超时（" + Math.round(ms / 1000) + " 秒）");
+        te.name = "TimeoutError";
+        throw te;
+      }
+      throw err;
     } finally {
       t.done();
+      if (ctl) {
+        try { t.signal.removeEventListener("abort", onTimeout); } catch (e) { /* ignore */ }
+        try { signal.removeEventListener("abort", onOuter); } catch (e) { /* ignore */ }
+      }
     }
   }
 
@@ -89,23 +119,23 @@
     });
   }
 
-  function searxng(query, settings) {
+  function searxng(query, settings, signal) {
     const list = String(settings.searxngInstances || "")
       .split("\n").map((s) => s.trim()).filter(Boolean);
     const tasks = list.map((base) => {
       const url = base.replace(/\/+$/, "") +
         "/search?format=json&safesearch=0&language=zh-CN&q=" + encodeURIComponent(query);
-      return fetchJson(url, { method: "GET" }, 8000).then((data) =>
+      return fetchJson(url, { method: "GET" }, 8000, signal).then((data) =>
         clean((data.results || []).map((r) => ({ title: r.title, url: r.url, snippet: r.content })))
       );
     });
     return firstWithResults(tasks);
   }
 
-  async function duckduckgo(query) {
+  async function duckduckgo(query, signal) {
     const url = "https://api.duckduckgo.com/?format=json&no_html=1&skip_disambig=1&q=" +
       encodeURIComponent(query);
-    const data = await fetchJson(url, { method: "GET" }, 10000);
+    const data = await fetchJson(url, { method: "GET" }, 10000, signal);
     const out = [];
     if (data.AbstractText && data.AbstractURL) {
       out.push({ title: data.Heading || query, url: data.AbstractURL, snippet: data.AbstractText });
@@ -118,10 +148,10 @@
     return clean(out);
   }
 
-  async function wikipedia(query) {
+  async function wikipedia(query, signal) {
     const url = "https://zh.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*" +
       "&srlimit=5&srsearch=" + encodeURIComponent(query);
-    const data = await fetchJson(url, { method: "GET" }, 10000);
+    const data = await fetchJson(url, { method: "GET" }, 10000, signal);
     const hits = (data.query && data.query.search) || [];
     return clean(hits.map((h) => ({
       title: h.title,
@@ -130,7 +160,7 @@
     })));
   }
 
-  async function tavily(query, settings) {
+  async function tavily(query, settings, signal) {
     if (!settings.tavilyKey) throw new Error("未配置 Tavily Key");
     const data = await fetchJson("https://api.tavily.com/search", {
       method: "POST",
@@ -139,7 +169,7 @@
         "Authorization": "Bearer " + settings.tavilyKey
       },
       body: JSON.stringify({ query, max_results: 6, search_depth: "basic" })
-    }, 15000);
+    }, 15000, signal);
     return clean((data.results || []).map((r) => ({
       title: r.title, url: r.url, snippet: r.content
     })));
@@ -154,12 +184,12 @@
     return [];
   }
 
-  async function custom(query, settings) {
+  async function custom(query, settings, signal) {
     if (!settings.customSearchUrl) throw new Error("未配置自定义搜索接口");
     const url = settings.customSearchUrl.replace(/\{query\}/g, encodeURIComponent(query));
     const headers = {};
     if (settings.customSearchKey) headers["Authorization"] = "Bearer " + settings.customSearchKey;
-    const data = await fetchJson(url, { method: "GET", headers }, 15000);
+    const data = await fetchJson(url, { method: "GET", headers }, 15000, signal);
     return clean(pickItems(data).map((r) => ({
       title: r.title || r.name,
       url: r.url || r.link || r.href,
@@ -172,7 +202,7 @@
      计费：每次 0.005 元，**只有返回非空结果才收钱**，失败和空结果免费。
      结果里带 summary（600~800 字，本来就是写给模型看的），拿它当 snippet
      比那 100 字的 description 有用得多。 */
-  async function deepseek(query, settings) {
+  async function deepseek(query, settings, signal) {
     const key = String(settings.apiKey || "");
     if (!key) throw new Error("主模型没有 API Key，用不了 DeepSeek 搜索");
     const root = String(settings.baseUrl || "").replace(/\/+$/, "").replace(/\/v1$/i, "");
@@ -181,7 +211,7 @@
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
       body: JSON.stringify({ query: String(query || "").slice(0, 128), count: 6, need_content: false })
-    }, 20000);
+    }, 20000, signal);
     const rows = clean((data.results || []).map((r) => ({
       title: r.title || r.site_name || "",
       url: r.url,
@@ -189,12 +219,12 @@
     })));
     if (rows.length) return rows;
     /* 老接口没给结果 —— 走官方兼容通道再试一次 */
-    return await deepseekViaMessages(query, settings);
+    return await deepseekViaMessages(query, settings, signal);
   }
   /* 官方通道：Anthropic 兼容 Messages + web_search_20250305 服务端工具。
      返回结构是 content 块数组：text 块是答案，web_search_tool_result 里才是来源。
      每次搜索等于一次完整模型轮次（官方没有单独的检索端点），所以只在老路失败时才走它。 */
-  async function deepseekViaMessages(query, settings) {
+  async function deepseekViaMessages(query, settings, signal) {
     const key = String(settings.apiKey || "");
     const root = String(settings.baseUrl || "").replace(/\/+$/, "").replace(/\/v1$/i, "");
     if (!key || !/deepseek\.com/i.test(root)) throw new Error("主模型不是 DeepSeek，用不了这条通道");
@@ -212,7 +242,7 @@
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         messages: [{ role: "user", content: String(query || "") + "\n\n请先联网检索最新信息，再给结论；如果检索不到就说检索不到。" }]
       })
-    }, 90000);
+    }, 90000, signal);
     const blocks = data.content || [];
     const out = [];
     blocks.forEach(function (b) {
@@ -244,16 +274,16 @@
 
   const Search = {
     /* 返回 { provider, results:[{title,url,snippet}] } */
-    async search(query, settings) {
+    async search(query, settings, signal) {
       const mode = settings.searchProvider || "auto";
 
       if (mode === "off") return { provider: "off", results: [] };
 
       if (mode === "deepseek") {
-        return { provider: "DeepSeek", results: await deepseek(query, settings) };
+        return { provider: "DeepSeek", results: await deepseek(query, settings, signal) };
       }
       if (mode === "tavily") {
-        return { provider: "Tavily", results: await tavily(query, settings) };
+        return { provider: "Tavily", results: await tavily(query, settings, signal) };
       }
       if (mode === "custom") {
         return { provider: "自定义", results: await custom(query, settings) };
@@ -264,7 +294,7 @@
       let lastErr = null;
       if (deepseekReady(settings)) {
         try {
-          const results = await deepseek(query, settings);
+          const results = await deepseek(query, settings, signal);
           if (results.length) return { provider: "DeepSeek", results };
         } catch (e) { lastErr = e; }
       }
@@ -272,16 +302,16 @@
       // 免 Key 源并行，按 SearXNG > DuckDuckGo > Wikipedia 优先级择优
       try {
         const hit = await racePrefer([
-          { name: "SearXNG", promise: searxng(query, settings) },
-          { name: "DuckDuckGo", promise: duckduckgo(query) },
-          { name: "Wikipedia", promise: wikipedia(query) }
+          { name: "SearXNG", promise: searxng(query, settings, signal) },
+          { name: "DuckDuckGo", promise: duckduckgo(query, signal) },
+          { name: "Wikipedia", promise: wikipedia(query, signal) }
         ], 650);
         if (hit.results.length) return { provider: hit.name, results: hit.results };
       } catch (e) { lastErr = e; }
 
       if (settings.tavilyKey) {
         try {
-          const results = await tavily(query, settings);
+          const results = await tavily(query, settings, signal);
           if (results.length) return { provider: "Tavily", results };
         } catch (e) { lastErr = e; }
       }

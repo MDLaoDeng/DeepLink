@@ -13,6 +13,13 @@
  * 本文件不新增依赖、不改动其它模块行为（只往 window.DL 挂入口）。
  */
 (function () {
+  /* 内置助手的对外名字（10-22 用户口径：不再出现「助手」三个字，就叫听澜）。
+     取 CONFIG.BUILTIN_ASSISTANT.name，取不到才退回「听澜」这个兜底。 */
+  function aiName() {
+    var c = window.CONFIG && window.CONFIG.BUILTIN_ASSISTANT;
+    return (c && c.name) || "听澜";
+  }
+
   /* 打包工具不一定按 index.html 的顺序执行脚本：app.js 有可能晚于本文件。
      那时 window.DL 还不存在 —— 等它就绪后再初始化一次。返回 false = 还没就绪。 */
   var booted = false;  /* boot 幂等：DOMContentLoaded 与补拍 retry 各会调一次，别重复绑事件 / 分裂状态 */
@@ -70,8 +77,10 @@
   /* ── 手机上的时间一律走「故事时间」──────────────────────────────
      开时间系统时 = 现实时间 + 一个常数偏移（见 memory.js 的 storyAt / nowOf）；
      没开就是现实时间。这样手机里的时钟、消息分隔、列表预览和主对话是同一套时间。 */
-  function storyMs(ts) {
-    var s = sessionById(ps.sid) || session();
+  function storyMs(ts, sid) {
+    /* sid 是「这条时间属于哪条线」。列表里每行要传自己的，否则全按最后打开那条线的
+       故事时间偏移算，多线时列表时间全是错的。 */
+    var s = sessionById(sid || ps.sid) || session();
     if (Memory && Memory.storyAt && s) {
       try { return Memory.storyAt(s, typeof ts === "number" ? ts : Date.now()); } catch (e) { /* ignore */ }
     }
@@ -224,13 +233,18 @@
     /* 角色卡上的「默认手机头像」（10-19 用户要求）：这张线专用，没设就回落到角色头像 */
     if (ch && ch.phoneAvatar) return ch.phoneAvatar;
     if (ch && ch.avatar) return ch.avatar;
+    /* 10-22：角色存在但没设头像 → 返回空串，让 UI 画占位人像。
+       以前这里回落到全局 avatarAi（现在是听澜的头像），结果没设头像的角色
+       全顶着听澜的脸出现在手机里 —— 看着像「听澜又变成了别人」。
+       只有 ch 为空（助手身份本身）才用全局那张。 */
+    if (ch) return "";
     return state.settings.avatarAi || "";
   }
   /* 这条线可以单独起昵称（「这条线」设置里设的）；没设就用角色卡的名字 */
   function nameOf(ch, s) {
     var own = s && typeof s === "object" ? String(s.nickChar || "").trim() : "";
     if (own) return own;
-    return ch ? (ch.name || "角色") : "助手";
+    return ch ? (ch.name || "角色") : aiName();
   }
 
   /* 朗读用的设置：这条线单独设过音色就用它的（见「对话设置 → 本线音色」） */
@@ -348,8 +362,10 @@
       w.appendChild(sp); w.appendChild(inp);
       return w;
     }
-    box.appendChild(nickField("你的昵称", "nickChar", "留空 = 用角色卡的名字"));
-    box.appendChild(nickField("我的昵称", "nickMe", "留空 = 用「我的昵称」"));
+    /* 语义纠正：nickChar 改的是「TA 在手机里叫什么」（nameOf 用它当角色名），
+       nickMe 是「TA 怎么称呼我」。原来的标签写反了，按字面填会把角色改名。 */
+    box.appendChild(nickField("TA 的昵称", "nickChar", "留空 = 用角色卡的名字"));
+    box.appendChild(nickField("TA 怎么称呼我", "nickMe", "留空 = 用全局的「你对我的称呼」"));
 
     /* ── 备忘录入口 ──────────────────────────────
        写在这儿，内容归听澜那边；约定型到点会在侧栏「助手」上冒红点。 */
@@ -359,7 +375,8 @@
     remBtn.type = "button"; remBtn.className = "btn ghost"; remBtn.textContent = "备忘录";
     remBtn.addEventListener("click", function () {
       closeSheet();
-      if (D.reminder && D.reminder.open) D.reminder.open();
+      /* 带上手机自己的 sid：不传会退回主聊天当前那条线，故事时间偏移就错位了 */
+      if (D.reminder && D.reminder.open) D.reminder.open(ps.sid);
     });
     var remHint = document.createElement("p");
     remHint.className = "ph-avset-hint";
@@ -390,9 +407,18 @@
         var f = inp.files && inp.files[0];
         if (!f) return;
         readBgFile(f).then(function (url) {
-          patchLine(sid, { phoneBg: url });
-          try { if (D.applyPhoneBackground) D.applyPhoneBackground(); } catch (e) { /* ignore */ }
-          toast("背景已换");
+          /* 走取景面板：这里以前直接落图，所以手机背景只能显示原图、不能缩放裁剪 */
+          if (D.openBgCrop) {
+            D.openBgCrop(url, "phone", function (out) {
+              patchLine(sid, { phoneBg: out });
+              try { if (D.applyPhoneBackground) D.applyPhoneBackground(); } catch (e) { /* ignore */ }
+              toast("背景已换");
+            });
+          } else {
+            patchLine(sid, { phoneBg: url });
+            try { if (D.applyPhoneBackground) D.applyPhoneBackground(); } catch (e) { /* ignore */ }
+            toast("背景已换");
+          }
         }).catch(function (e) { toast((e && e.message) || "图片读取失败", true); });
       };
       inp.click();
@@ -583,19 +609,31 @@
       return wrap;
     }
 
-    var blurBox = slider("背景模糊", 0, 20, 1, Number(state.settings.phoneBgBlur) || 0, function (v) {
+    var blurBox = slider("背景模糊", 0, 100, 1, Number(state.settings.phoneBgBlur) || 0, function (v) {
       patchPhoneBg({ phoneBgBlur: v });
     });
-    var brightBox = slider("背景亮度", 40, 140, 5, Number(state.settings.phoneBgBright) || 100, function (v) {
+    var brightBox = slider("背景亮度", 0, 200, 2, Number(state.settings.phoneBgBright) || 100, function (v) {
       patchPhoneBg({ phoneBgBright: v });
+    });
+
+    /* 「这条线」入口放在这里（10-24 用户口径）：它属于设置，不该占着聊天页的动作格子。
+       只在聊天视图里能进来才有意义，所以 ps.sid 有名才显示。 */
+    var lineBtn = document.createElement("button");
+    lineBtn.className = "btn block";
+    lineBtn.type = "button";
+    lineBtn.textContent = "这条线（头像 / 昵称 / 本线背景 / 音色）";
+    lineBtn.addEventListener("click", function () {
+      closeSheet();
+      openPhoneLineSheet();
     });
 
     var hint = document.createElement("p");
     hint.className = "ph-set-hint";
-    hint.textContent = "背景只作用于手机页。想给某一条线单独设头像，去聊天里的「头像」。";
+    hint.textContent = "背景只作用于手机页。某一条线想单独换头像 / 昵称 / 背景，点上面那一项。";
 
     box.appendChild(pv);
     box.appendChild(row);
+    if (ps.sid) box.appendChild(lineBtn);
     box.appendChild(blurBox);
     box.appendChild(brightBox);
     box.appendChild(hint);
@@ -679,6 +717,9 @@
     ps.enterAnim = true;      /* 让列表跟着外壳一起入场 */
     goList();
     applyPhoneBg();
+    /* 打开前校准一次视口高度：--app-h 可能还停在键盘弹起时的旧值
+       （部分 WebView 收起键盘不派发 resize），不校准就是「手机页只占上半屏」。 */
+    try { window.dispatchEvent(new Event("resize")); } catch (e) { /* 老内核没有 Event 构造器就算了 */ }
     el.hidden = false;
     document.body.classList.add("phone-open");
     playEnter(el);
@@ -693,6 +734,7 @@
     if (ps.closeTimer) { clearTimeout(ps.closeTimer); ps.closeTimer = null; }
     setText("#phoneClock", nowHM());
     applyPhoneBg();
+    try { window.dispatchEvent(new Event("resize")); } catch (e) { /* 同上 */ }
     el.hidden = false;
     document.body.classList.add("phone-open");
     /* 外壳正在播入场，视图这一层就别再叠一次滑动（否则两层动画打架） */
@@ -725,7 +767,14 @@
       }
     }
     document.body.classList.remove("phone-open");
+    /* 关掉手机就把录音收干净：以前只挂电话、关弹层，麦克风一直开着。
+       只收手机自己那一路（ps.recActive），主聊天的录音不受影响。 */
+    if (ps.recActive) {
+      ps.recActive = false;
+      try { if (window.Media && Media.recorder && Media.recorder.recording) Media.recorder.cancel(); } catch (e) { /* ignore */ }
+    }
     ps.busy = false; ps.sending = false;
+    ps.busySid = "";
     if (ps.abort) { try { ps.abort.abort(); } catch (e) { /* ignore */ } }
     ps.abort = null;
   }
@@ -780,6 +829,9 @@
 
   function goList() {
     ps.view = "list";
+    /* 回列表就丢掉「正在看哪条线」：否则列表时间和背景会继续按刚才那条线算，
+       表现是别的线的行也带上这条线的故事时间偏移 / 背景图。 */
+    ps.sid = "";
     var lv = $("#phoneListView");
     /* 从聊天 / 动态退回列表：当前页整页右移退出，把底下一直留着的列表露出来。
        刚进手机页时整页外壳已经在播入场，这时直接切，不叠一层视图动画。 */
@@ -796,9 +848,11 @@
     var sess = Store.getSessions();
     var rows = [];
     var seen = {};
-    /* 群聊：一条群会话就是一个手机群，单独成行 */
+    /* 群聊：只有「手机群」能进手机列表，现实群不进来（口径 A，10-23 拍板）。
+       原因：现实群的消息在 messages 里，手机这边读写的却是 phone.msgs ——
+       放进来会变成「能进、能聊，但主聊天和成员线都看不到这段」的黑洞，两套记录各存一份。 */
     sess.forEach(function (s) {
-      if (!s || !s.isGroup) return;
+      if (!s || !s.isGroup || !s.phoneGroup) return;
       var gm = lastPhoneMsg(s);
       /* 没有手机消息的群不该靠「会话更新时间」窜到最前 —— 只有真有消息才参与排序 */
       rows.push({ isGroup: true, s: s, ch: null, lines: [s], last: gm, lastTs: (gm && gm.ts) || 0, avLine: s });
@@ -806,7 +860,10 @@
     function addRow(charId) {
       if (seen[charId]) return;
       /* 听澜是内置助手，不进手机联系人：它不是能"打电话、发表情"的角色（10-21 用户口径，
-         以前漏了这条，助手直接变成手机里一个普通联系人）。 */
+         以前漏了这条，助手直接变成手机里一个普通联系人）。
+         10-22 补：没挂角色的会话（characterId 为空 = 助手身份）同样不进 —— 用户截图里
+         手机列表上那行「助手」就是它，名字还是旧的兜底文案。 */
+      if (!charId) return;
       if (charId === ((window.DL && window.DL.tinglanId) || "c_tinglan")) return;
       seen[charId] = 1;
       var lines = [];
@@ -858,7 +915,7 @@
       item.appendChild(mid);
       var right = document.createElement("div");
       right.className = "phone-item-right";
-      if (r.last) { var tm = document.createElement("div"); tm.className = "phone-item-time"; tm.textContent = hmOf(r.last.ts); right.appendChild(tm); }
+      if (r.last) { var tm = document.createElement("div"); tm.className = "phone-item-time"; tm.textContent = hmOf(r.last.ts, (r.avLine && r.avLine.id) || (r.s && r.s.id) || ""); right.appendChild(tm); }
       /* 一个角色有多条线 → 右侧给个箭头，示意「点开里面有东西」（按角色分组） */
       var multi = !r.isGroup && r.lines.length > 1;
       var opened = !!(multi && ps.expandChar === r.charId);
@@ -939,9 +996,9 @@
     box.innerHTML = UI.iconSvg("account-group");
     return box;
   }
-  function hmOf(ts) {
+  function hmOf(ts, sid) {
     if (!ts) return "";
-    var d = new Date(storyMs(ts));
+    var d = new Date(storyMs(ts, sid));
     return pad2n(d.getHours()) + ":" + pad2n(d.getMinutes());
   }
   /* 一个角色有多条线时，原来是弹「选择和哪条线聊天」——
@@ -956,6 +1013,11 @@
     if (!s) { toast("这条对话已经不在了", true); goList(); return; }
     ps.sid = sid;
     ps.view = "chat";
+    /* 多选态与「查看更早」的条数都是上一条线残留的：不复位的话，
+       新线一进来就带着上次的多选条、并按上一条线展开过的条数渲染。
+       注意别清 ps.busy —— 别的线可能还在生成（提示文案靠 busySid 认归属）。 */
+    ps.pick = null;
+    ps.phoneLimit = 0;
     var ch = characterFor(s);
     setText("#phoneTitle", s.isGroup
       ? (s.title || "群聊")
@@ -975,7 +1037,15 @@
     if (!btn.dataset.bound) {
       btn.dataset.bound = "1";
       btn.addEventListener("click", function () {
-        if (window.DL && window.DL.startOpening) window.DL.startOpening(ps.sid);
+        /* 必须走手机自己的生成链：DL.startOpening 内部是 continueLast() → session()，
+           取的是主聊天当前线，从手机点下去会写进别的会话，手机页毫无变化。
+           genReply(sid) 全程按 sid 写回，不会串线。 */
+        if (ps.busy || ps.sending || !ps.sid) return;
+        var s0 = sessionById(ps.sid);
+        if (!s0) return;
+        var ms0 = (phoneOf(s0) || {}).msgs || [];
+        if (ms0.some(function (m) { return m && m.role === "user" && m.kind !== "recalled"; })) return;
+        genReply(ps.sid);
       });
     }
     var s = ps.sid ? sessionById(ps.sid) : null;
@@ -1015,8 +1085,26 @@
     /* 新来的消息才播「从下方弹入」——整块重渲时旧消息不重放，否则每次都闪一片。
        prevCount 为 0 表示这是首次渲染（刚进聊天页），一律不播。 */
     var total = ph.msgs.length;
+    /* 只画最近 N 条：以前一次把全部消息建进 DOM，两三百条后每次操作都要重画整屏。
+       数据一条不少，「查看更早」点一次往前加 80 条。 */
+    var PH_PAGE = 80;
+    var shown = Math.min(total, ps.phoneLimit || PH_PAGE);
+    var start = total - shown;
+    if (start > 0) {
+      var more = document.createElement("button");
+      more.type = "button";
+      more.className = "earlier-msg";
+      more.textContent = "↑ 还有 " + start + " 条更早的消息";
+      more.addEventListener("click", function () {
+        ps.phoneLimit = (ps.phoneLimit || PH_PAGE) + PH_PAGE;
+        renderChat();
+        scrollPhoneBottom(true);
+      });
+      box.appendChild(more);
+    }
     var prevTs = 0;
     ph.msgs.forEach(function (m, i) {
+      if (i < start) return;
       /* 和上一条隔了 3 分钟以上（或这是第一条）→ 插一条居中的时分。
          **自己发的、对方发的都算**（用户口径）。 */
       if (!prevTs || (m.ts && (m.ts - prevTs) > PH_TIME_GAP)) box.appendChild(phTimeEl(m.ts));
@@ -1167,28 +1255,42 @@
     var at = ph.msgs.indexOf(msg);
     if (at < 0) return;
 
-    /* ① 生成中：中断 + 让旧回调作废（seq 加一，finally 里就不会再动新状态） */
-    if (ps.busy && ps.abort) {
+    /* ① 生成中：中断 + 让旧回调作废（seq 加一，finally 里就不会再动新状态）。
+       只中断「本线」的请求：ps.abort 是单例，以前在 B 线撤回会把 A 线正在跑的请求打断。 */
+    if (ps.busy && ps.abort && (!ps.busySid || ps.busySid === ps.sid)) {
       try { ps.abort.abort(); } catch (e) { /* ignore */ }
       ps.seq = (ps.seq || 0) + 1;
       ps.busy = false;
+      ps.busySid = "";
       ps.abort = null;
       try { hideTyping(); } catch (e) { /* ignore */ }
       try { setDisabled("#phoneSend", false); } catch (e) { /* ignore */ }
     }
 
-    /* ② 紧跟其后的那条 AI 回复一起撤回（同一次交流，两分钟内） */
-    var next = ph.msgs[at + 1];
-    if (next && next.role === "assistant" && next.kind !== "recalled" &&
-      (next.ts || 0) - (msg.ts || 0) < 120000) {
-      ph.msgs[at + 1] = {
-        id: next.id || ("pm_" + Date.now().toString(36)),
+    /* ② 这一轮 AI 说的话全部一起撤回：长回复会被拆成 2-6 条（splitPhoneReply），
+       以前只处理 at+1，剩下几条原样留着 —— 用户看到的是「撤了一半」。 */
+    var killed = [];
+    for (var j = at + 1; j < ph.msgs.length; j++) {
+      var nx = ph.msgs[j];
+      if (!nx || nx.role !== "assistant") break;
+      if (nx.kind === "recalled") continue;
+      if ((nx.ts || 0) - (msg.ts || 0) >= 180000) break;
+      if (nx.id) killed.push(nx.id);
+      ph.msgs[j] = {
+        id: nx.id || ("pm_" + Date.now().toString(36)),
         role: "assistant",
         kind: "recalled",
         text: "",
-        origText: String(next.text || ""),
-        ts: next.ts || Date.now()
+        origText: String(nx.text || ""),
+        ts: nx.ts || Date.now()
       };
+    }
+    /* 主聊天里挂在这些消息上的「线下侧写」也要撤 —— 删除路径已经这么做了，撤回漏了。
+       不然手机里撤干净了，主聊天还留着同一句话。 */
+    if (killed.length && Array.isArray(list[i].messages)) {
+      list[i].messages = list[i].messages.filter(function (m) {
+        return !(m && killed.indexOf(m.phoneMsgId) >= 0);
+      });
     }
 
     ph.msgs[at] = {
@@ -1226,7 +1328,9 @@
       });
     });
     sess.forEach(function (s) {
-      if (!s || !s.isGroup) return;
+      /* 转发目标与手机列表同一口径：只列手机群。转进现实群会写进主群的 phone.msgs，
+         而主群读的是 messages —— 转过去等于扔进看不见的地方。 */
+      if (!s || !s.isGroup || !s.phoneGroup) return;
       out.push({ kind: "group", id: s.id, name: s.title || "群聊" });
     });
     return out;
@@ -1624,7 +1728,9 @@
           {
             label: "删除本条", danger: true,
             fn: function () {
-              UI.confirmDialog("删除这条消息", "只删手机里的这一条，删了没法恢复。确定吗？").then(function (ok) {
+              /* 文案必须和行为一致：这条路径会连主聊天里绑定的那条线下侧写一起删
+                 （见 deletePhoneMsg）。想只删手机里这一条，用「撤回」。 */
+              UI.confirmDialog("删除这条消息", "会一起删掉主聊天里对应的那条线下描写，删了没法恢复。只想删手机里这条？取消后用「撤回」。").then(function (ok) {
                 if (!ok) return;
                 if (deletePhoneMsgOne(m)) { renderChat(); toast("已删除"); }
               });
@@ -1947,6 +2053,27 @@
     });
     return out;
   }
+  /* 群成员绑的那条线（10-22：手机群也绑线了，和主群一样）。
+     绑定写在自己这份 memberLine 里，主群那份不受影响；老数据没绑就退回他最近的一条线。 */
+  function boundLineOf(s, charId) {
+    /* 统一走 chat.js 的 lineOfMember：它优先「主线」，这里以前按 updatedAt 取。
+       老群（memberLine 没绑）会出现「提示词读的是 X 线，群里的事写进 Y 线」，
+       两处兜底必须同一口径，否则记忆会写进不相干的支线。 */
+    if (window.DL && typeof window.DL.lineOfMember === "function") {
+      return window.DL.lineOfMember(s, charId);
+    }
+    var bind = (s && s.memberLine) || {};
+    var id = bind[charId];
+    var hit = id ? sessionById(id) : null;
+    if (hit) return hit;
+    var list = Store.getSessions().filter(function (x) {
+      return !x.isGroup && (x.characterId || "") === charId;
+    });
+    if (!list.length) return null;
+    list.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+    return list[0];
+  }
+
   function buildGroupSysPhone(s) {
     var members = phoneGroupMembers(s);
     if (!members.length) return "这是一个手机群聊，但还没有选成员。";
@@ -1955,10 +2082,24 @@
       var c = charById(m.id);
       var p = Memory.personaText ? Memory.personaText(c) : "";
       t += "\n—— " + m.name + " ——\n" + (p || "（没有更多设定）") + "\n";
+      /* 记忆互通（10-22 用户要求）：读他绑定的那条线 —— 手机单聊和现实扮演用的是同一条线，
+         所以这里读到的是「他本人在那条线上经历过的全部」。必须标明只有本人知道，
+         否则模型会把 A 的私聊内容当成全群共有的。 */
+      var line = boundLineOf(s, m.id);
+      if (line) {
+        /* 与主群同一个入口（10-23）：关系 / 共同经历 / 场景 / 认知 / 摘要 /
+           最近原话 / TA 的思绪 / 图库里的样子，一次读全。 */
+        var dz = (Memory.lineDossier) ? Memory.lineDossier(line, c, { budget: 900, talk: 4 }) : "";
+        if (dz) {
+          t += "（下面这些只是" + m.name + "自己知道的事，不是全群共有的）\n" + dz + "\n";
+        }
+      }
     });
+    /* 表情包不再写进提示词（10-22）：改成双段式——先出正文，再单独问一次「挑不挑表情」。
+       提示词里教它写 [表情:…] 会跟正文混在一起，也容易在句子中间乱插。 */
     if (s && s.scene) t += "\n【当前情境】\n" + s.scene + "\n";
     if (s && s.shared) t += "\n【共同经历】\n" + s.shared + "\n";
-    var mt = Memory.memoryText ? Memory.memoryText(s && s.memory) : "";
+    var mt = (Memory.memoryForPrompt || Memory.memoryText) ? (Memory.memoryForPrompt || Memory.memoryText)(s && s.memory) : "";
     if (mt) t += "\n【群聊记忆】\n" + mt + "\n";
     /* @ 提醒（10-20）：用户在最后一条里 @ 了谁，就让谁先说话 */
     try {
@@ -1978,7 +2119,8 @@
     } catch (e) { /* ignore */ }
     t += "\n【规则】像真人发微信：口语、简短。每次让 1~3 位成员发言（谁说话、说几句由你按各自性格决定，可以有人不说话），" +
       "每条发言单独一行、用「名字：内容」开头，例如：\n小明：在啊\n小红：刚下课。\n" +
-      "名字必须是上面列出的成员名。不要旁白、不要括号动作、不要替用户说话、不要用 Markdown。\n" + PH_STYLE_RULE;
+      "名字必须是上面列出的成员名。不要旁白、不要括号动作、不要替用户说话、不要用 Markdown。\n" +
+      "不要自己插表情标记 —— 表情会在你写完之后单独挑，正文里只写话。\n" + PH_STYLE_RULE;
     return t;
   }
   /* 把「名字：内容」拆成 [{id,name,text}]；不足两人就说不上是群聊发言，返回 null */
@@ -2052,9 +2194,13 @@
     });
     if (merged.length <= 1) return [t];
     if (merged.length > PH_MAX) {
-      var head = merged.slice(0, PH_MAX - 1);
-      head.push(merged.slice(PH_MAX - 1).join("\n"));
-      merged = head;
+      /* 以前把超出部分整个 join 进最后一个气泡 —— 15 行的回复会变成 5 条短气泡
+         加一大坨（气泡是 textContent，换行不生效，视觉上还是一条长的）。
+         现在每次合并 3 行、循环收敛，代价是多一两个气泡，但每条都还是「短消息」的样子。 */
+      var over = merged.splice(PH_MAX - 1);
+      var tail = [];
+      for (var m2 = 0; m2 < over.length; m2 += 3) tail.push(over.slice(m2, m2 + 3).join("\n"));
+      merged = merged.concat(tail);
     }
     return merged;
   }
@@ -2069,7 +2215,11 @@
     if (s && s.isGroup) {
       sys = buildGroupSysPhone(s);
     } else {
-      try { if (ch) sys = Memory.buildSystemText(ch, s, state.settings); } catch (e) { sys = ""; }
+      /* noEmoji：手机走双段式（第二段单独挑表情），第一段提示词里不列表情清单 */
+      try { if (ch) sys = Memory.buildSystemText(ch, s, state.settings, { noEmoji: true }); } catch (e) { sys = ""; }
+      /* 「TA 怎么称呼我」以前只是个存了没人读的字段（写进会话、从不进提示词）。
+         这里补上：留空就什么都不加，不改变现有行为。 */
+      if (s && s.nickMe) sys += "\n【称呼】你在手机里叫他「" + String(s.nickMe).trim() + "」。";
       if (!ch) sys = "你是 DeepLink 的助手。现在用户改用手机聊天软件找你，回复要像发消息一样。";
       var head = "【场景】你和对方正在用手机聊天软件发消息。回复要像真人发微信：口语、简短、" +
         "别写小说旁白、别用（动作）括号、不要用 Markdown 标题，不要自称 AI。\n" + PH_STYLE_RULE;
@@ -2088,7 +2238,9 @@
         "姿势、表情、手上的动作、周围的光线或声音。用第三人称旁白写，像镜头看着你，不要用第一人称。" +
         "格式严格写成：〖线下〗内容〖/线下〗。这一段不会出现在手机聊天里，正文照常按发消息的口吻写。";
     }
-    var fmt = ((s && typeof s.adoptFormat === "string" && s.adoptFormat.trim()) || (state.settings.adoptFormat || "")).trim();
+    /* 采用格式：三层取值统一走 chat.js 的 adoptFormatFor（会话 > 角色 > 全局） */
+    var fmt = (window.DL && window.DL.adoptFormatFor) ? window.DL.adoptFormatFor(s)
+      : String((s && s.adoptFormat) || (ch && ch.format) || (state.settings.adoptFormat || "") || "").trim();
     if (fmt) sys += "\n\n【采用格式】\n" + fmt;
     /* 手机也读同一套故事时间（没开时间系统时 timeLine 回空串，等于不加） */
     var tline = (Memory && Memory.timeLine) ? Memory.timeLine(ch, s) : "";
@@ -2109,6 +2261,42 @@
   function cleanReply(t) {
     var s = String(t || "").trim();
     return s;
+  }
+
+  /* ── 双段式的第二段：挑表情（10-22 用户口径）────────────────────
+     第一段只写正文（不显示、也不提表情），这一轮把「刚写的正文 + 他的性格」再喂一次，
+     让它从可用清单里挑**一个**最贴的，或者干脆不发。
+     清单上限 50 个（Memory.stickerNamesFor 里定的），范围按上传时设的「可用范围」走。
+     返回 "" = 不发表情。 */
+  async function pickSticker(s, text, who) {
+    if (!text) return "";
+    var names = (Memory.stickerNamesFor) ? Memory.stickerNamesFor(s, state.settings) : [];
+    if (!names.length) return "";
+    var ch = who ? charById(who.id) : characterFor(s);
+    var persona = "";
+    try {
+      persona = (ch && Memory.personaText) ? String(Memory.personaText(ch) || "").slice(0, 500) : "";
+    } catch (e) { persona = ""; }
+    var sys = "你在手机聊天里刚发完话。现在只做一件事：判断要不要再补一个表情包。\n" +
+      "要就挑最贴的那一个，不想发就回「不发」。不要解释，不要写别的字，不要重复正文。";
+    var user = "【你刚才发的】\n" + String(text).slice(0, 600) +
+      (persona ? "\n\n【你的性格】\n" + persona : "") +
+      "\n\n【可选表情】\n" + names.join("、") +
+      "\n\n只回一个表情名（必须是上面列出的之一），或者回「不发」。";
+    var r = await Api.run({
+      settings: phoneSettings(s),
+      messages: [{ role: "system", content: sys }, { role: "user", content: user }],
+      thinking: false,
+      effort: "low"
+    });
+    if (r && r.usage && typeof recordUsage === "function") recordUsage(s.id, r.usage, s.characterId || "", "phone");
+    var t = String((r && r.content) || "").trim().replace(/[「」“”"'《》]/g, "");
+    if (!t || t.indexOf("不发") >= 0) return "";
+    /* 先找完全相等的，再找包含的（模型常写成「表情：无语」或带一句解释） */
+    var exact = names.filter(function (n) { return t === n; })[0];
+    if (exact) return exact;
+    var loose = names.filter(function (n) { return t.indexOf(n) >= 0; })[0];
+    return loose || "";
   }
 
   /* ── 双线：手机那一轮，主聊天那边也要有「她此刻线下的样子」──────
@@ -2155,6 +2343,7 @@
     var ch = characterFor(s);
     if (!state.settings.apiKey) { toast("请先在「设置」里填写 API Key", true); return; }
     ps.busy = true;
+    ps.busySid = sid;      /* 记归属：撤回 / 发送闸门 / 提示文案都要用它区分「谁在跑」 */
     /* 本轮序号：关掉手机再重开重发时，上一轮的回调靠它认出「我已经过期了」，
        不再去复位新请求的 busy / abort（否则新请求中止不了、还能被重复触发）。 */
     ps.seq = (ps.seq || 0) + 1;
@@ -2166,13 +2355,20 @@
     try {
       var messages = buildPhoneMessages(s, ch);
       if (!Api || typeof Api.run !== "function") throw new Error("接口模块 api.js 没有加载成功");
+      /* 手机这边也挂工具（10-23）：角色可以自己决定去翻记忆 / 找旧原话。
+         端点不认 tools 时 api.js 会自动去掉重试，这里不用写兜底。 */
+      var toolsOn = !!(window.Tools && state.settings.toolUse !== false);
       var result = await Api.run({
         settings: phoneSettings(s),
         messages: messages,
         thinking: false,
         effort: "low",
         signal: ps.abort.signal,
-        search: null
+        search: null,
+        extraTools: toolsOn ? Tools.defs() : null,
+        runTool: toolsOn ? function (name, args) {
+          return Tools.run(name, args, { line: s, ch: characterFor(s) });
+        } : null
       }, {
         /* 逐字回调：只累加，**不刷界面**（手机端不做流式，见 showTyping 的注释） */
         onContent: function (t) { acc += t; updateTyping(); }
@@ -2200,18 +2396,44 @@
         if (!usedId && offId) { o.id = offId; usedId = true; }
         pushMsg(sid, o);
       }
-      /* 群聊：一次回复里可能有几个人说话 → 先按「谁说的」分好，再各自拆成短消息 */
+      /* 双段式（10-22 用户口径）：先把正文排好但**不落库**，
+         等第二段挑完表情，再和表情一起发出去 —— 否则表情会晚半秒追在正文后面。 */
       var segs = splitPhoneSpeakers(finalText, s);
+      var queue = [];
+      var lastWho = null;
       if (segs) {
         segs.forEach(function (sg) {
+          lastWho = sg;
           splitPhoneReply(sg.text).forEach(function (part) {
-            pushOne(part, { speaker: sg.id, speakerName: sg.name });
+            queue.push({ text: part, speaker: sg.id, speakerName: sg.name });
           });
         });
       } else {
         /* 单聊：把一大段拆成「像真人连发的几条短消息」 */
-        splitPhoneReply(finalText).forEach(function (part) { pushOne(part); });
+        splitPhoneReply(finalText).forEach(function (part) { queue.push({ text: part }); });
       }
+      /* 第二段：带着刚写好的正文和他的性格，从可用表情里挑一个（也可以一个都不挑）。
+         挑表情是另一次请求，abort 管不到它 —— 所以重新转圈，并在回来之后验一次归属。 */
+      showTyping();
+      var stkName = "";
+      try { stkName = await pickSticker(s, finalText, lastWho); } catch (e) { stkName = ""; }
+      /* 这两三秒里用户可能撤回了、也可能关掉手机换了线：整轮作废，一个字都不许落库。
+         以前缺这一步，abort 之后正文照样发出去（用户以为撤回了）。 */
+      if (mySeq !== ps.seq) return;
+      hideTyping();
+      if (stkName) {
+        /* 表情单独一条消息、单独一个气泡（用户明确要求不要挤在同一个气泡里） */
+        queue.push({
+          text: "[表情:" + stkName + "]",
+          speaker: lastWho ? lastWho.id : "",
+          speakerName: lastWho ? lastWho.name : ""
+        });
+      }
+      queue.forEach(function (q) {
+        var extra = {};
+        if (q.speaker) { extra.speaker = q.speaker; extra.speakerName = q.speakerName; }
+        pushOne(q.text, extra);
+      });
       /* 线下那段落到主聊天里（和上面第一条手机消息绑定） */
       if (off.offline && offId) insertOfflineMsg(sid, off.offline, offId);
       if (result && result.usage && typeof recordUsage === "function") recordUsage(sid, result.usage, s.characterId, "phone");
@@ -2221,6 +2443,14 @@
          正在翻旧消息就不打扰他 */
       scrollPhoneBottom(false);
       afterExchange(s);
+      /* 记忆互通（10-22）：手机群这一轮也写回各成员绑定的那条线。
+         手机线就是那条会话本身（phone.msgs 挂在同一个 session 上），
+         所以写回之后，主聊天和手机单聊立刻都能看到群里发生的事。 */
+      if (s.isGroup && window.DL && DL.syncGroupToLines) {
+        try {
+          DL.syncGroupToLines(sid).catch(function () { /* 同步失败不影响这轮对话 */ });
+        } catch (e) { /* ignore */ }
+      }
     } catch (e) {
       hideTyping();
       var aborted = e && e.name === "AbortError";
@@ -2231,6 +2461,7 @@
          这里若还去清 busy / abort，会把新请求的状态一起清掉。 */
       if (mySeq === ps.seq) {
         ps.busy = false;
+        ps.busySid = "";
         setDisabled("#phoneSend", false);
         ps.abort = null;
       }
@@ -2346,7 +2577,17 @@
   /* ── 发文本 ───────────────────────────────────────── */
   function sendText() {
     syncModules();
-    if (ps.busy || ps.sending) return;
+    /* 忙闲要带归属。ps.busy 是全局的、手机只有一个 typing 指示条和一个 abort，
+       所以不开并发；但「别的线在生成」必须说清楚 —— 以前直接 return，
+       用户看到的是「消息没发出去也没提示」，像是卡死了。 */
+    if (ps.busy || ps.sending) {
+      if (ps.busySid && ps.busySid !== ps.sid) {
+        var bs = sessionById(ps.busySid);
+        var bn = (bs && (bs.title || (characterFor(bs) || {}).name)) || "另一条会话";
+        toast("「" + bn + "」还在回复，等它说完再发", true);
+      }
+      return;
+    }
     var input = $("#phoneInput");
     if (!input) return;
     var text = String(input.value || "").trim();
@@ -2560,6 +2801,8 @@
     if (av) {
       av.innerHTML = "";
       var url = avatarOf(ch, s);
+      /* 头像外置之后是文件路径，直接用会 404（通话页空白）——统一过一道 avatarUrl */
+      if (url && window.DL && DL.avatarUrl) url = DL.avatarUrl(url);
       if (url) { var im = document.createElement("img"); im.src = url; av.appendChild(im); }
       else av.innerHTML = UI.iconSvg("creation");
     }
@@ -2644,6 +2887,17 @@
     sizeCallCanvas(canvas);
     /* 这条线在「这条线」设置里单独选过模型就用它的，否则跟全局 */
     var lineModel = String((sessionById(ps.sid) || {}).live2dModel || "") || state.settings.live2dModel;
+    /* 渲染坏了（色块 / 碎片）就退回静态头像，并说清原因 ——：
+       硬画一团乱码比不画更糟，用户只会以为整个功能废了。 */
+    if (typeof L2.onBroken === "function") {
+      L2.onBroken(function () {
+        if (!callState || callState !== st) return;
+        try { L2.detach(); } catch (e) { /* ignore */ }
+        if (canvas) show(canvas, false);
+        if (fb) show(fb, true);
+        toast("这台设备的 WebGL 画不出这个模型，已换成静态头像", true);
+      });
+    }
     L2.attach(canvas, lineModel).then(function () {
       if (!callState || callState !== st || !callState.video) { L2.detach(); return; }
       show(canvas, true);
@@ -2963,7 +3217,7 @@
     if (!s) return "";
     if (s.isGroup) return s.title || "群聊";
     var c = characterFor(s);
-    return (c ? (c.name || "角色") : "助手") + (s.title && s.title !== "新对话" ? " · " + s.title : "");
+    return (c ? (c.name || "角色") : aiName()) + (s.title && s.title !== "新对话" ? " · " + s.title : "");
   }
   function renderMoments() {
     var box = $("#phoneMoments");
@@ -3228,6 +3482,11 @@
     on("#phoneAddCancel", "click", function () { showAddSheet(false); });
     on("#phAddMoment", "click", function () { showAddSheet(false); openMoments(); });
     on("#phAddContact", "click", function () { showAddSheet(false); newPhoneContact(); });
+    /* 手机群聊：走主群聊那个建群弹窗，但模式是 phone（不绑线、不导记忆） */
+    on("#phAddGroup", "click", function () {
+      showAddSheet(false);
+      if (window.DL && DL.openGroupModal) DL.openGroupModal("phone");
+    });
     on("#phoneBack", "click", function () { hangUp(true); goList(); });
     on("#phoneMomentsBack", "click", closeMoments);
     on("#phoneMomentsClose", "click", closePhone);
@@ -3238,7 +3497,11 @@
       if (f) handleMomentImage(f);
     });
     on("#phoneSend", "click", sendText);
-    on("#phoneInput", "keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); sendText(); } });
+    on("#phoneInput", "keydown", function (e) {
+      /* 输入法组字中按回车是在「上屏选词」，不是要发送 —— 不判 isComposing 会把半截拼音发出去 */
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter") { e.preventDefault(); sendText(); }
+    });
     on("#phoneSetBtn", "click", function () { openPhoneSettings(); });
     on("#phoneMore", "click", function () {
       var row = document.querySelector("#phoneChatView .phone-actions");
@@ -3255,11 +3518,6 @@
     on("#phoneActVoice", "click", toggleVoice);
     on("#phoneActCall", "click", function () { startCall(false); });
     on("#phoneActVideo", "click", function () { startCall(true); });
-    on("#phoneActAvatar", "click", function () {
-      var row = document.querySelector("#phoneChatView .phone-actions");
-      if (row) row.hidden = true;   /* 和其它动作一致：点完就把功能条收起来 */
-      openPhoneLineSheet();
-    });
     on("#phoneImgInput", "change", function (e) {
       var f = e.target.files && e.target.files[0];
       e.target.value = "";
@@ -3284,6 +3542,8 @@
     openPhone: openPhone,
     openPhoneFor: openPhoneFor,
     closePhone: closePhone,
+    /* 手机页开着的时候，外部（比如刚建完群）需要它重画列表 —— renderAll 不管这块 */
+    refreshList: function () { try { if (!$("#phoneModal") || $("#phoneModal").hidden) return; if (ps.view === "list") renderList(); } catch (e) { /* ignore */ } },
     /* 当前手机页这条线的独立背景（没设过返回空 → app.js 回落到全局手机背景） */
     phoneLineBg: function () {
       var s = sessionById(ps.sid);
@@ -3299,15 +3559,25 @@
     applyAutoShare: applyAutoShare,
     /* 长回复拆成多条短消息（回归测试直接测它） */
     splitReply: function (t) { return splitPhoneReply(t); },
+    /* 手机群的系统提示词（回归测试用：验证绑线的记忆与表情包真的进了提示词） */
+    groupSys: function (s) { return buildGroupSysPhone(s); },
+    groupMembers: function (s) { return phoneGroupMembers(s); },
     /* 双线：从模型回复里剥出「线下」那段（测试与调试用） */
     splitOffline: function (t) { return splitOffline(t); },
     /* 删一条手机消息（连同绑定的主聊天那条）。名字带 Phone 前缀，
        免得以后主聊天那边也挂一个 deleteMsg 撞名。 */
     deletePhoneMessage: function (msg) { return deletePhoneMsg(ps.sid, msg); },
     splitSpeakers: function (t, s) { return splitPhoneSpeakers(t, s); },
-    syncPhoneOpening: function () { return syncPhoneOpening(); }
+    syncPhoneOpening: function () { return syncPhoneOpening(); },
+    /* 回归测试 / 调试：直接跑一轮手机生成，不经过输入框与发送键
+       （双段式：正文一段、挑表情一段，两条都在这里验证） */
+    reply: function (sid) { return genReply(sid || ps.sid); },
+    pickSticker: function (s, text, who) { return pickSticker(s, text, who); }
   };
   Object.keys(api).forEach(function (k) {
+    /* 同上（roleplay.js）：只转发现有函数，undefined 成员会让调用点抛
+       「Cannot read property 'apply' of undefined」，看着像框架问题。 */
+    if (typeof api[k] !== "function") return;
     D[k] = function () { syncModules(); return api[k].apply(null, arguments); };
   });
   /* 返回键：app.js 的 onBackKey 会先问这里（和相机层同一套约定） */
@@ -3325,6 +3595,32 @@
     isOpen: function () {
       if (callState) return true;      /* 通话中：返回键先挂断 */
       var el = $("#phoneModal"); return !!(el && !el.hidden);
+    },
+    /* 返回键逐级退（10-24 用户要求：手机页的返回键必须是「返回上一级」）：
+       顺序 = 浮层 → 通话 → 动态 → 聊天页里的动作条 / 多选 → 列表。
+       返回 true 表示「吃掉了这次返回」，false 交给上层（关手机）。 */
+    back: function () {
+      var el = $("#phoneModal");
+      if (!el || el.hidden) return false;
+      /* 1) 两个浮层都压在聊天页上面，先收 */
+      var sheet = $("#phoneSheet");
+      if (sheet && !sheet.hidden) { closeSheet(); return true; }
+      var addSheet = $("#phoneAddSheet");
+      if (addSheet && !addSheet.hidden) { show(addSheet, false); return true; }
+      /* 2) 通话中 → 挂断 */
+      if (callState) { hangUp(true); return true; }
+      /* 3) 动态页 → 列表 */
+      if (ps.view === "moments") { closeMoments(); return true; }
+      /* 4) 聊天页：功能条 → 多选 → 列表 */
+      if (ps.view === "chat") {
+        var row = document.querySelector("#phoneChatView .phone-actions");
+        if (row && !row.hidden) { row.hidden = true; return true; }
+        if (ps.pick) { exitPick(); return true; }
+        goList();
+        return true;
+      }
+      /* 5) 已在列表：不自作主张关手机，交回上层 */
+      return false;
     },
     close: function () {
       if (callState) { hangUp(false); return; }

@@ -178,7 +178,7 @@
       if (!text) { UI.toast("先写点什么", true); return; }
       var asTime = $("#reminderAsTime") && $("#reminderAsTime").checked;
       var at = $("#reminderAt") ? String($("#reminderAt").value || "") : "";
-      var sid = state.sessionId || "";
+      var sid = openSid || state.sessionId || "";
       var due = 0;
       if (asTime) {
         if (!at) { UI.toast("先把约定时间选上", true); return; }
@@ -204,7 +204,13 @@
       UI.toast("记下了");
     }
 
-    function open() {
+    /* 面板是从哪条线打开的。手机页会带自己的 sid 过来 —— 以前这里恒用
+       state.sessionId（主聊天当前那条），于是手机线的备忘录会按另一条线的
+       故事时间偏移算、红点也记在别人头上。 */
+    var openSid = "";
+
+    function open(sid) {
+      openSid = String(sid || "");
       sync();
       UI.openModal("reminderModal");
       renderList();

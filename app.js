@@ -92,13 +92,17 @@
   let lastViewH = 0;
   function syncViewportHeight() {
     const vv = window.visualViewport;
-    let h = Math.round((vv && vv.height) ? vv.height : window.innerHeight);
-    if (!(h > 0)) return;
-    /* 键盘收起后有些机型的 visualViewport.height 不还原，页面就永远矮一截
-       （手机页下面留一大片空白，就是这条）。没有输入焦点时不允许比 innerHeight 小太多。 */
-    const aeNow = document.activeElement;
-    const typingNow = !!(aeNow && (aeNow.tagName === "INPUT" || aeNow.tagName === "TEXTAREA"));
-    if (!typingNow && window.innerHeight > h + 40) h = Math.round(window.innerHeight);
+    const inner = Math.round(window.innerHeight);
+    const vh = Math.round((vv && vv.height) ? vv.height : inner);
+    if (!(vh > 0) || !(inner > 0)) return;
+    /* 判据要两条同时成立才算「键盘弹着」：①焦点在可输入元素上 ②视口明显缩小。
+       只看焦点不行：焦点会一直留在输入框上，键盘收了也不还原（手机页只占上半屏）。
+       只看高度差也不行：个别 WebView 的 visualViewport 天生比 innerHeight 小一截，
+       会被一直当成「键盘弹着」，同样永远矮一截。 */
+    const ae = document.activeElement;
+    const editable = !!(ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable));
+    const keyboard = editable && vh < inner - 120;
+    const h = keyboard ? vh : inner;
     const shrank = lastViewH > 0 && h < lastViewH - 40; /* 缩小一大截 ≈ 键盘弹起 */
     /* 贴底判断必须在「改高度之前」做：改完 clientHeight 变小，
        同一位置会被算成「离底很远」，本来贴着底的人也会被误判成在翻历史。
@@ -109,6 +113,10 @@
     }
     lastViewH = h;
     document.documentElement.style.setProperty("--app-h", h + "px");
+    /* 键盘是否真弹着，用类告诉 CSS：只有这种时候才把全屏层换成可视高度。
+       平时用 inset:0 铺满，完全不依赖 --app-h —— 变量一旦存了过期的小值，
+       手机页就只占上半屏（真机上就是这么空出半屏的）。 */
+    document.documentElement.classList.toggle("kb-open", keyboard);
     /* 键盘弹起时把最新消息顶上来，免得最后几条被切掉 —— 但只在用户本来就贴着底部时。
        翻上去看历史时（比如长按选中、往回翻对话）弹键盘，绝不能把他硬拽回末尾。 */
     if (shrank && stick) {
@@ -130,10 +138,13 @@
   let errToasts = 0;
   window.addEventListener("error", (e) => {
     const msg = e && e.message ? e.message : "未知错误";
-    console.error("[DeepLink] 运行时错误：", msg, e && e.filename, e && e.lineno);
+    /* 带上文件名和行号：只报一句「Cannot read property xxx of undefined」，
+       在手机上根本没法定位是哪个文件的哪一行 —— 用户截图发过来也只能猜。 */
+    const where = e && e.filename ? (String(e.filename).split("/").pop() + ":" + (e.lineno || 0)) : "";
+    console.error("[DeepLink] 运行时错误：", msg, where);
     if (errToasts >= 2 || /Failed to fetch|NetworkError|Load failed/i.test(msg)) return;
     errToasts++;
-    try { UI.toast("运行时错误：" + msg, true); } catch (e2) { /* UI 未就绪 */ }
+    try { UI.toast("运行时错误：" + msg + (where ? "（" + where + "）" : ""), true); } catch (e2) { /* UI 未就绪 */ }
   });
 
   function isTouch() {
@@ -168,8 +179,12 @@
   const TINGLAN_ID = "c_tinglan";
 
   function agentId() {
-    if (state.settings.roleplayEnabled) return state.settings.activeCharacterId || TINGLAN_ID;
-    return TINGLAN_ID;
+    /* 「听澜」不再是角色卡，而是助手这个身份本身（用户 10-22 口径）：
+       没有选中任何角色时，activeCharacterId 为空串 = 助手（对外显示叫听澜）。
+       以前这里回落到 TINGLAN_ID，于是每新建一条线都挂到那个角色名下，
+       侧栏还得给它算「主线 / 支线」，可助手本来就不该分线。 */
+    if (state.settings.roleplayEnabled) return state.settings.activeCharacterId || "";
+    return "";
   }
   function characterFor(s) {
     const id = s && s.characterId ? s.characterId : "";
@@ -210,6 +225,18 @@
     return out;
   }
 
+  /* 删完之后把「当前会话」收敛到一条真实存在的线。
+     以前删的正好是当前那条时，state.sessionId 还指着已删的 id —— 聊天区一片空白，
+     下一次发送会走 chat.js 的「没会话就新建」，等于凭空多出一条线。
+     一条都不剩时按正常流程补一条空的，别让应用停在没有会话的状态。 */
+  function reconcileAfterDelete() {
+    const list = Store.getSessions();
+    if (!list.length) { newSession(); return; }
+    if (!list.some((x) => x.id === state.sessionId)) {
+      state.sessionId = Store.getCurrentId() || list[0].id;
+    }
+  }
+
   /* 返回 true = 已经删掉了；false = 用户取消 */
   async function deleteSessionWithGuard(id) {
     const used = groupsUsingLine(id);
@@ -222,7 +249,7 @@
       exitSelect();
       Store.deleteSession(id);
       used.forEach((g) => { try { Store.deleteSession(g.id); } catch (e) { /* 单条失败不影响其它 */ } });
-      if (used.some((g) => g.id === state.sessionId)) state.sessionId = Store.getCurrentId() || "";
+      reconcileAfterDelete();
       renderAll();
       UI.toast("已删除这条线，并解散了 " + used.length + " 个群聊");
       return true;
@@ -231,6 +258,7 @@
     if (!ok) return false;
     exitSelect();
     Store.deleteSession(id);
+    reconcileAfterDelete();
     return true;
   }
 
@@ -238,6 +266,491 @@
      三栏共用 renderSessionList 这个入口，按 state.sideTab 决定渲染哪一栏。
      「现实扮演角色」= 原来的逻辑（当前角色的会话），基本没动。 */
   const sideTab = () => state.sideTab || "role";
+
+  /* 侧栏第一栏（听澜）的图标：未选中 = 听澜头像，选中 = 原来的图标。
+     用户 10-22 口径：把「助手」这一栏直接改名听澜，不再另外摆一个同名角色卡。 */
+  function syncAsstTabFace(on) {
+    const el = $("#sideTabAsstFace");
+    if (!el) return;
+    /* 每次刷新列表都会调到这里：已经是目标形态就别重建 DOM，省掉一次图片解码判断 */
+    const want = on ? "icon" : "face";
+    if (el.dataset.mode === want) return;
+    el.dataset.mode = want;
+    const av = (CONFIG && CONFIG.BUILTIN_ASSISTANT && CONFIG.BUILTIN_ASSISTANT.avatar) || "";
+    if (on || !av) {
+      el.className = "ic";
+      el.innerHTML = UI.iconSvg("creation");
+    } else {
+      el.className = "side-tab-face";
+      el.innerHTML = '<img src="' + bgUrl(av) + '" alt="">';
+    }
+    /* 换形时重放一次动画（10-22 用户要求）：换完 className 再补，
+       否则会被上面那句 className 覆盖掉。强制读一次 offsetWidth 让动画重新开始。 */
+    el.classList.remove("tl-swap");
+    void el.offsetWidth;
+    el.classList.add("tl-swap");
+  }
+
+  /* 老数据归一化：c_tinglan 已不是角色，渲染前一律当空串（助手身份）。
+     两栏都要过一遍 —— 迁移失败过的机器上，这些会话在角色栏里还会带「主线/支线」角标。 */
+  function asAssistantLine(s) {
+    return (s.characterId || "") === TINGLAN_ID ? Object.assign({}, s, { characterId: "" }) : s;
+  }
+
+  /* 「这条是不是助手线」的唯一判据（10-23）。
+     助手已经是「没有角色卡」这个身份本身：characterId 为空串。
+     但群聊的 characterId 也是空串、纯手机角色也一样 —— 只看空串会把它们当成助手，
+     所以三个条件缺一不可。所有需要判助手的地方都用这个，别再各自拼。 */
+  function isAssistantLine(s) {
+    return !!s && !s.isGroup && !s.phoneOnly && !(s.characterId || "");
+  }
+
+  /* ── 生成视频 / 音乐的表单（10-22）──────────────────────
+     必填项不填不放行；非必填也列出来，能预填的都预填。
+     最后一步把「表单 + 角色资料」交给模型写成可执行的提示词，再发去生成。 */
+  const STUDIO_FIELDS = {
+    video: [
+      { k: "desc", label: "画面描述（必填）", type: "textarea", req: true, hint: "一句话说清：谁、在哪、做什么。写不出就写你脑子里第一个画面。", ph: "例：他靠在窗边，手里捏着伞，没撑开" },
+      { k: "duration", label: "时长 / 秒（必填）", type: "number", req: true, def: 5, min: 2, max: 20, hint: "多数接口支持 4-10 秒。越短越稳，越长越容易糊。" },
+      { k: "ratio", label: "比例（必填）", type: "select", req: true, def: "16:9", opts: ["16:9", "9:16", "1:1"], hint: "手机竖屏选 9:16，横屏播放选 16:9。" },
+      { k: "shot", label: "镜头运动", type: "select", req: false, def: "定镜", opts: ["定镜", "缓慢推近", "横向平移", "跟随人物", "手持轻晃"], hint: "定镜最稳；推近用来压情绪；手持适合紧张或纪实感。" },
+      { k: "light", label: "光感", type: "select", req: false, def: "自然光", opts: ["自然光", "暖光", "冷光", "逆光", "夜晚灯光"], hint: "逆光会把人物压成剪影，适合不明说的情绪。" },
+      { k: "framing", label: "景别", type: "select", req: false, def: "中景", opts: ["远景", "中景", "近景", "特写"], hint: "远景交代环境，特写只给一双手或一双眼睛。" },
+      { k: "motion", label: "画面运动强度", type: "range", req: false, def: 3, min: 0, max: 10, hint: "0 几乎静止，10 动得厉害。超过 7 容易糊，慎用。" },
+      { k: "style", label: "风格 / 质感（选填）", type: "text", req: false, ph: "例：胶片颗粒、浅景深、低饱和" }
+    ],
+    music: [
+      { k: "desc", label: "情绪与画面（必填）", type: "textarea", req: true, hint: "写「他走了之后那五分钟」比写「悲伤」有用得多。", ph: "例：空教室，风扇还在转" },
+      { k: "duration", label: "时长 / 秒（必填）", type: "number", req: true, def: 30, min: 10, max: 180, hint: "30 秒够一段完整情绪，超过 60 秒多数模型会开始重复。" },
+      { k: "genre", label: "风格", type: "select", req: false, def: "钢琴", opts: ["钢琴", "弦乐", "民谣", "流行", "电子", "Lo-fi"], hint: "钢琴最不容易出错；电子和 Lo-fi 对节奏感要求高。" },
+      { k: "bpm", label: "节奏 BPM", type: "range", req: false, def: 70, min: 50, max: 160, hint: "60-80 舒缓，80-110 日常，110 以上紧张。别和情绪描述打架。" },
+      { k: "mood", label: "情绪强度", type: "range", req: false, def: 3, min: 1, max: 5, hint: "1 克制，5 饱满。太满容易腻，多数场景 2-3 刚好。" },
+      { k: "space", label: "留白", type: "select", req: false, def: "适中", opts: ["多留白", "适中", "满一些"], hint: "留白多显得克制、有余味；满一些更热闹。" },
+      { k: "voice", label: "人声", type: "select", req: false, def: "不要人声", opts: ["不要人声", "女声", "男声"], hint: "要人声的话模型可能自己编歌词，出来的词通常不能细看。" },
+      { k: "inst", label: "乐器（选填）", type: "text", req: false, ph: "例：大提琴 + 轻微环境音" }
+    ]
+  };
+
+  /* 角色资料：只放「生成画面/音乐需要的」，不塞整段对话 */
+  function studioContext(s) {
+    const parts = [];
+    const ch = characterFor(s);
+    if (ch) {
+      const f = ch.fields || {};
+      const pick = [["aiName", "名字"], ["aiAppearance", "外貌"], ["aiPersona", "性格"],
+        ["aiBackground", "来历"], ["aiLikes", "偏好"]];
+      pick.forEach(function (it) {
+        if (f[it[0]]) parts.push("【" + it[1] + "】" + String(f[it[0]]));
+      });
+      /* 手机角色「功能型 / 还不熟」：不读资料、不出形象（用户 10-22 口径） */
+      if (ch.phoneKind === "casual") {
+        return { text: "", appearance: false, reason: "这个角色是「功能型 / 还不熟」，按设定只作为背景出现" };
+      }
+    }
+    /* 这条线的完整档案：和群聊同一个入口（Memory.lineDossier）。
+       以前这里自己拼了一遍（场景 / 共同经历 / 关系 / 摘要 / 思考 / 手机近况），
+       漏了「对用户的认知」和「图库里的样子」—— 生成视频时形象容易跑。 */
+    try {
+      const dz = (window.Memory && Memory.lineDossier)
+        ? Memory.lineDossier(s, ch, { budget: 1400, talk: 10 }) : "";
+      if (dz) parts.push("【这条线的档案】\n" + dz);
+    } catch (e) { /* 档案读不出来不影响表单 */ }
+    return { text: parts.join("\n"), appearance: true, reason: "" };
+  }
+
+  function studioCostText(kind, f) {
+    const sec = Number(f.duration) || 0;
+    return kind === "video"
+      ? "预计：1 次提示词优化 + 1 次视频生成（" + sec + " 秒）。视频按你所用服务商的秒数计费。"
+      : "预计：1 次提示词优化 + 1 次音乐生成（" + sec + " 秒）。音乐按你所用服务商的时长计费。";
+  }
+
+  let studioKind = "";
+
+  function openStudio(kind) {
+    const s = session();
+    if (!s) { UI.toast("先打开一条对话", true); return; }
+    if (!Media.capable(kind, state.settings)) {
+      UI.toast("还没配置" + (kind === "video" ? "视频" : "音乐") + "生成（设置 → " + (kind === "video" ? "视频" : "音乐") + "生成）", true);
+      return;
+    }
+    studioKind = kind;
+    studioState = null;
+    studioHideAsk();
+    const box = $("#studioBody");
+    if (!box) return;
+    box.innerHTML = "";
+    setText("#studioTitle", kind === "video" ? "生成视频" : "生成音乐");
+
+    const ctx = studioContext(s);
+    setText("#studioHint", ctx.appearance
+      ? "会用到这个角色的设定、记忆摘要、共同经历和思考记录；不填必填项也能生成，但描述越具体越准。"
+      : (ctx.reason || "只作为背景出现"));
+
+    STUDIO_FIELDS[kind].forEach(function (fd) {
+      const wrap = document.createElement("label");
+      wrap.className = "field";
+      const t = document.createElement("span");
+      t.textContent = fd.label;
+      wrap.appendChild(t);
+
+      const addHint = function (el) {
+        if (!fd.hint) return;
+        const h = document.createElement("p");
+        h.className = "hint";
+        h.textContent = fd.hint;
+        el.appendChild(h);
+      };
+
+      /* 滑杆：自研控件（原生 range 在安卓样式不可控） */
+      if (fd.type === "range") {
+        makeRange(wrap, fd.k, fd.min, fd.max, fd.def, null);
+        addHint(wrap);
+        box.appendChild(wrap);
+        return;
+      }
+
+      let el;
+      if (fd.type === "textarea") {
+        el = document.createElement("textarea");
+        el.rows = 3;
+        if (fd.ph) el.placeholder = fd.ph;
+        el.value = (s.scene || "").slice(0, 200);
+      } else if (fd.type === "select") {
+        el = document.createElement("select");
+        (fd.opts || []).forEach(function (o) {
+          const op = document.createElement("option");
+          op.value = o; op.textContent = o;
+          el.appendChild(op);
+        });
+        el.value = fd.def;
+      } else if (fd.type === "check") {
+        el = document.createElement("input");
+        el.type = "checkbox";
+        el.checked = !!fd.def;
+      } else {
+        el = document.createElement("input");
+        el.type = fd.type === "number" ? "number" : "text";
+        if (fd.min != null) el.min = fd.min;
+        if (fd.max != null) el.max = fd.max;
+        if (fd.ph) el.placeholder = fd.ph;
+        el.value = fd.def != null ? String(fd.def) : "";
+      }
+      el.setAttribute("data-studio", fd.k);
+      wrap.appendChild(el);
+      addHint(wrap);
+      box.appendChild(wrap);
+    });
+
+    setText("#studioCost", studioCostText(kind, { duration: (kind === "video" ? state.settings.videoDuration : state.settings.musicDuration) || 5 }));
+    UI.openModal("studioModal");
+  }
+
+  function studioValues() {
+    const vals = {};
+    const els = document.querySelectorAll("#studioBody [data-studio]");
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i];
+      const k = el.getAttribute("data-studio");
+      /* 自研滑杆把值放在 data-value 上（它不是表单控件，没有 .value） */
+      if (el.classList && el.classList.contains("rng")) {
+        vals[k] = String(el.getAttribute("data-value") || "");
+        continue;
+      }
+      vals[k] = el.type === "checkbox" ? !!el.checked : String(el.value || "").trim();
+    }
+    return vals;
+  }
+
+  /* 把表单 + 资料交给模型，写成一段可执行的提示词 */
+  async function studioPrompt(kind, vals, ctx) {
+    const label = kind === "video" ? "视频" : "音乐";
+    const sys = [
+      "你要把用户填的「" + label + "需求」和「角色资料」合并成一段给" + label + "生成模型用的提示词。",
+      "要求：",
+      "1. 只输出提示词本身，不要解释、不要标题、不要引号。",
+      "2. 中文，150 字以内，具体可执行。",
+      kind === "video"
+        ? "3. 写清：镜头怎么走、光是什么样、人物在做什么、画面氛围。不要写心理活动，不要写剧情旁白。"
+        : "3. 写清：情绪走向、节奏快慢、主要乐器、整体质感。不要写歌词。",
+      "4. 角色资料只取与画面/情绪有关的，不要把人设整段抄进去。",
+      "5. 如果资料里说这个角色只作为背景出现，就不要描述人物形象，只写环境与物件。"
+    ].join("\n");
+
+    const userText = [
+      "【需求】" + (vals.desc || ""),
+      vals.style ? "【风格】" + vals.style : "",
+      "【时长】" + (vals.duration || "") + " 秒",
+      kind === "video" ? "【比例】" + (vals.ratio || "") : (vals.lyrics ? "【需要人声】" : ""),
+      ctx.text ? "【角色资料】\n" + ctx.text : ""
+    ].filter(Boolean).join("\n");
+
+    const r = await Api.run({
+      settings: state.settings,
+      messages: [{ role: "system", content: sys }, { role: "user", content: userText }],
+      thinking: false,
+      effort: "low"
+    });
+    if (r && r.usage && typeof recordUsage === "function") recordUsage(null, r.usage, "", kind);
+    return String((r && r.content) || "").trim();
+  }
+
+  let studioState = null;   /* { extra, asked[] } —— 追问过程中攒的回答与已问过的问题 */
+
+  async function studioRun() {
+    const kind = studioKind;
+    const s = session();
+    if (!kind || !s) return;
+
+    const askOpen = (function () { const b = $("#studioAsk"); return b && !b.hidden; })();
+    const vals = studioValues();
+
+    if (askOpen) {
+      /* 追问轮：把这一轮回答并进 extra，再让模型判断够不够。
+         空着点也算「不想答了」，直接按现有信息出 —— 提示里就是这么写的。 */
+      const inp = $("#studioAskInput");
+      const ans = inp ? String(inp.value || "").trim() : "";
+      if (!studioState) studioState = { extra: "", asked: [], skip: false };
+      if (!ans) studioState.skip = true;
+      else {
+        studioState.extra = studioState.extra ? (studioState.extra + "\n" + ans) : ans;
+        studioState.skip = false;
+      }
+      vals.extra = studioState.extra || "";
+    } else {
+      /* 首次提交：必填项就地校验 */
+      const need = STUDIO_FIELDS[kind].filter(function (f) { return f.req; });
+      const miss = need.filter(function (f) { return !String(vals[f.k] || "").trim(); });
+      if (miss.length) {
+        UI.toast("还差：" + miss.map(function (f) { return f.label.replace("（必填）", ""); }).join("、"), true);
+        return;
+      }
+      studioState = { extra: "", asked: [] };
+      vals.extra = "";
+    }
+
+    const ctx = studioContext(s);
+    const go = $("#studioGo");
+    if (go) go.disabled = true;
+    UI.toast("正在看还缺什么…");
+
+    let rv = null;
+    try { rv = await studioReview(kind, vals, ctx, studioState.asked); }
+    catch (e) { rv = { ready: true, prompt: vals.desc }; }
+    if (go) go.disabled = false;
+
+    /* 用户选了「不答了」：模型就算还觉得缺，也按现有信息直接出 */
+    if (studioState.skip && rv && !rv.ready) {
+      rv = { ready: true, prompt: [vals.desc || "", studioState.extra || ""].filter(Boolean).join("；") };
+    }
+
+    /* 还在缺、而且没问够（最多三轮追问）→ 继续问 */
+    if (rv && !rv.ready && (rv.questions || []).length && studioState.asked.length < 6) {
+      studioState.asked = studioState.asked.concat(rv.questions);
+      studioShowAsk(rv.questions);
+      setText("#studioCost", "答完点「继续」；不想答就直接点，我按现有信息生成。");
+      return;
+    }
+
+    const prompt = (rv && rv.prompt) ? rv.prompt : (vals.desc || "");
+    studioHideAsk();
+    UI.closeModal("studioModal");
+    UI.toast("正在生成" + (kind === "video" ? "视频" : "音乐") + "，可能要等一会儿…");
+    try {
+      const opts = Object.assign({}, state.settings, {
+        videoDuration: kind === "video" ? Number(vals.duration) || 5 : state.settings.videoDuration,
+        videoRatio: kind === "video" ? (vals.ratio || "16:9") : state.settings.videoRatio,
+        musicDuration: kind === "music" ? Number(vals.duration) || 30 : state.settings.musicDuration,
+        musicWithLyrics: kind === "music" ? (vals.voice && vals.voice !== "不要人声") : state.settings.musicWithLyrics
+      });
+      const url = kind === "video" ? await Media.makeVideo(prompt, opts) : await Media.makeMusic(prompt, opts);
+      if (!url) throw new Error("没有拿到结果地址");
+      const field = kind === "video" ? "video" : "audio";
+      mutateSession(s.id, function (msgs) {
+        const item = { role: "assistant", content: "", ts: Date.now() };
+        item[field] = url;
+        msgs.push(item);
+      });
+      renderAll();
+    } catch (e) {
+      UI.toast("生成失败：" + (e && e.message ? e.message : e), true);
+    }
+  }
+
+  /* 加号菜单的三个入口。
+     ⚠️ 这里只能用原生 getElementById：本块在 IIFE 靠前的位置执行，
+     那时 app.js 自己的 $ 还是 const 未初始化（TDZ），用它绑定会直接抛错、
+     按钮全部失效。 */
+  (function bindStudio() {
+    const gid = function (id) { return document.getElementById(id); };
+    const hidePlus = function () { const m = gid("plusMenu"); if (m) m.hidden = true; };
+    const pv = gid("plusVideo"), pm = gid("plusMusic"), pd = gid("plusDoc");
+    if (pv) pv.addEventListener("click", function () { hidePlus(); openStudio("video"); });
+    if (pm) pm.addEventListener("click", function () { hidePlus(); openStudio("music"); });
+    if (pd) pd.addEventListener("click", function () {
+      hidePlus();
+      if (window.DL && DL.exportDocNow) DL.exportDocNow();
+      else UI.toast("导出功能还没就绪", true);
+    });
+    const sc = gid("studioCancel");
+    if (sc) sc.addEventListener("click", function () { UI.closeModal("studioModal"); });
+    const sg = gid("studioGo");
+    if (sg) sg.addEventListener("click", studioRun);
+  })();
+
+  /* 把表单 + 资料交给模型：它要么指出还缺什么（追问），要么直接给最终提示词。
+     返回 { ready, questions, prompt } —— 一轮调用同时做「评估」和「专业化」。
+     追问最多三轮，防止绕圈。 */
+  async function studioReview(kind, vals, ctx, asked) {
+    const label = kind === "video" ? "视频" : "音乐";
+    const sys = [
+      "你在帮用户把「" + label + "需求」整理成能给生成模型用的提示词。",
+      "",
+      "先判断信息够不够：",
+      kind === "video"
+        ? "生成一段视频至少要清楚：镜头里谁在、在哪、做什么、光是什么样、画面什么氛围。"
+        : "生成一段音乐至少要清楚：情绪走向、节奏快慢、主要乐器、整体质感。",
+      "",
+      "如果缺关键信息，就提 1-2 个具体问题。要求：",
+      "- 每个问题都能用一句话回答，不要开放式大问题（比如「你想要什么感觉」）",
+      "- 只问最影响结果的那一两项，不要把所有能问的都问一遍",
+      "- 已经问过的问题不要再问（见下方「已问过」）",
+      "",
+      "信息够了就给最终提示词：中文、150 字以内、具体可执行、不写心理活动、不写歌词。",
+      ctx && !ctx.appearance ? "注意：这个角色只作为背景出现，提示词里不要描述人物形象，只写环境与物件。" : "",
+      "",
+      "只输出 JSON，不要任何别的话：",
+      '缺信息时：{"ready":false,"questions":["问题一","问题二"]}',
+      '够了时：{"ready":true,"prompt":"最终提示词"}'
+    ].filter(Boolean).join("\n");
+
+    const userText = [
+      "【需求】" + (vals.desc || ""),
+      kind === "video" ? [
+        vals.shot ? "镜头：" + vals.shot : "",
+        vals.light ? "光感：" + vals.light : "",
+        vals.framing ? "景别：" + vals.framing : "",
+        vals.motion ? "运动强度：" + vals.motion + "/10" : "",
+        vals.ratio ? "比例：" + vals.ratio : ""
+      ].filter(Boolean).join("｜") : "",
+      kind === "music" ? [
+        vals.genre ? "风格：" + vals.genre : "",
+        vals.bpm ? "BPM：" + vals.bpm : "",
+        vals.mood ? "情绪强度：" + vals.mood + "/5" : "",
+        vals.space ? "留白：" + vals.space : "",
+        vals.voice && vals.voice !== "不要人声" ? "人声：" + vals.voice : "",
+        vals.inst ? "乐器：" + vals.inst : ""
+      ].filter(Boolean).join("｜") : "",
+      vals.style ? "额外风格（视频）：" + vals.style : "",
+      "【时长】" + (vals.duration || "") + " 秒",
+      asked && asked.length ? "【已问过】" + asked.join(" / ") : "",
+      (vals.extra || "") ? "【用户补充】" + vals.extra : "",
+      ctx && ctx.text ? "【角色资料】\n" + ctx.text : ""
+    ].filter(Boolean).join("\n");
+
+    const r = await Api.run({
+      settings: state.settings,
+      messages: [{ role: "system", content: sys }, { role: "user", content: userText }],
+      thinking: false,
+      effort: "low"
+    });
+    if (r && r.usage && typeof recordUsage === "function") recordUsage(null, r.usage, "", kind);
+    const raw = String((r && r.content) || "").trim();
+    /* 模型偶尔会包 ```json 或者多写一句话，抠第一个花括号块 */
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) {
+      try {
+        const o = JSON.parse(m[0]);
+        if (o && o.ready && o.prompt) return { ready: true, prompt: String(o.prompt).trim() };
+        if (o && Array.isArray(o.questions) && o.questions.length) {
+          return { ready: false, questions: o.questions.map(String).slice(0, 2) };
+        }
+      } catch (e) { /* 解析失败走下面的兜底 */ }
+    }
+    /* 解析不出来就当它给了提示词（总比让用户白填一遍好） */
+    return { ready: true, prompt: raw || vals.desc || "" };
+  }
+
+  /* 表单底部的追问区 */
+  function studioShowAsk(questions) {
+    const box = $("#studioAsk");
+    const q = $("#studioAskQ");
+    const inp = $("#studioAskInput");
+    if (!box || !q) return;
+    q.innerHTML = "";
+    (questions || []).forEach(function (t) {
+      const d = document.createElement("div");
+      d.className = "ask-item";
+      d.textContent = t;
+      q.appendChild(d);
+    });
+    box.hidden = false;
+    if (inp) { inp.value = ""; try { inp.focus(); } catch (e) { /* ignore */ } }
+    const go = $("#studioGo");
+    if (go) go.textContent = "继续";
+  }
+
+  function studioHideAsk() {
+    const box = $("#studioAsk");
+    if (box) box.hidden = true;
+    const go = $("#studioGo");
+    if (go) go.textContent = "生成";
+  }
+
+  /* 自研滑杆：轨道 + 填充 + 拇指，触摸和鼠标同一套换算。
+     返回一个 set(v) 便于外部重置。 */
+  function makeRange(wrap, key, min, max, val, onChange) {
+    const root = document.createElement("div");
+    root.className = "rng";
+    root.setAttribute("data-studio", key);
+    const track = document.createElement("div");
+    track.className = "rng-track";
+    const fill = document.createElement("div");
+    fill.className = "rng-fill";
+    const thumb = document.createElement("div");
+    thumb.className = "rng-thumb";
+    track.appendChild(fill);
+    track.appendChild(thumb);
+    const out = document.createElement("span");
+    out.className = "rng-val";
+    root.appendChild(track);
+    root.appendChild(out);
+    wrap.appendChild(root);
+
+    const set = function (v) {
+      const n = Math.max(min, Math.min(max, Math.round(Number(v) || min)));
+      const p = (n - min) / (max - min);
+      fill.style.width = (p * 100) + "%";
+      thumb.style.left = (p * 100) + "%";
+      out.textContent = String(n);
+      root.setAttribute("data-value", String(n));
+      if (onChange) onChange(n);
+      return n;
+    };
+
+    const pick = function (e) {
+      const r = track.getBoundingClientRect();
+      const cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+      const ratio = (cx - r.left) / (r.width || 1);
+      return min + ratio * (max - min);
+    };
+
+    let dragging = false;
+    const down = function (e) { dragging = true; set(pick(e)); if (e.cancelable) e.preventDefault(); };
+    const move = function (e) { if (!dragging) return; set(pick(e)); if (e.cancelable) e.preventDefault(); };
+    const up = function () { dragging = false; };
+
+    root.addEventListener("touchstart", down, { passive: false });
+    root.addEventListener("touchmove", move, { passive: false });
+    root.addEventListener("touchend", up);
+    root.addEventListener("touchcancel", up);
+    root.addEventListener("mousedown", down);
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+
+    set(val);
+    return set;
+  }
 
   function renderSessionList() {
     const tab = sideTab();
@@ -247,11 +760,16 @@
     if (phonePane) phonePane.hidden = tab !== "phone";
     const tabs = document.querySelectorAll("#sideTabs .side-tab");
     for (let i = 0; i < tabs.length; i++) tabs[i].classList.toggle("on", tabs[i].getAttribute("data-side") === tab);
+    syncAsstTabFace(tab === "assistant");
 
     if (tab === "assistant") {
-      /* 听澜的线算「助手」这一栏 —— 它是内置助手，不是要切过去才能聊的角色卡。
-         不加这一条，听澜的会话会被分到「角色」栏，助手栏反而空掉。 */
-      const list = Store.getSessions().filter((s) => (!s.characterId || s.characterId === TINGLAN_ID) && !s.isGroup && !s.phoneOnly);
+      /* 听澜已经不是角色卡了：老数据里可能还有挂在 c_tinglan 名下的会话，
+         渲染前统一归一化成空串（空串 = 助手身份），这样：
+         ① 它们会出现在助手栏；② 不再带「主线 / 支线」角标（助手不分线）。 */
+      const list = Store.getSessions()
+        .filter((s) => !s.isGroup && !s.phoneOnly)
+        .map(asAssistantLine)
+        .filter((s) => !s.characterId);
       list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
       UI.sessionListEl(list, state.sessionId, {
         onOpen(id) {
@@ -277,7 +795,9 @@
        群里那条线两边都不收（助手栏又把 isGroup 滤掉了）→ 群聊从侧栏消失，切走就回不去。
        群聊跟「当前角色」无关，放这一栏最顺。 */
     const aid = state.settings.roleplayEnabled ? (state.settings.activeCharacterId || "") : "";
-    const list = Store.getSessions().filter((s) => (s.isGroup || (s.characterId || "") === aid) && !s.phoneOnly);
+    const list = Store.getSessions()
+      .filter((s) => (s.isGroup || (s.characterId || "") === aid) && !s.phoneOnly)
+      .map(asAssistantLine);
     list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
     UI.sessionListEl(list, state.sessionId, {
       onOpen(id) {
@@ -436,14 +956,36 @@
     popoverClose();
     if (wasOpen) return;
     poAnchor = anchor;
+    /* 加号菜单是底部抽屉（10-24 用户要求：像微信一样从下方弹起），
+       不参与气泡定位 —— 定位交给 CSS，这里只清掉可能残留的内联坐标。 */
+    if (sel === "#plusMenu") {
+      panel.style.left = "";
+      panel.style.top = "";
+      panel.hidden = false;
+      return;
+    }
     popoverPlace(panel, anchor, above);
   }
+  /* 加号菜单按身份裁剪（10-24 用户口径）：
+     生成视频 / 生成音乐 / 导出关系评析 是听澜的能力，普通角色线里不该出现。
+     它们依赖文生视频、文生音乐、关系剖析这三套助手侧能力，摆在角色对话里只会点出一堆错。 */
+  function syncPlusMenu() {
+    const s = session();
+    const isAsst = (window.DL && typeof DL.isAssistantLine === "function")
+      ? DL.isAssistantLine(s) : true;
+    ["#plusVideo", "#plusMusic", "#plusDoc"].forEach((sel) => {
+      const el = $(sel);
+      if (el) el.hidden = !isAsst;
+    });
+  }
+
   function bindPopovers() {
     const pb = $("#plusBtn");
     if (pb && !pb.__poBound) {
       pb.__poBound = true;
       pb.addEventListener("click", (e) => {
         e.preventDefault();
+        syncPlusMenu();
         popoverToggle("#plusMenu", pb, true);      /* 贴在加号上方，和它相连 */
       });
     }
@@ -506,8 +1048,21 @@
     UI.toast("已关掉时间系统（对话里回到现实时间）");
   }
 
+  /* 上一次渲染的是哪条线：用来判「这次是不是换了会话」 */
+  let lastRenderedSid = "";
+
   function renderAll() {
     const s = session();
+    /* 切会话就把还没发出去的附件收掉 —— 附件属于「正在写的这条消息」，不是全局的。
+       openSessionById / 侧栏点击 / newSession 三条路都汇到这里，比在每个入口各补一行可靠：
+       少补一处就是「A 线挂的图发进 B 线」。sid 没变时不动（保存设置、删单条消息），
+       免得用户刚选好的图被清掉。 */
+    const sidNow = s ? s.id : "";
+    if (sidNow !== lastRenderedSid) {
+      lastRenderedSid = sidNow;
+      state.attachments = [];
+      try { if (window.DL && DL.renderAttachments) DL.renderAttachments(); } catch (e) { /* 模块未就绪 */ }
+    }
     if (s && sweepImageExpiry(s)) Store.saveSessions(Store.getSessions());
     const ch = characterFor(s);
     setText("#chatTitle", s ? (s.title || (ch ? ch.name : "新对话")) : "新对话");
@@ -531,7 +1086,16 @@
   }
 
   /* ── 群聊：新建一个多人群（成员 ≥ 2），可选从某条已有的线导入记忆 ── */
-  function openGroupModal() {
+  /* 群聊分两种（10-22 用户口径）：
+     "main"  = 现实扮演群聊，每个成员绑一条线、可以导记忆；
+     "phone" = 手机群聊，模拟多人物线上聊天，消息走独立的 phone.msgs。
+     两种**要求和规则基本一致**（都绑线、都能导记忆），但绑定、记忆、消息互不相通：
+     手机群用自己的 memberLine 记绑哪条线，主群那份不受影响。 */
+  let groupMode = "main";
+  function openGroupModal(mode) {
+    groupMode = mode === "phone" ? "phone" : "main";
+    const ttl = document.querySelector("#groupModal .modal-head h2");
+    if (ttl) ttl.textContent = groupMode === "phone" ? "新建手机群聊" : "新建群聊";
     const box = $("#groupMembers");
     if (box) {
       box.innerHTML = "";
@@ -555,8 +1119,10 @@
           nm.className = "g-name";
           nm.textContent = c.name || "角色";
           row.appendChild(cb); row.appendChild(av); row.appendChild(nm);
-          /* 关联哪条线（10-18 用户口径：进群就必须给每人选一条线）。
-             同步到各自线靠这条绑定；没有线的角色不让进群 —— 否则它那份记忆永远同步不到。 */
+          /* 关联哪条线（10-18 主群、10-22 手机群同口径：进群就必须给每人选一条线）。
+             手机群的绑定写在自己的 memberLine 里，和主群互不相干 —— 同一个角色可以在
+             主群里绑 A 线、在手机群里绑 B 线，互不覆盖。
+             手机群优先列出「已经有手机消息」的线：那才是这个人在手机上的日常。 */
           const lines = Store.getSessions().filter((x) => !x.isGroup && (x.characterId || "") === c.id);
           if (!lines.length) {
             /* 没有线的角色：不给下拉，直接写「没有线」—— 留一块空白看着像按钮没渲染出来 */
@@ -569,14 +1135,25 @@
             box.appendChild(row);
             return;
           }
+          const hasPhone = (x) => {
+            const arr = (x.phone && x.phone.msgs) || [];
+            for (let k = 0; k < arr.length; k++) { if (arr[k] && arr[k].role) return 1; }
+            return 0;
+          };
           const sel = document.createElement("select");
           sel.className = "g-line";
           sel.setAttribute("data-char", c.id);
-          lines.sort((a, b) => (b.mainLine ? 1 : 0) - (a.mainLine ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0));
+          if (groupMode === "phone") {
+            lines.sort((a, b) => hasPhone(b) - hasPhone(a) || (b.updatedAt || 0) - (a.updatedAt || 0));
+          } else {
+            lines.sort((a, b) => (b.mainLine ? 1 : 0) - (a.mainLine ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0));
+          }
           lines.forEach((x) => {
             const o = document.createElement("option");
             o.value = x.id;
-            o.textContent = (x.title || "新对话") + (x.mainLine ? "（主线）" : "");
+            /* 有手机消息的线前面点一个「●」：下拉本身就窄，写「（有手机消息）」会把文字挤断，
+               一个点足够区分，也省得把标题挤没。 */
+            o.textContent = (hasPhone(x) ? "● " : "") + (x.title || "新对话") + (x.mainLine ? "（主线）" : "");
             sel.appendChild(o);
           });
           row.appendChild(sel);
@@ -630,9 +1207,30 @@
     let title = $v("#groupName").trim();
     if (!title) title = names.join("、");
     const s = Store.createSession("");
+    /* 导出选项先取出来：两种群都要用（手机群也走导入） */
+    const src = $v("#groupImport");
+    if (groupMode === "phone") {
+      /* 手机群：独立的线上聊天，消息走 phone.msgs（每条带 speaker / speakerName），
+         不进主聊天列表。memberLine 是这份群自己的绑定 —— 与主群那份互不覆盖。 */
+      Store.updateSession(s.id, {
+        isGroup: true, members: ids, title: title, memberLine: memberLine,
+        phoneOnly: true, phoneGroup: true,
+        phone: { msgs: [] }
+      });
+      /* 和主群一样可以导记忆：口径见 importLineMemoryToGroup（只写进被导入那条线的成员块） */
+      if (src) {
+        const from = sessionById(src);
+        if (from) importLineMemoryToGroup(s.id, from);
+      }
+      UI.closeModal("groupModal");
+      renderAll();
+      /* 手机页可能正开着：让它重画列表，否则新建的群要退出去再进来才看得见 */
+      try { if (window.DL && DL.refreshList) DL.refreshList(); } catch (e) { /* ignore */ }
+      UI.toast("手机群建好了，去「手机角色」那一栏里进去");
+      return;
+    }
     Store.updateSession(s.id, { isGroup: true, members: ids, title: title, memberLine: memberLine });
     /* 可选：把某条线的记忆导进群聊（口径见 importLineMemoryToGroup） */
-    const src = $v("#groupImport");
     if (src) {
       const from = sessionById(src);
       if (from) importLineMemoryToGroup(s.id, from);
@@ -1015,7 +1613,7 @@
   }
 
   /* 启动自检：这些 id 缺任何一个都可能让界面部分失灵 */
-  const REQUIRED_IDS = "cameraModal camStage camVideo camCanvas camShutter camClose camAttach camRetake camTextInput camEdit charSplitAgain charSplitRoleOnly charReadyHint plusBtn plusCamera plusFile plusMenu headMenu headMenuSet worldView worldViewBack worldViewBody attachmentBar audioInput avatarInput chatTitle customSearchField deleteCancel deleteList deleteOk dialogCancel dialogOk dialogText dialogTitle passModal passTitle passNote passInput passConfirmWrap passConfirm passOk passCancel pickModal pickTitle pickList replayIntroBtn resetSettingsBtn dataUsageLine dropHint editCancel editSave editText editTitle effortSelect effortWrap fileInput histFrom histKeyword histKeywordField histResults histSearchBtn histModule histScope histTimeField histTo imgChip imgToggle input main menuBtn messages micBtn modeBtn modeSwitch modelBadge modelPanel modelPanelList modelSwitchBtn msgMenuList rowMenuModal rowMenuList rowMenuTitle newChatBtn openSearchBtn openSettingsBtn openThemesBtn saveSettingsBtn scrim searchModeSwitch searchToggle selectBar selectCancel selectCopy selectCount selectDelete selfTestBtn selfTestOut sendBtn sessionBtn sessionList sessionPromptReset sessionPromptSave msetAsr msetImg msetMain msetTts msetVision providerNowLine setAsrEnabled setAsrLang setAvatarAiClear setAvatarAiPick setAvatarAiPreview setAvatarUserClear setAvatarUserPick setAvatarUserPreview setCustomKey setCustomUrl setImgEnabled setImgSize setImgToImg setPhoneShareImg setMainCompat setInstances setSearchProvider setSessionAlias setSessionAvatarAiClear setSessionAvatarAiPick setSessionAvatarAiPreview setSessionAvatarUserClear setSessionAvatarUserPick setSessionAvatarUserPreview setSessionFollow setSessionPrompt setSessionTempVal setSessionTemperature setSessionTitle setSessionTopP setSessionTopPVal setSessionScene setSessionSceneEvery setSessionAge setSessionRelation setSessionShared setSessionCognition setSessionAutoBackup sessionRoleWrap sessionMemoryBox charMemoryBox setMemoryList sessionLineBadge sessionCognitionUpdate sessionRelationUpdate sessionReCompress sessionThinkBox sessionThinkRead sessionThinkDigest sessionThinkCorrect sessionThinkCorrectRun setSessionAutoFreeze setThinkAbout sessionCorrectInput sessionCorrectRun sessionBackupNow sessionRestoreBackup sessionSetMain setSystemPrompt setTavilyKey setTempVal setTemperature setTopP setTopPVal setTtsAuto setTtsEnabled setTtsVoice setVideoEnabled setVideoBaseUrl setVideoKey setVideoModel setVideoMode setVideoRatio setVideoSize setVideoDuration setVideoFps setVideoCreatePath setVideoStatusPath setVideoResultField setVideoPollMs setVideoPollMax setVideoTemplate setMusicEnabled setMusicBaseUrl setMusicKey setMusicModel setMusicDuration setMusicFormat setMusicWithLyrics setMusicCreatePath setMusicStatusPath setMusicResultField setMusicPollMs setMusicPollMax setMusicTemplate setVisionEnabled sidebar stopBtn tavilyField themeGrid thinkToggle toasts characterBtn charBar characterModal charList charNewBtn charForm charEmpty charTools charName charSave charFilterRule charFilterEvery charFilterAI charFilterNow charFilterState charSplitBtn charSplitHelp charSplitHint charSplitPanel charSplitInput charSplitRun charSplitCancel charSplitState  aboutVersion openDataBtn dataModal exportScope exportCharWrap exportCharSel exportSessionWrap exportSessionSel exportKeys exportDownload exportCopy importText importFileBtn importTextBtn importFileInput importClipBtn exportShare clearCacheBtn setNoImage setNotifyTasks introModal introTree introDots introNext introPrev introSkip guideTree setImgToText setImgExpireTurns charUsageLine usageModal usageGlobal usageSessions usageChars openUsageBtn setRoleplayEnabled setMyName setMyPersona setMyAppearance setMyBackground setMyLikes setAssistantCompress setCompressModel setTokenWarn setBgKeep sessionMakeShortcut sessionRemoveShortcut charMakeShortcut charRemoveShortcut exportNoImg setLockEnabled setLockNote setLockChange setLockCode setLockState lockScreen lockPassBox lockInput lockOk lockForgot lockErr lockRecoverBox recInput recOk recAi recBack recErr recNote lockQuizBox quizNote quizQ quizA quizOk quizBack quizErr lockResetBox resetNote resetPass1 resetPass2 resetOk resetBack resetErr lockDeadBox deadNote deadOk codeScreen codeText codeCopy codeOk setDailyUpdate setWorldGen setStatusQuant setAutoMessage setAutoMessagePhone setAdoptFormat setBgPreview setBgPick setBgAi setBgClear bgInput setBgBlur setBgBlurVal setBgBright setBgBrightVal setUsagePriceMode setUsagePriceHit setUsagePriceIn setUsagePriceOut setPhoneWarn resetUsageBtn usageCats setSessionFormat setSessionTtsVoice setSessionBgPreview setSessionBgPick setSessionBgAi setSessionBgClear setSessionBgFollow chatBg charImportBtn charImportInput phoneBtn phoneTopBtn phoneModal phoneClock phoneListView phoneCloseBtn phoneList phoneChatView phoneBack phoneTitle phoneMsgs phoneActCall phoneActTransfer phoneActLoc phoneActImg phoneActVoice phoneActVoiceLabel phoneMore phoneSetBtn phoneInput phoneSend phoneSheet phoneSheetTitle phoneSheetBody phoneSheetCancel phoneSheetOk phoneCall phoneCallAvatar phoneCallName phoneCallState phoneCallTimer phoneCallSaid phoneCallTalk phoneCallTalkLabel phoneCallHang phoneImgInput phoneMomentsView phoneMoments phoneMomentsBack phoneMomentsPost phoneMomentsClose phoneMomentImg newGroupBtn groupModal reminderDot reminderModal reminderText reminderAsTime reminderTimeField reminderAt reminderAddBtn reminderList groupName groupMembers groupImport groupCancel groupOk setSessionStatusQuant setSessionDiary sessionDiarySave sessionDiaryClear sessionDiaryList worldModal worldText worldSkip worldRegen worldAdopt setAutoMessageMin setLive2dEnabled setLive2dModel live2dUploadBtn live2dFolderInput live2dUploadState live2dTestBtn live2dTestOut phoneActVideo phoneActAvatar phoneCallCam phoneCallCamLabel phoneCallStage phoneCallCanvas phoneCallFallback charPresetBtn presetModal presetList setSplashAnim setSplashText setSplashSub setSplashImage setSplashAvatar phoneTypingBar quickBtn quickPanel qpList qpRefresh qpClose qpCount sessionClockText sessionClockLive setSessionAutoMsg setSessionTime setSessionTimeSync sessionTimeApply sessionTimeNow sessionTimeClear sessionTimeLine setPhoneBgPreview setPhoneBgPick setPhoneBgClear setPhoneBgBlur setPhoneBgBlurVal setPhoneBgBright setPhoneBgBrightVal charImportAI charImportUser groupCogSection setPeerCogOn peerCogList peerCogUpdate peerCogState groupSyncBtn groupSyncState updateCheckBtn updateState settingsHome settingsBack settingsTitle settingsBody personaPick personaCount personaFields personaNewBtn personaDelBtn personaApplyBtn personaSplitInput personaSplitRun personaSplitAgain personaSplitState sideTabs sidePaneAsst sidePaneRole sidePanePhone sessionListAsst phoneCharList phoneAddSheet phoneAddBtn phoneAddCancel phAddMoment phAddContact freezeAskModal freezeAskOn freezeAskNever freezeAskStay freezeAskGo reasonDrawer reasonMask reasonClose reasonList reasonNewInput reasonAddBtn openReasonBtn setSessionReason setReasonLock sessionReasonExit charUpgradeRow charUpgradeBtn upgradeModal upgradeMeet upgradeCancel upgradeOk".split(" ");
+  const REQUIRED_IDS = "cameraModal camStage camVideo camCanvas camShutter camClose camAttach camRetake camTextInput camEdit bgcStage bgcImg bgcZoom bgcZoomVal bgcBlur bgcBlurVal bgcBright bgcBrightVal bgcCancel bgcOk bgcCrop albumModal albumTabs albumGrid albumHint albumSysBtn albumOkBtn albumScopes albumTitle albumTip phoneKindField bgCropModal cfAvPreview cfAvPick cfAvInput cfAvAi cfAvClear charSplitAgain charSplitRoleOnly charReadyHint plusBtn plusCamera plusFile plusVideo plusMusic plusDoc studioModal studioTitle studioHint studioBody studioAsk studioAskQ studioAskInput studioCost studioCancel studioGo plusMenu headMenu headMenuSet worldView worldViewBack worldViewBody attachmentBar audioInput avatarInput chatTitle customSearchField deleteCancel deleteList deleteOk dialogCancel dialogOk dialogText dialogTitle passModal passTitle passNote passInput passConfirmWrap passConfirm passOk passCancel pickModal pickTitle pickList replayIntroBtn resetSettingsBtn dataUsageLine dropHint editCancel editSave editText editTitle effortSelect effortWrap fileInput histFrom histKeyword histKeywordField histResults histSearchBtn histModule histScope histTimeField histTo imgChip imgToggle input main menuBtn messages micBtn modeBtn modeSwitch modelBadge modelPanel modelPanelList modelSwitchBtn msgMenuList rowMenuModal rowMenuList rowMenuTitle newChatBtn openSearchBtn openSettingsBtn openThemesBtn saveSettingsBtn scrim searchModeSwitch searchToggle selectBar selectCancel selectCopy selectCount selectDelete selfTestBtn selfTestOut sendBtn sessionBtn sessionList sessionPromptReset sessionPromptSave msetAsr msetImg msetMain msetTts msetVision providerNowLine setAsrEnabled setAsrLang setAvatarAiClear setAvatarAiPick setAvatarAiPreview setAvatarUserClear setAvatarUserPick setAvatarUserPreview setCustomKey setCustomUrl setImgEnabled setImgSize setImgToImg setPhoneShareImg setMainCompat setInstances setSearchProvider setSessionAlias setSessionAvatarAiClear setSessionAvatarAiPick setSessionAvatarAiPreview setSessionAvatarUserClear setSessionAvatarUserPick setSessionAvatarUserPreview setSessionFollow setSessionPrompt setSessionTempVal setSessionTemperature setSessionTitle setSessionTopP setSessionTopPVal setSessionScene setSessionSceneEvery setSessionAge setSessionRelation setSessionShared setSessionCognition setSessionAutoBackup sessionRoleWrap sessionMemoryBox charMemoryBox setMemoryList sessionLineBadge sessionCognitionUpdate sessionRelationUpdate sessionReCompress sessionThinkBox sessionThinkRead sessionThinkDigest sessionThinkCorrect sessionThinkCorrectRun setSessionAutoFreeze setThinkAbout sessionCorrectInput sessionCorrectRun sessionBackupNow sessionRestoreBackup sessionSetMain setSystemPrompt setTavilyKey setTempVal setTemperature setTopP setTopPVal setTtsAuto setTtsEnabled setTtsVoice setVideoEnabled setVideoBaseUrl setVideoKey setVideoModel setVideoMode setVideoRatio setVideoSize setVideoDuration setVideoFps setVideoCreatePath setVideoStatusPath setVideoResultField setVideoPollMs setVideoPollMax setVideoTemplate setMusicEnabled setMusicBaseUrl setMusicKey setMusicModel setMusicDuration setMusicFormat setMusicWithLyrics setMusicCreatePath setMusicStatusPath setMusicResultField setMusicPollMs setMusicPollMax setMusicTemplate setVisionEnabled sidebar stopBtn tavilyField themeGrid thinkToggle toasts characterBtn charBar characterModal charList charNewBtn charForm charEmpty charTools charName charSave charFilterRule charFilterEvery charFilterAI charFilterNow charFilterState cfCharFormat charSplitBtn charSplitHelp charSplitHint charSplitPanel charSplitInput charSplitRun charSplitCancel charSplitState  aboutVersion openDataBtn dataModal exportScope exportCharWrap exportCharSel exportSessionWrap exportSessionSel exportKeys exportDownload exportCopy importText importFileBtn importTextBtn importFileInput importClipBtn exportShare clearCacheBtn setNoImage setNotifyTasks introModal introTree introDots introNext introPrev introSkip guideTree setImgToText setImgExpireTurns charUsageLine usageModal usageGlobal usageSessions usageChars openUsageBtn setRoleplayEnabled setMyName setMyPersona setMyAppearance setMyBackground setMyLikes setAssistantCompress setCompressModel setTokenWarn setBgKeep sessionMakeShortcut sessionRemoveShortcut charMakeShortcut charRemoveShortcut exportNoImg setLockEnabled setLockNote setLockChange setLockCode setLockState lockScreen lockPassBox lockInput lockOk lockForgot lockErr lockRecoverBox recInput recOk recAi recBack recErr recNote lockQuizBox quizNote quizQ quizA quizOk quizBack quizErr lockResetBox resetNote resetPass1 resetPass2 resetOk resetBack resetErr lockDeadBox deadNote deadOk codeScreen codeText codeCopy codeOk setDailyUpdate setWorldGen setStatusQuant setAutoMessage setAutoMessagePhone setAdoptFormat setBgPreview setBgPick setBgAi setBgClear bgInput setBgBlur setBgBlurVal setBgBright setBgBrightVal setUsagePriceMode setUsagePriceHit setUsagePriceIn setUsagePriceOut setPhoneWarn resetUsageBtn usageCats setSessionFormat setSessionTtsVoice setSessionBgPreview setSessionBgPick setSessionBgAi setSessionBgClear setSessionBgFollow chatBg charImportBtn charImportInput charImportKeepCode phoneBtn phoneTopBtn phoneModal phoneClock phoneListView phoneCloseBtn phoneList phoneChatView phoneBack phoneTitle phoneMsgs phoneActCall phoneActTransfer phoneActLoc phoneActImg phoneActVoice phoneActVoiceLabel phoneMore phoneSetBtn phoneInput phoneSend phoneSheet phoneSheetTitle phoneSheetBody phoneSheetCancel phoneSheetOk phoneCall phoneCallAvatar phoneCallName phoneCallState phoneCallTimer phoneCallSaid phoneCallTalk phoneCallTalkLabel phoneCallHang phoneImgInput phoneMomentsView phoneMoments phoneMomentsBack phoneMomentsPost phoneMomentsClose phoneMomentImg newGroupBtn groupModal reminderDot reminderModal reminderText reminderAsTime reminderTimeField reminderAt reminderAddBtn reminderList groupName groupMembers groupImport groupCancel groupOk setSessionStatusQuant setSessionDiary sessionDiarySave sessionDiaryClear sessionDiaryList worldModal worldText worldSkip worldRegen worldAdopt setAutoMessageMin setLive2dEnabled setLive2dModel live2dUploadBtn live2dFolderInput live2dUploadState live2dTestBtn live2dTestOut phoneActVideo phoneCallCam phoneCallCamLabel phoneCallStage phoneCallCanvas phoneCallFallback charPresetBtn presetModal presetList setSplashAnim setSplashText setSplashSub setSplashImage setSplashAvatar phoneTypingBar quickBtn quickPanel qpList qpRefresh qpClose qpCount sessionClockText sessionClockLive setSessionAutoMsg setSessionTime setSessionTimeSync sessionTimeApply sessionTimeNow sessionTimeClear sessionTimeLine setPhoneBgPreview setPhoneBgPick setPhoneBgClear setPhoneBgBlur setPhoneBgBlurVal setPhoneBgBright setPhoneBgBrightVal charImportUser groupCogSection setPeerCogOn peerCogList peerCogUpdate peerCogState groupSyncBtn groupSyncState updateCheckBtn updateState settingsHome settingsBack settingsTitle settingsBody personaPick personaCount personaFields personaNewBtn personaDelBtn personaApplyBtn personaSplitInput personaSplitRun personaSplitAgain personaSplitState sideTabs sidePaneAsst sidePaneRole sidePanePhone sessionListAsst phoneCharList phoneAddSheet phoneAddBtn phoneAddCancel phAddMoment phAddContact freezeAskModal freezeAskOn freezeAskNever freezeAskStay freezeAskGo reasonDrawer reasonMask reasonClose reasonList reasonNewInput reasonAddBtn openReasonBtn setSessionReason setReasonLock sessionReasonExit charUpgradeRow charUpgradeBtn upgradeModal upgradeMeet upgradeCancel upgradeOk".split(" ");
   /* filter(Boolean)：上面这串用空格分隔，手工删条目时容易留下连续空格 →
      会多出一个空字符串条目，自检永远报「缺一个元素」。这里直接剔掉。 */
   function missingIds() { return REQUIRED_IDS.filter((id) => !!id && !document.getElementById(id)); }
@@ -1040,7 +1638,15 @@
     const key = role === "user" ? "avatarUser" : "avatarAi";
     const sessVal = ses && ses[key] ? ses[key] : "";
     const globVal = state.settings[key] || "";
-    return sessVal || globVal || "";
+    const v = sessVal || globVal || "";
+    if (v) return v;
+    /* 老数据里 avatarAi 存的是空串（改默认值不影响已存的空值），所以这里还要兜一层：
+       没有角色的会话 = 助手 = 听澜，用内置那张头像，不要退回星形占位图标（用户 10-22 口径）。 */
+    if (role !== "user" && !(ses && ses.characterId)) {
+      const builtin = (CONFIG && CONFIG.BUILTIN_ASSISTANT && CONFIG.BUILTIN_ASSISTANT.avatar) || "";
+      if (builtin) return builtin;
+    }
+    return "";
   }
 
   /* 群聊里每条消息的头像按「发言人」取：角色自己的头像优先，没有就用全局 AI 头像 */
@@ -1050,12 +1656,14 @@
   function speakerAvatarRaw(charId, s) {
     const c = Store.getCharacters().find((x) => x.id === charId);
     if (c && c.avatar) return c.avatar;
-    const ses = s || session();
-    return (ses && ses.avatarAi) || state.settings.avatarAi || "";
+    /* 没有头像就返回空串，让 UI 画人像图标。
+       绝不能回落到 avatarAi —— 那个字段默认是听澜的脸，群里几个没设头像的角色
+       会全部顶着听澜说话，根本分不清谁在讲。 */
+    return "";
   }
 
   /* 头像草稿存在 JS 里：不依赖 <input type="hidden">（封装工具可能把它剔掉） */
-  const avatarDraft = { settingsUser: "", settingsAi: "", phoneUser: "", sessionUser: "", sessionAi: "", charPhone: "" };
+  const avatarDraft = { settingsUser: "", settingsAi: "", phoneUser: "", sessionUser: "", sessionAi: "", charPhone: "", char: "" };
 
   function renderAvatarPreview(previewSel, url, role, fallback) {
     const box = $(previewSel);
@@ -1106,6 +1714,611 @@
       return p || v;
     } catch (e) { return v; }
   }
+
+  /* ── 自研相册 v2（10-25）──────────────────────────────────────
+     依据 APK 的 jointapi.txt：
+       获取目录排列(path) → "子文件夹/\\文件\\文件\\"（以 / 结尾是文件夹）
+       获取文件内容(path) → base64；获取文件大小(path) → 字节数
+       判断存储权限状态() / 申请存储权限() / 存储权限回调("全局函数名") → 0 允许
+     内存是这里唯一真正的难点：一张 3MB 的图转 base64 就是 4MB 字符串，
+     一次读 30 张 = 120MB，WebView 直接崩。所以：
+       · 缩略图**串行**生成，一次只解码一张；
+       · 缩到 168px 立刻丢掉原图（shrinkDataUrl 返回后原 dataURL 没人引用，可回收）；
+       · 每次循环 `await sleep(0)` 让出主线程，让 GC 有机会跑；
+       · 超过 8MB 的原图不生成缩略图，只显示「大图」，点了才读。 */
+  const ALBUM_DIRS = { dcim: "/DCIM/Camera/", pictures: "/Pictures/", download: "/Download/" };
+  const ALBUM_THUMB_MAX = 150;      /* 一次最多补 150 张缩略图，再多就靠系统选择器 */
+  const ALBUM_BIG = 8 * 1024 * 1024; /* 超过这个不自动读，避免单张就把内存顶满 */
+  const albumState = {
+    dir: "dcim", list: [], onPick: null,
+    multi: false, withScope: false, scope: "both",
+    picked: {}, thumbs: {}, seq: 0,
+    io: null, queue: [], pumping: false
+  };
+
+  /* 相册给的 dataURL 不能直接存：原图 3~5MB，几张就把存储撑满。
+     缩到最长边 maxW 再转 jpeg。返回之后原 dataURL 没有任何引用，可被 GC 回收 ——
+     这是「相册能出缩略图又不爆内存」的关键一步。 */
+  function shrinkDataUrl(url, maxW, q) {
+    return new Promise((resolve) => {
+      const im = new Image();
+      im.onload = function () {
+        try {
+          const iw = im.naturalWidth || maxW, ih = im.naturalHeight || maxW;
+          const sc = Math.min(1, maxW / Math.max(1, iw));
+          const w = Math.max(1, Math.round(iw * sc));
+          const h = Math.max(1, Math.round(ih * sc));
+          const cv = document.createElement("canvas");
+          cv.width = w; cv.height = h;
+          const ctx = cv.getContext("2d");
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(im, 0, 0, w, h);
+          let out = "";
+          try { out = cv.toDataURL("image/jpeg", q || 0.86); } catch (e) { out = ""; }
+          resolve(out || url);
+        } catch (e) { resolve(url); }
+      };
+      im.onerror = function () { resolve(url); };
+      im.src = url;
+    });
+  }
+
+  function albumSleep(ms) { return new Promise((r) => setTimeout(r, ms || 0)); }
+
+  function albumRoot() {
+    let root = "";
+    try { root = String(Store.callBridge("获取外部存储目录") || ""); } catch (e) { root = ""; }
+    if (!root) root = "/storage/emulated/0";
+    return root.replace(/\/+$/, "");
+  }
+  function albumDirPath() { return albumRoot() + (ALBUM_DIRS[albumState.dir] || ALBUM_DIRS.dcim); }
+  function albumMime(name) {
+    return /\.png$/i.test(name) ? "image/png" : (/\.webp$/i.test(name) ? "image/webp" : "image/jpeg");
+  }
+
+  function albumHasPerm() {
+    if (!Store.hasBridge("判断存储权限状态")) return true;
+    try { return !!Store.callBridge("判断存储权限状态"); } catch (e) { return false; }
+  }
+  function albumAskPerm(then) {
+    if (!Store.hasBridge("申请存储权限") || !Store.hasBridge("存储权限回调")) { then(false); return; }
+    try {
+      window.__dlAlbumPerm = function (code) {
+        window.__dlAlbumPerm = null;
+        then(Number(code) === 0);
+      };
+      Store.callBridge("申请存储权限");
+      Store.callBridge("存储权限回调", "window.__dlAlbumPerm");
+    } catch (e) { then(false); }
+  }
+
+  /* 读一张图并缩成小图。原图 dataURL 只在这个函数里活着，返回后即可回收。 */
+  function albumThumb(dir, name) {
+    const path = albumRoot() + (ALBUM_DIRS[dir] || ALBUM_DIRS.dcim) + name;
+    let size = 0;
+    try { size = Number(Store.callBridge("获取文件大小", path)) || 0; } catch (e) { size = 0; }
+    if (size <= 0 || size > ALBUM_BIG) return Promise.resolve("");
+    let b64 = "";
+    try { b64 = String(Store.callBridge("获取文件内容", path) || ""); } catch (e) { b64 = ""; }
+    if (!b64) return Promise.resolve("");
+    const url = b64.slice(0, 5) === "data:" ? b64 : ("data:" + albumMime(name) + ";base64," + b64);
+    return shrinkDataUrl(url, 168, 0.6);
+  }
+
+  function albumCellOf(name) {
+    const grid = $("#albumGrid");
+    if (!grid) return null;
+    const kids = grid.children;
+    for (let i = 0; i < kids.length; i++) {
+      if (kids[i] && kids[i].getAttribute && kids[i].getAttribute("data-name") === name) return kids[i];
+    }
+    return null;
+  }
+
+  /* 缩略图缓存的 key 必须带目录：三个目录里 IMG_0001.jpg 这种同名文件太常见，
+     只用文件名当 key 会串图（切到「图片」目录，某些格子显示的是「相机」目录那张）。 */
+  function albumKey(dir, name) { return dir + "/" + name; }
+
+  function albumPaint(dir, name) {
+    const cell = albumCellOf(name);
+    if (!cell) return;
+    const th = albumState.thumbs[albumKey(dir, name)];
+    if (th) {
+      let im = cell.querySelector("img");
+      if (!im) { im = document.createElement("img"); im.alt = ""; cell.insertBefore(im, cell.firstChild); }
+      if (im.src !== th) im.src = th;
+    }
+  }
+
+  function albumPaintPick(name) {
+    const cell = albumCellOf(name);
+    if (!cell) return;
+    const on = !!albumState.picked[name];
+    cell.classList.toggle("on", on);
+    const tick = cell.querySelector(".album-tick");
+    if (on && !tick) {
+      const t = document.createElement("span");
+      t.className = "album-tick";
+      t.textContent = "✓";
+      cell.appendChild(t);
+    } else if (!on && tick) {
+      tick.parentNode.removeChild(tick);
+    }
+    const ok = $("#albumOkBtn");
+    if (ok) {
+      const n = Object.keys(albumState.picked).length;
+      ok.hidden = !albumState.multi;
+      ok.textContent = n ? ("添加 " + n + " 个") : "添加";
+      ok.disabled = !n;
+    }
+  }
+
+  function albumGridFill() {
+    const grid = $("#albumGrid"), hint = $("#albumHint"), tip = $("#albumTip");
+    if (!grid || !hint) return;
+    grid.innerHTML = "";
+    const names = albumState.list;
+    if (!names.length) { hint.textContent = "这个目录里没有图片"; return; }
+    const shown = names.slice(0, ALBUM_THUMB_MAX);
+    hint.textContent = "共 " + names.length + " 张"
+      + (names.length > shown.length ? ("，这里先列前 " + shown.length + " 张") : "")
+      + (albumState.multi ? "，点选要添加的" : "，点一张选中");
+    if (tip) tip.hidden = false;
+    shown.forEach((n) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "album-cell" + (albumState.picked[n] ? " on" : "");
+      b.setAttribute("data-name", n);
+      b.setAttribute("data-dir", albumState.dir);
+      b.addEventListener("click", () => {
+        if (albumState.multi) {
+          albumState.picked[n] = !albumState.picked[n];
+          if (!albumState.picked[n]) delete albumState.picked[n];
+          albumPaintPick(n);
+          return;
+        }
+        albumPick(n);
+      });
+      grid.appendChild(b);
+      if (albumState.picked[n]) albumPaintPick(n);
+    });
+    /* 注意：这里不再一次性把 150 张全读出来，改成观察进入视口的那些 */
+    const cells = grid.children;
+    const dirNow = albumState.dir;
+    for (let i = 0; i < cells.length && i < shown.length; i++) {
+      albumObserve(cells[i], dirNow, shown[i]);
+    }
+  }
+
+  /* 缩略图队列：进入视口才排进来，一次只处理一张，处理完让出主线程。
+     这样哪怕目录里有 800 张图，内存和 CPU 都只按「当前看得到的几张」算。 */
+  function albumPump() {
+    if (albumState.pumping) return;
+    albumState.pumping = true;
+    const step = () => {
+      const job = albumState.queue.shift();
+      if (!job) { albumState.pumping = false; return; }
+      const dir = job.dir, n = job.name;
+      const key = albumKey(dir, n);
+      if (albumState.thumbs[key]) { step(); return; }
+      albumThumb(dir, n).then((th) => {
+        /* 读的时候可能已经切了目录：这时结果属于「上一页」，直接丢掉，别污染新页 */
+        if (albumState.dir !== dir) { setTimeout(step, 0); return; }
+        if (th) { albumState.thumbs[key] = th; albumPaint(dir, n); }
+        setTimeout(step, 0);        /* 让出主线程，给 GC 和渲染留缝 */
+      }).catch(() => { setTimeout(step, 0); });
+    };
+    step();
+  }
+
+  function albumQueueThumb(dir, n) {
+    if (!n) return;
+    const key = albumKey(dir, n);
+    if (albumState.thumbs[key]) return;
+    for (let i = 0; i < albumState.queue.length; i++) {
+      if (albumState.queue[i].dir === dir && albumState.queue[i].name === n) return;
+    }
+    albumState.queue.push({ dir: dir, name: n });
+    albumPump();
+  }
+
+  /* 进视口才加载：一张 3MB 的图解码要几十毫秒，全部提前读就是几百毫秒的白屏 */
+  function albumObserve(cell, dir, n) {
+    if (!("IntersectionObserver" in window)) { albumQueueThumb(dir, n); return; }
+    if (!albumState.io) {
+      albumState.io = new IntersectionObserver((entries) => {
+        entries.forEach((en) => {
+          if (!en.isIntersecting) return;
+          const el = en.target;
+          const name = el && el.getAttribute ? el.getAttribute("data-name") : "";
+          const d = el && el.getAttribute ? el.getAttribute("data-dir") : "";
+          if (name) { albumQueueThumb(d || albumState.dir, name); }
+          if (albumState.io) albumState.io.unobserve(el);
+        });
+      }, { root: $("#albumGrid"), rootMargin: "160px" });
+    }
+    albumState.io.observe(cell);
+  }
+
+  function albumLoad() {
+    const hint = $("#albumHint"), grid = $("#albumGrid");
+    if (!hint || !grid) return;
+    hint.textContent = "正在读取…";
+    grid.innerHTML = "";
+    albumState.seq++;          /* 作废上一轮的补图任务 */
+    albumState.queue.length = 0;
+    albumState.pumping = false;
+    /* 换目录就把缩略图缓存清掉：不清会一直涨（三个目录各 150 张 × 15KB），
+       而且同名文件跨目录复用会串图（已由 albumKey 兜住，但内存还是要收） */
+    albumState.thumbs = {};
+    if (albumState.io) { try { albumState.io.disconnect(); } catch (e) { /* ignore */ } albumState.io = null; }
+    if (!Store.hasBridge("获取目录排列")) {
+      hint.textContent = "这个封装没有目录接口，请用下面的系统选择器";
+      return;
+    }
+    let raw = null;
+    try { raw = Store.callBridge("获取目录排列", albumDirPath()); } catch (e) { raw = null; }
+    if (raw == null) { hint.textContent = "读不到这个目录（可能没有存储权限）"; return; }
+    albumState.list = String(raw).split("\\")
+      .map((n) => n.trim())
+      .filter((n) => n && n.charAt(n.length - 1) !== "/")
+      .filter((n) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(n));
+    albumGridFill();
+  }
+
+  function albumPick(name) {
+    const path = albumDirPath() + name;
+    let size = 0;
+    try { size = Number(Store.callBridge("获取文件大小", path)) || 0; } catch (e) { size = 0; }
+    if (size > 24 * 1024 * 1024) { UI.toast("这张图太大（" + Math.round(size / 1048576) + "MB），换一张", true); return; }
+    UI.toast("正在读取…");
+    let b64 = "";
+    try { b64 = String(Store.callBridge("获取文件内容", path) || ""); } catch (e) { b64 = ""; }
+    if (!b64) { UI.toast("读不出来这张图", true); return; }
+    const url = b64.slice(0, 5) === "data:" ? b64 : ("data:" + albumMime(name) + ";base64," + b64);
+    const cb = albumState.onPick;
+    albumState.onPick = null;
+    UI.closeModal("albumModal");
+    if (typeof cb === "function") cb(url, albumState.scope);
+  }
+
+  /* 多选确定：把选中的图读出来（串行，读完压到 240px 再交出去） */
+  const ALBUM_PICK_MAX = 12 * 1024 * 1024;   /* 单张上限：超过就不读，别拿进程去赌 */
+
+  async function albumConfirm() {
+    const names = Object.keys(albumState.picked);
+    if (!names.length) return;
+    const cb = albumState.onPick;
+    const scope = albumState.scope;
+    albumState.onPick = null;      /* 不置空的话，旧回调会一直挂着，下次开相册可能被二次触发 */
+    UI.closeModal("albumModal");
+    const out = [];
+    let skipped = 0;
+    for (let i = 0; i < names.length; i++) {
+      const path = albumDirPath() + names[i];
+      let size = 0;
+      try { size = Number(Store.callBridge("获取文件大小", path)) || 0; } catch (e) { size = 0; }
+      /* 和单选同一个口径：先查大小再读。多选一次点十几张，不查就会在解码途中 OOM */
+      if (size <= 0 || size > ALBUM_PICK_MAX) { skipped++; continue; }
+      let b64 = "";
+      try { b64 = String(Store.callBridge("获取文件内容", path) || ""); } catch (e) { b64 = ""; }
+      if (!b64) { skipped++; continue; }
+      const url = b64.slice(0, 5) === "data:" ? b64 : ("data:" + albumMime(names[i]) + ";base64," + b64);
+      /* 表情包不需要原图那么大：240px 足够模型看清，也够气泡显示 */
+      const small = await shrinkDataUrl(url, 240, 0.85);
+      out.push(small || url);
+      await albumSleep(0);
+    }
+    albumState.picked = {};
+    if (skipped) UI.toast("跳过 " + skipped + " 张（太大或读不出来）", true);
+    if (typeof cb === "function") cb(out, scope);
+  }
+
+  /* opts: { onPick, multi, withScope, scope, title } */
+  function openAlbum(opts) {
+    const o = opts || {};
+    albumState.onPick = (typeof o.onPick === "function") ? o.onPick : null;
+    albumState.multi = !!o.multi;
+    albumState.withScope = !!o.withScope;
+    albumState.scope = o.scope || "both";
+    albumState.picked = {};
+    const title = $("#albumTitle"), scopes = $("#albumScopes"), ok = $("#albumOkBtn"), tip = $("#albumTip");
+    if (title) title.textContent = o.title || (o.multi ? "从相册选图（可多选）" : "从相册选图");
+    if (scopes) {
+      scopes.hidden = !o.withScope;
+      const btns = scopes.querySelectorAll(".album-scope");
+      for (let i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle("on", btns[i].getAttribute("data-scope") === albumState.scope);
+      }
+    }
+    if (ok) { ok.hidden = !albumState.multi; ok.textContent = "添加"; ok.disabled = true; }
+    if (tip) tip.hidden = false;
+    if (!Store.hasBridge("获取目录排列")) {
+      albumState.onPick = null;
+      if (typeof o.onPick === "function") o.onPick(null, albumState.scope);
+      return;
+    }
+    const go = () => { UI.openModal("albumModal"); albumLoad(); };
+    if (albumHasPerm()) { go(); return; }
+    albumAskPerm((ok2) => { if (ok2) go(); else if (typeof o.onPick === "function") o.onPick(null, albumState.scope); });
+  }
+
+  /* ── 原生相册（10-24 用户要求「走原生桥试试」）──────────────────
+     各家封装工具给的接口名不一样（「选择图片」/「打开相册」/「获取相册列表」…），
+     硬编码猜名字只会静默失败，所以运行时枚举 window.webapp 按关键词找候选，
+     找到就试调，拿不到结果就回退系统选择器 —— 试错的代价只是多一次点击。
+     返回值只认三种：dataURL、裸 base64、JSON 数组。文件路径一律放弃
+     （WebView 里 file:// 读外部路径要权限，赌不起）。 */
+  function nativeAlbumApis() {
+    const out = { pick: [], list: [] };
+    let names = [];
+    try { names = Object.keys(window.webapp || {}); } catch (e) { return out; }
+    names.forEach((n) => {
+      try {
+        if (typeof window.webapp[n] !== "function") return;
+        const s = String(n);
+        if (!/(相册|相片|图片|照片|photo|album|gallery|image)/i.test(s)) return;
+        if (/(选择|选取|挑|pick|select|choose|打开)/i.test(s)) out.pick.push(s);
+        else if (/(列表|全部|获取|list|all)/i.test(s)) out.list.push(s);
+      } catch (e) { /* 单个名字异常不影响其它 */ }
+    });
+    return out;
+  }
+
+  /* 把各种奇怪的返回格式压成「能直接设给 img.src 的地址」 */
+  function albumToUrls(v, out) {
+    out = out || [];
+    if (v == null) return out;
+    if (typeof v === "string") {
+      let s = v.trim();
+      if (!s) return out;
+      if (s.charAt(0) === "[" || s.charAt(0) === "{") {
+        try { albumToUrls(JSON.parse(s), out); } catch (e) { /* 不是 JSON 就当普通字符串 */ }
+        if (out.length) return out;
+      }
+      if (s.slice(0, 5) === "data:") { out.push(s); return out; }
+      if (s.slice(0, 7) === "base64,") { out.push("data:image/jpeg;base64," + s.slice(7)); return out; }
+      if (s.length > 200 && /^[A-Za-z0-9+/=\s]+$/.test(s)) {
+        out.push("data:image/jpeg;base64," + s.replace(/\s+/g, ""));
+      }
+      return out;
+    }
+    if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) albumToUrls(v[i], out);
+      return out;
+    }
+    if (typeof v === "object") {
+      ["data", "base64", "src", "url", "path", "list", "images", "result"].forEach((k) => {
+        if (v[k] != null) albumToUrls(v[k], out);
+      });
+    }
+    return out;
+  }
+
+  /* 试一次原生相册。有结果 → 回调拿到的图；没接口 / 超时 / 格式不认识 → false */
+  function tryNativeAlbum() {
+    return new Promise((resolve) => {
+      const apis = nativeAlbumApis();
+      if (!apis.pick.length) { resolve(false); return; }
+      const name = apis.pick[0];
+      let done = false;
+      let timer = 0;
+      const finish = (raw) => {
+        if (done) return;
+        done = true;
+        if (timer) clearTimeout(timer);
+        const urls = albumToUrls(raw);
+        if (!urls.length) { resolve(false); return; }
+        resolve(urls);
+      };
+      try {
+        /* 两种常见签名都试：fn(cb) 和 fn("图片", cb) */
+        let r = null;
+        try { r = window.webapp[name](finish); }
+        catch (e1) { r = window.webapp[name]("图片", finish); }
+        if (r != null) finish(r);
+      } catch (e) {
+        done = true;
+        resolve(false);
+        return;
+      }
+      timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        resolve(false);     /* 没回调就当没这个能力，别把用户卡在这 */
+      }, 9000);
+    });
+  }
+
+  /* ── 背景取景面板（10-24 用户要求：选图后要能裁剪、调亮度模糊）─────
+     取景框比例 = 屏幕可视区比例，拖动 + 缩放决定取哪一块；确定时按框生成 1080 宽的图。
+     亮度 / 模糊**不烘进图里**：它们是显示层参数（bgBlur / bgBright，CSS 滤镜），
+     烘进去就再也调不回来了，而且会和滑杆叠加成双份。 */
+  const bgc = { open: false, target: "", img: null, k: 1, tx: 0, ty: 0, blur: 0, bright: 100,
+    drag: null, onOk: null,
+    /* 裁剪框用「相对取景框的比例」存，窗口尺寸变了也不会失效；默认内缩 6% */
+    rect: { l: 0.06, t: 0.06, r: 0.94, b: 0.94 }, cropDrag: null };
+  const BGC_MIN_CROP = 0.12;   /* 裁到最小也留 12%，否则能拖成一条线 */
+
+  function bgcFit() {
+    const stage = $("#bgcStage"), im = $("#bgcImg");
+    if (!stage || !im || !bgc.img) return;
+    const sw = stage.clientWidth, sh = stage.clientHeight;
+    if (!sw || !sh) return;
+    const natW = bgc.img.naturalWidth || 1, natH = bgc.img.naturalHeight || 1;
+    const base = Math.max(sw / natW, sh / natH);
+    const s = base * bgc.k;
+    const dw = natW * s, dh = natH * s;
+    bgc.tx = Math.min(0, Math.max(sw - dw, bgc.tx));
+    bgc.ty = Math.min(0, Math.max(sh - dh, bgc.ty));
+    im.style.width = dw + "px";
+    im.style.height = dh + "px";
+    im.style.left = ((sw - dw) / 2 + bgc.tx) + "px";
+    im.style.top = ((sh - dh) / 2 + bgc.ty) + "px";
+    im.style.filter = "brightness(" + bgc.bright + "%) blur(" + (bgc.blur / 100 * 30).toFixed(2) + "px)";
+    const crop = $("#bgcCrop");
+    if (crop) {
+      crop.style.left = (bgc.rect.l * sw) + "px";
+      crop.style.top = (bgc.rect.t * sh) + "px";
+      crop.style.width = ((bgc.rect.r - bgc.rect.l) * sw) + "px";
+      crop.style.height = ((bgc.rect.b - bgc.rect.t) * sh) + "px";
+    }
+  }
+
+  /* 拖角改裁剪框：以「按下那一刻的框」为基准算增量，避免累计误差 */
+  function bgcCropDragTo(h, dx, dy, sw, sh) {
+    const base = (bgc.cropDrag && bgc.cropDrag.r) || bgc.rect;
+    const r = Object.assign({}, base);
+    const rx = dx / Math.max(1, sw), ry = dy / Math.max(1, sh);
+    if (h.indexOf("w") >= 0) r.l = Math.min(r.r - BGC_MIN_CROP, Math.max(0, base.l + rx));
+    if (h.indexOf("e") >= 0) r.r = Math.max(r.l + BGC_MIN_CROP, Math.min(1, base.r + rx));
+    if (h.indexOf("n") >= 0) r.t = Math.min(r.b - BGC_MIN_CROP, Math.max(0, base.t + ry));
+    if (h.indexOf("s") >= 0) r.b = Math.max(r.t + BGC_MIN_CROP, Math.min(1, base.b + ry));
+    bgc.rect = r;
+    bgcFit();
+  }
+
+  function openBgCrop(url, target, onOk) {
+    const map = { settings: ["#setBgBlur", "#setBgBright"], phone: ["#setPhoneBgBlur", "#setPhoneBgBright"], session: ["#setBgBlur", "#setBgBright"] };
+    const ids = map[target] || map.settings;
+    bgc.target = target;
+    bgc.onOk = (typeof onOk === "function") ? onOk : null;
+    bgc.k = 1; bgc.tx = 0; bgc.ty = 0; bgc.drag = null; bgc.cropDrag = null;
+    bgc.rect = { l: 0.06, t: 0.06, r: 0.94, b: 0.94 };
+    bgc.blur = Number($v(ids[0])) || 0;
+    bgc.bright = Number($v(ids[1])) || 100;
+    setVal("#bgcZoom", 100); setVal("#bgcBlur", bgc.blur); setVal("#bgcBright", bgc.bright);
+    setText("#bgcZoomVal", "1.00");
+    setText("#bgcBlurVal", String(bgc.blur));
+    setText("#bgcBrightVal", String(bgc.bright));
+    const im = $("#bgcImg");
+    bgc.img = new Image();
+    bgc.img.onload = function () { requestAnimationFrame(bgcFit); };
+    bgc.img.src = url;
+    if (im) im.src = url;
+    bgc.open = true;
+    UI.openModal("bgCropModal");
+    setTimeout(bgcFit, 60);
+  }
+
+  function bgcBake() {
+    const stage = $("#bgcStage");
+    if (!stage || !bgc.img) return "";
+    const sw = Math.max(1, stage.clientWidth), sh = Math.max(1, stage.clientHeight);
+    /* 只输出裁剪框里的那一块：先算框在 stage 里的像素位置，再映射回原图坐标 */
+    const box = bgc.rect;
+    const bw = Math.max(1, (box.r - box.l) * sw);
+    const bh = Math.max(1, (box.b - box.t) * sh);
+    const outW = 1080, outH = Math.max(1, Math.round(outW * bh / bw));
+    const cv = document.createElement("canvas");
+    cv.width = outW; cv.height = outH;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, outW, outH);
+    const natW = bgc.img.naturalWidth || 1, natH = bgc.img.naturalHeight || 1;
+    const base = Math.max(sw / natW, sh / natH);
+    const s = base * bgc.k;
+    const dw = natW * s, dh = natH * s;
+    const dx = (sw - dw) / 2 + bgc.tx, dy = (sh - dh) / 2 + bgc.ty;
+    const toNat = natW / dw;            /* stage 像素 → 原图像素 */
+    const sx = (box.l * sw - dx) * toNat;
+    const sy = (box.t * sh - dy) * toNat;
+    const swNat = bw * toNat;
+    const shNat = bh * toNat;
+    try { ctx.drawImage(bgc.img, sx, sy, swNat, shNat, 0, 0, outW, outH); } catch (e) { return ""; }
+    try { return cv.toDataURL("image/jpeg", 0.86); } catch (e) { return ""; }
+  }
+
+  function closeBgCrop() {
+    bgc.open = false;
+    bgc.drag = null;
+    UI.closeModal("bgCropModal");
+  }
+
+  function bindBgCrop() {
+    const stage = $("#bgcStage");
+    if (stage && !stage.dataset.bound) {
+      stage.dataset.bound = "1";
+      stage.addEventListener("pointerdown", (e) => {
+        if (!bgc.open) return;
+        bgc.drag = { x: e.clientX, y: e.clientY, tx: bgc.tx, ty: bgc.ty };
+        try { stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      });
+      stage.addEventListener("pointermove", (e) => {
+        if (!bgc.drag) return;
+        bgc.tx = bgc.drag.tx + (e.clientX - bgc.drag.x);
+        bgc.ty = bgc.drag.ty + (e.clientY - bgc.drag.y);
+        bgcFit();
+      });
+      const endDrag = () => { bgc.drag = null; };
+      stage.addEventListener("pointerup", endDrag);
+      stage.addEventListener("pointercancel", endDrag);
+      stage.addEventListener("pointerleave", endDrag);
+      /* 裁剪框四角：按下手柄后移动量交给 bgcCropDragTo（不能触发图片拖动） */
+      const cropEl = $("#bgcCrop");
+      if (cropEl) {
+        cropEl.addEventListener("pointerdown", (e) => {
+          const h = e.target && e.target.getAttribute && e.target.getAttribute("data-h");
+          if (!h) return;
+          e.stopPropagation();
+          bgc.cropDrag = { h: h, x: e.clientX, y: e.clientY,
+            r: Object.assign({}, bgc.rect),
+            sw: stage.clientWidth, sh: stage.clientHeight };
+          try { cropEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        });
+        cropEl.addEventListener("pointermove", (e) => {
+          if (!bgc.cropDrag) return;
+          e.stopPropagation();
+          bgcCropDragTo(bgc.cropDrag.h, e.clientX - bgc.cropDrag.x, e.clientY - bgc.cropDrag.y,
+            bgc.cropDrag.sw, bgc.cropDrag.sh);
+        });
+        const endCrop = () => { bgc.cropDrag = null; };
+        cropEl.addEventListener("pointerup", endCrop);
+        cropEl.addEventListener("pointercancel", endCrop);
+      }
+    }
+    on("#bgcZoom", "input", () => {
+      bgc.k = Math.max(1, (Number($v("#bgcZoom")) || 100) / 100);
+      setText("#bgcZoomVal", bgc.k.toFixed(2));
+      bgcFit();
+    });
+    on("#bgcBlur", "input", () => {
+      bgc.blur = Number($v("#bgcBlur")) || 0;
+      setText("#bgcBlurVal", String(bgc.blur));
+      bgcFit();
+    });
+    on("#bgcBright", "input", () => {
+      bgc.bright = Number($v("#bgcBright")) || 100;
+      setText("#bgcBrightVal", String(bgc.bright));
+      bgcFit();
+    });
+    on("#bgcCancel", "click", closeBgCrop);
+    on("#bgcOk", "click", () => {
+      const url = bgcBake();
+      if (!url) { UI.toast("生成失败，换个图片试试", true); return; }
+      const target = bgc.target;
+      const saved = keepBg(url);
+      if (bgc.onOk) {
+        const cb = bgc.onOk;
+        bgc.onOk = null;
+        closeBgCrop();
+        try { cb(saved); } catch (e) { UI.toast("保存背景失败", true); }
+        return;
+      }
+      bgDraft[target] = saved;
+      const map = { settings: ["#setBgBlur", "#setBgBright"], phone: ["#setPhoneBgBlur", "#setPhoneBgBright"], session: ["#setBgBlur", "#setBgBright"] };
+      const ids = map[target] || map.settings;
+      setVal(ids[0], bgc.blur);
+      setVal(ids[1], bgc.bright);
+      const prevSel = target === "session" ? "#setSessionBgPreview" : (target === "phone" ? "#setPhoneBgPreview" : "#setBgPreview");
+      renderBgPreview(prevSel, bgDraft[target]);
+      if (target === "session") setChecked("#setSessionBgFollow", false);
+      try { syncBgLabels(); } catch (e) { /* ignore */ }
+      closeBgCrop();
+    });
+  }
+
   /* 老数据里的背景图还是内联 base64（做外置之前存进去的）。启动后顺手搬一次：
      有桥且确实搬成功才换成路径，任何一步不成就原样留着 —— 和图片外置同一套底线。 */
   function migrateBgImages() {
@@ -1261,7 +2474,8 @@
     const ov = resolvedMode() === "dark" ? "rgba(0,0,0,.34)" : "rgba(255,255,255,.30)";
     layer.hidden = false;
     layer.style.backgroundImage = "linear-gradient(" + ov + "," + ov + "), url(" + url + ")";
-    layer.style.filter = "blur(" + blur + "px) brightness(" + bright + "%)";
+    /* 模糊 0-100 档 → 0-30px（100 = 原来最糊的那档）；亮度就是百分比，100 = 原亮度 */
+    layer.style.filter = "blur(" + (blur / 100 * 30).toFixed(2) + "px) brightness(" + bright + "%)";
   }
   function effectiveBgImage() {
     const s = session();
@@ -1279,36 +2493,72 @@
     const ov = resolvedMode() === "dark" ? "rgba(0,0,0,.34)" : "rgba(255,255,255,.30)";
     layer.hidden = false;
     layer.style.backgroundImage = "linear-gradient(" + ov + "," + ov + "), url(" + url + ")";
-    layer.style.filter = "blur(" + blur + "px) brightness(" + bright + "%)";
+    /* 模糊 0-100 档 → 0-30px（100 = 原来最糊的那档）；亮度就是百分比，100 = 原亮度 */
+    layer.style.filter = "blur(" + (blur / 100 * 30).toFixed(2) + "px) brightness(" + bright + "%)";
   }
-  /* 读本地图片 → 缩到最长边 1280 的 JPEG（背景只需够用，别把几 MB 原图外置） */
-  function readBgFile(file) {
+
+  /* 读本地图片，居中裁剪成 192×192 JPEG 数据 URL */
+  /* 统一的图片读取：**不走 readAsDataURL**。
+     png 的 base64 通常是同尺寸 jpg 的 3~5 倍，大图在安卓 WebView 里会解码失败 ——
+     表现就是「同一张图存成 jpg 能选、png 一点就报读取失败」。
+     改成 blob URL 直接交给 <img>，由解码器按文件流处理，不受 base64 长度影响。
+     maxW：最长边上限；square=true 时裁成正方形（头像用）。 */
+  function readImageFile(file, maxW, quality, square) {
     return new Promise((resolve, reject) => {
-      if (!file || !/^image\//.test(file.type || "")) { reject(new Error("请选择图片文件")); return; }
-      const fr = new FileReader();
-      fr.onload = () => {
-        const raw = String(fr.result || "");
-        const img = new Image();
-        img.onload = () => {
-          const maxW = 1280;
-          const scale = Math.min(1, maxW / Math.max(1, img.width));
-          const w = Math.max(1, Math.round(img.width * scale));
-          const h = Math.max(1, Math.round(img.height * scale));
-          const cv = document.createElement("canvas");
-          cv.width = w; cv.height = h;
-          cv.getContext("2d").drawImage(img, 0, 0, w, h);
-          try { resolve(cv.toDataURL("image/jpeg", 0.82)); } catch (e) { resolve(raw); }
-        };
-        img.onerror = () => reject(new Error("图片读取失败"));
-        img.src = raw;
+      const name = String((file && file.name) || "");
+      const okType = /^image\//.test((file && file.type) || "") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(name);
+      if (!file || !okType) { reject(new Error("请选择图片文件")); return; }
+      let objUrl = "";
+      try { objUrl = URL.createObjectURL(file); } catch (e) { objUrl = ""; }
+      const fin = (err, out) => {
+        try { if (objUrl) URL.revokeObjectURL(objUrl); } catch (e) { /* ignore */ }
+        if (err) reject(err); else resolve(out);
       };
-      fr.onerror = () => reject(new Error("图片读取失败"));
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+          const cv = document.createElement("canvas");
+          const ctx0 = cv.getContext("2d");
+          let dw, dh;
+          if (square) {
+            const size = maxW;
+            cv.width = size; cv.height = size;
+            const sc = Math.max(size / iw, size / ih);
+            dw = Math.round(iw * sc); dh = Math.round(ih * sc);
+            /* 头像：先铺底色再居中裁方（png 透明区域不会变黑） */
+            ctx0.fillStyle = "#ffffff";
+            ctx0.fillRect(0, 0, size, size);
+            ctx0.drawImage(img, Math.round((size - dw) / 2), Math.round((size - dh) / 2), dw, dh);
+          } else {
+            const sc = Math.min(1, maxW / Math.max(1, iw));
+            dw = Math.max(1, Math.round(iw * sc));
+            dh = Math.max(1, Math.round(ih * sc));
+            cv.width = dw; cv.height = dh;
+            ctx0.fillStyle = "#ffffff";
+            ctx0.fillRect(0, 0, dw, dh);
+            ctx0.drawImage(img, 0, 0, dw, dh);
+          }
+          let out = "";
+          try { out = cv.toDataURL("image/jpeg", quality); } catch (e) { out = ""; }
+          fin(out ? null : new Error("图片转换失败"), out);
+        } catch (err) { fin(new Error("图片转换失败")); }
+      };
+      img.onerror = () => fin(new Error("图片读取失败（格式或体积不支持）"));
+      if (objUrl) { img.src = objUrl; return; }
+      /* 没有 createObjectURL 的极老环境：退回 dataURL */
+      const fr = new FileReader();
+      fr.onload = () => { img.src = String(fr.result || ""); };
+      fr.onerror = () => fin(new Error("图片读取失败"));
       fr.readAsDataURL(file);
     });
   }
 
-  /* 读本地图片，居中裁剪成 192×192 JPEG 数据 URL */
-  function readAvatarFile(file) {
+  function readBgFile(file) { return readImageFile(file, 1280, 0.82, false); }
+
+  function readAvatarFile(file) { return readImageFile(file, 192, 0.85, true); }
+
+  function readAvatarFileLegacy(file) {
     return new Promise((resolve, reject) => {
       if (!file || !/^image\//.test(file.type || "")) { reject(new Error("请选择图片文件")); return; }
       const fr = new FileReader();
@@ -1412,7 +2662,7 @@
       UI.toast("要开着时间系统、且时间没被冻结", true); return;
     }
     UI.toast("正在压缩…");
-    const t = await window.Think.digest(s.id);
+    const t = await window.Think.digest(s.id, false);   /* 手动「压缩」只压不读 */
     try { if (window.DL.renderSessionThink) window.DL.renderSessionThink(session()); } catch (e) { /* ignore */ }
     renderAll();
     UI.toast(t ? "压缩好了（置顶显示）" : "没有新的想法要压，或者压缩失败", !t);
@@ -1536,9 +2786,19 @@
       /* 1) 相机层（它是 .camera-layer，不在 .modal 里，要单独判） */
       const cam = window.DL && window.DL.camera;
       if (cam && typeof cam.isOpen === "function" && cam.isOpen()) { cam.close(); return; }
-      /* 1.5) 手机层（.phone-layer，同样不在 .modal 里）：通话中先挂断，其次聊天 → 列表 → 关闭 */
+      /* 1.5) 手机层（.phone-layer，不在 .modal 里）：交给它自己逐级退
+             （浮层 → 通话 → 动态 → 动作条/多选 → 列表），只有它说「退到头了」才关手机。 */
       const ph = window.DL && window.DL.phone;
-      if (ph && typeof ph.isOpen === "function" && ph.isOpen()) { ph.close(); return; }
+      if (ph && typeof ph.isOpen === "function" && ph.isOpen()) {
+        if (typeof ph.back === "function" && ph.back()) return;
+        ph.close();
+        return;
+      }
+      /* 1.6) 自绘滚轮选择器（.wp-mask，不是 .modal，以前漏了 → 返回键会关错层） */
+      if (window.WheelPicker && typeof window.WheelPicker.close === "function") {
+        const wp = document.querySelector(".wp-mask:not([hidden])");
+        if (wp) { window.WheelPicker.close(); return; }
+      }
       /* 1.8) 设置子页：返回键先退回设置首页，别一脚踩到底（10-21 用户要求）。
              设置页本身是整页浮层，不插这条会被下面「关掉当前弹窗」直接关回主界面。 */
       const sbody = document.getElementById("settingsBody");
@@ -2017,6 +3277,7 @@
     });
     on("#menuBtn", "click", openSidebar);
     on("#scrim", "click", closeSidebar);
+    bindBgCrop();
     on("#newChatBtn", "click", () => { newSession(); closeSidebar(); });
     on("#openSearchBtn", "click", () => { openSearchModal(); closeSidebar(); });
     on("#newGroupBtn", "click", () => { openGroupModal(); closeSidebar(); });
@@ -2090,14 +3351,49 @@
 
     /* ── 自定义背景：全局 / 会话两处共用一个文件选择器，靠 bgTarget 区分 ── */
     let bgTarget = "settings";
-    on("#setBgPick", "click", () => { bgTarget = "settings"; const i = $("#bgInput"); if (i) i.click(); });
-    on("#setSessionBgPick", "click", () => { bgTarget = "session"; const i = $("#bgInput"); if (i) i.click(); });
+    /* 三个背景入口都先试原生相册，9 秒没结果就弹系统选择器 */
+    const pickBg = (target) => {
+      bgTarget = target;
+      /* 先开自研相册（走目录接口）；用户在那里点「用系统选择器」时 onPick 收到 null */
+      openAlbum({
+        onPick: (url) => {
+          if (url) { openBgCrop(url, target); return; }
+          const i = $("#bgInput");
+          if (i) i.click();
+        }
+      });
+    };
+    on("#albumTabs", "click", (e) => {
+      const b = e.target && e.target.closest ? e.target.closest(".album-tab") : null;
+      if (!b) return;
+      albumState.dir = b.getAttribute("data-dir") || "dcim";
+      const all = document.querySelectorAll("#albumTabs .album-tab");
+      for (let i = 0; i < all.length; i++) all[i].classList.toggle("on", all[i] === b);
+      albumLoad();
+    });
+    on("#albumSysBtn", "click", () => {
+      const cb = albumState.onPick;
+      const scope = albumState.scope;
+      albumState.onPick = null;
+      UI.closeModal("albumModal");
+      if (typeof cb === "function") cb(null, scope);
+    });
+    on("#albumOkBtn", "click", () => { albumConfirm(); });
+    on("#albumScopes", "click", (e) => {
+      const b = e.target && e.target.closest ? e.target.closest(".album-scope") : null;
+      if (!b) return;
+      albumState.scope = b.getAttribute("data-scope") || "both";
+      const all = document.querySelectorAll("#albumScopes .album-scope");
+      for (let i = 0; i < all.length; i++) all[i].classList.toggle("on", all[i] === b);
+    });
+    on("#setBgPick", "click", () => pickBg("settings"));
+    on("#setSessionBgPick", "click", () => pickBg("session"));
     /* AI 生成背景：全局 / 本对话各一个入口（结果先进草稿，保存才落库） */
     on("#setBgAi", "click", () => { genBgByAi("settings", "#setBgPreview"); });
     on("#setSessionBgAi", "click", () => { genBgByAi("session", "#setSessionBgPreview"); });
     on("#setBgClear", "click", () => { bgDraft.settings = ""; renderBgPreview("#setBgPreview", ""); });
     /* 手机背景：同一个文件选择器，靠 bgTarget 区分 */
-    on("#setPhoneBgPick", "click", () => { bgTarget = "phone"; const i = $("#bgInput"); if (i) i.click(); });
+    on("#setPhoneBgPick", "click", () => pickBg("phone"));
     on("#setPhoneBgClear", "click", () => { bgDraft.phone = ""; renderBgPreview("#setPhoneBgPreview", ""); });
     on("#setPhoneBgBlur", "input", syncBgLabels);
     on("#setPhoneBgBright", "input", syncBgLabels);
@@ -2110,13 +3406,10 @@
       const file = e.target.files && e.target.files[0];
       e.target.value = "";
       if (!file) return;
+      /* 选图后先进取景面板（裁剪 + 亮度/模糊），确定时再写回草稿 */
       try {
         const url = await readBgFile(file);
-        bgDraft[bgTarget] = keepBg(url);
-        const prevSel = bgTarget === "session" ? "#setSessionBgPreview"
-          : (bgTarget === "phone" ? "#setPhoneBgPreview" : "#setBgPreview");
-        renderBgPreview(prevSel, bgDraft[bgTarget]);
-        if (bgTarget === "session") setChecked("#setSessionBgFollow", false);
+        openBgCrop(url, bgTarget);
       } catch (err) {
         UI.toast(err.message || "背景图读取失败", true);
       }
@@ -2401,14 +3694,20 @@
         bgFollow: checkedOf("#setSessionBgFollow")
       };
       if (isRole) {
+        /* 只回写用户真改过的记忆类字段：没改过的不要用表单快照盖回后台刚写完的值 */
+        const init = (state.sessionFormInit || {});
+        const putIfChanged = (key, sel) => {
+          const v = $v(sel);
+          if (init[key] === undefined || v !== init[key]) patch[key] = v;
+        };
         patch.adoptFormat = $v("#setSessionFormat").trim();
         /* 本线音色：留空 = 跟随全局 */
         patch.ttsVoice = $v("#setSessionTtsVoice").trim();
-        patch.scene = $v("#setSessionScene");
+        putIfChanged("scene", "#setSessionScene");
         patch.sceneEvery = Number($v("#setSessionSceneEvery")) || 10;
-        patch.relation = $v("#setSessionRelation");
-        patch.shared = $v("#setSessionShared");
-        patch.cognition = $v("#setSessionCognition");
+        putIfChanged("relation", "#setSessionRelation");
+        putIfChanged("shared", "#setSessionShared");
+        putIfChanged("cognition", "#setSessionCognition");
         /* 本线年龄（10-20）：留空 = 用角色卡的；存成字符串，ageOf 里取第一段数字 */
         patch.age = String($v("#setSessionAge") || "").trim();
         /* 混搭模式（10-20）：离线自动冻结、发第一条消息解冻。放会话级，别塞进 s.time
@@ -2725,54 +4024,37 @@
     pickMode(rm === "dark" ? "light" : "dark");
   }
 
-  /* 读工作区。返回 true = 读成功（可以渲染）；false = 这次没读到（别渲染成「没有数据」） */
-  /* ── 听澜：内置助手身份（一次性迁移）──────────────────
-     1）没有这个角色就按预设建一个（固定 id，不随机）
-     2）把老的「无角色会话」挂到它名下 —— 只改归属，消息 / 记忆 / 摘要一律不动
-     用户要是把听澜删了，不再重建（删了就是删了），会话自然回落到「助手」显示。
-     群聊的 characterId 也是空串，但成员在 members 里，绝不能挂。 */
+  /* ── 听澜并进「助手」（一次性迁移，10-22 口径）──────────
+     听澜不再是角色卡：删掉 c_tinglan，把它名下的会话 characterId 改回空串
+     （空串 = 助手身份，对外显示叫听澜）。
+     顺序必须「先解除引用、再删角色、最后打标记」：
+     反过来的话，删完角色会话还挂着 c_tinglan，而标记已经落盘，
+     那几条会话在助手栏和角色栏里都看不到，等于从侧栏消失。 */
   function ensureTinglan() {
     try {
-      if (state.settings.tlAsstDone) return;
-      const preset = (CONFIG && CONFIG.BUILTIN_ASSISTANT) || null;
-      if (!preset) return;
-      const list = Store.getCharacters();
-      if (!list.some((c) => c.id === TINGLAN_ID)) {
-        const now = Date.now();
-        const ch = {
-          id: TINGLAN_ID,
-          name: preset.name || "听澜",
-          avatar: preset.avatar || "",
-          fields: {},
-          ctxFilter: { rule: "", every: 10 },
-          usage: null,
-          pinned: false,
-          builtin: true,
-          createdAt: now,
-          updatedAt: now
-        };
-        Object.keys(preset.fields || {}).forEach((k) => {
-          if (k.indexOf("my") === 0) return;   /* 我自己那半边，预设一律不写 */
-          ch.fields[k] = preset.fields[k];
-        });
-        list.push(ch);
-        Store.saveCharacters(list);
-      }
+      if (state.settings.tlAssistantMerged) return;
+
+      /* ① 先迁会话，没写进去就不往下走，下次启动重试 */
       const ss = Store.getSessions();
       let moved = 0;
-      ss.forEach((s) => {
-        if ((s.characterId || "") === "" && !s.isGroup) { s.characterId = TINGLAN_ID; moved++; }
-      });
-      if (moved) Store.saveSessions(ss);
-      /* ⚠️ 不写成 `state.settings = Store.saveSettings(...)`：那会把 state.settings
-         整个换成一个新对象，凡是之前拿过引用的人（模块里的闭包、流式生成中的快照）
-         都会继续读旧对象 —— 表现为「刚设好的东西突然不生效了」。原地打标记最安全。 */
-      Store.saveSettings({ tlAsstDone: true });
-      if (state.settings) state.settings.tlAsstDone = true;
-      /* 迁移发生在启动早期（渲染之前），这里不用再刷界面 —— 后面 renderAll 会带上 */
-    } catch (e) { /* 迁移出错也不能挡住启动：大不了继续显示「助手」 */ }
+      ss.forEach((s) => { if ((s.characterId || "") === TINGLAN_ID) { s.characterId = ""; moved++; } });
+      if (moved && Store.saveSessions(ss) === false) return;
+
+      /* ② 再删角色。角色卡是加密存储的，没解锁时 saveCharacters 会拒绝返回 false，
+            同样不打标记，下次再来。 */
+      const list = Store.getCharacters();
+      const rest = list.filter((c) => c.id !== TINGLAN_ID);
+      if (rest.length !== list.length) {
+        if (Store.saveCharacters(rest) === false) return;
+      }
+
+      /* ③ 确实清理完了才打标记 */
+      Store.saveSettings({ tlAssistantMerged: true, tlAsstDone: true });
+      if (state.settings) { state.settings.tlAssistantMerged = true; state.settings.tlAsstDone = true; }
+    } catch (e) { /* 迁移失败不能挡住启动：下一轮再来 */ }
   }
 
+  /* 读工作区。返回 true = 读成功（可以渲染）；false = 这次没读到（别渲染成「没有数据」） */
   function loadWorkspace() {
     state.settings = Store.getSettings();
     /* ⚠️ 读失败时什么都别做：既不能按「空」渲染，更不能 newSession() ——
@@ -3028,8 +4310,11 @@
     autoMessageTick: autoMessageTick,
     toast: UI.toast, err: function (t) { UI.toast(t, true); },
     session: session, sessionById: sessionById, agentId: agentId, characterFor: characterFor, activeCharacter: activeCharacter, voiceSettingsFor: voiceSettingsFor,
+    /* 助手线判据：chat.js 的「关系剖析」等地方要用，别再各自拼 characterId 判断 */
+    isAssistantLine: isAssistantLine, openBgCrop: openBgCrop, openAlbum: openAlbum, shrinkDataUrl: shrinkDataUrl, nativeAlbumProbe: nativeAlbumApis,
     saveSession: saveSession, setMainLine: setMainLine,
     newSession: newSession, appendMessage: appendMessage, renderSessionList: renderSessionList,
+    openGroupModal: openGroupModal, groupModeOf: function () { return groupMode; },
     deleteSessionWithGuard: deleteSessionWithGuard, groupsUsingLine: groupsUsingLine,
     /* 阶段④搬走、由各子模块末尾自注册补挂到这里的（**别在这写裸名字**，写了就成了转发到自己的死循环）：
        recordUsage / renderCharUsage / renderBackupLine / maybeAutoBackup / syncChip / maybeAutoWash → settings.js 与 roleplay.js；

@@ -1,5 +1,12 @@
 /* DeepLink —— 角色记忆：分层压缩（日→周→月）/ 对我的认知 / 极度提纯 */
 (function () {
+  /* 内置助手的对外名字（10-22 用户口径：不再出现「助手」三个字，就叫听澜）。
+     取 CONFIG.BUILTIN_ASSISTANT.name，取不到才退回「听澜」这个兜底。 */
+  function aiName() {
+    var c = window.CONFIG && window.CONFIG.BUILTIN_ASSISTANT;
+    return (c && c.name) || "听澜";
+  }
+
   function pad(n) { return (n < 10 ? "0" : "") + n; }
   function dateStr(ts) {
     const d = new Date(ts);
@@ -68,7 +75,7 @@
         }
       }
     } catch (e) { /* 拿不到名字就退回默认 */ }
-    return (rec && rec.characterId) ? "角色" : "助手";
+    return (rec && rec.characterId) ? "角色" : aiName();
   }
 
   function speakerOf(m, aiName) {
@@ -127,6 +134,24 @@
         vi: 0
       });
     }
+    /* 群聊压缩（10-22）：群里是多人说话，摘要里必须带「谁说的」——
+       否则压完分不清哪句是沈霁、哪句是阿澈，群记忆基本白做。
+       ⚠️ 一定要克隆后再加前缀：variants 里的对象是和真实消息共享的引用，
+       直接改会让聊天界面里每条气泡都顶上一个「名字：」。 */
+    if (rec && rec.isGroup) {
+      for (let k = 0; k < out.length; k++) {
+        const m = out[k];
+        const nm = String(m.speakerName || "").trim();
+        if (!nm || m.role !== "assistant" || !m.variants || !m.variants[0]) continue;
+        const v0 = m.variants[0];
+        const txt = (typeof v0 === "string") ? v0 : String(v0.content || "");
+        if (!txt || txt.indexOf(nm + "：") === 0) continue;
+        const nv = (typeof v0 === "string")
+          ? (nm + "：" + v0)
+          : Object.assign({}, v0, { content: nm + "：" + txt });
+        out[k] = Object.assign({}, m, { variants: [nv].concat(m.variants.slice(1)) });
+      }
+    }
     /* 手机消息是「追加」在主消息后面的，跨端消息的真实先后会被打乱。
        下游按时间生成日摘要 / 场景，这里先按 ts 归并（Chrome 83 的 sort 是稳定的）。 */
     out.sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); });
@@ -134,15 +159,35 @@
   }
 
   /* 分层记忆拼成可注入的文本（越久越靠前） */
-  function memoryText(mem) {
+  /* 注入预算（10-23）：一条老线的记忆只会越压越长（月摘要永不折叠），
+     而它每一轮都要重发一次、每一轮都计费，还挤压正文能用的上下文。
+     口径：精华全留 + 近 3 个月 + 近 6 周 + 近 14 天，总长超 2400 字就从「最远的那层」开始丢
+     （月 → 周 → 日），精华永远不丢。
+     ⚠️ 压缩 / 纠偏 / 再压缩要吃全量，它们调用时不传第二个参数。 */
+  const MEM_INJECT = { cap: 2400, months: 3, weeks: 6, days: 14 };
+
+  function memoryText(mem, opt) {
     if (!mem) return "";
-    const out = [];
-    if (mem.core) out.push("〖精华〗" + mem.core);
-    (mem.months || []).forEach((x) => out.push("〖月·" + x.key + "〗" + x.summary));
-    (mem.weeks || []).forEach((x) => out.push("〖周·" + x.key + "〗" + x.summary));
-    (mem.days || []).forEach((x) => out.push("〖" + x.date + "〗" + x.summary));
-    return out.join("\n");
+    const cap = (opt && opt.cap) || 0;
+    const take = (arr, n) => (n ? (arr || []).slice(-n) : (arr || []));
+    const coreText = mem.core ? "〖精华〗" + mem.core : "";
+    const parts = {
+      months: take(mem.months, opt && opt.months).map((x) => "〖月·" + x.key + "〗" + x.summary),
+      weeks: take(mem.weeks, opt && opt.weeks).map((x) => "〖周·" + x.key + "〗" + x.summary),
+      days: take(mem.days, opt && opt.days).map((x) => "〖" + x.date + "〗" + x.summary)
+    };
+    const join = () => [coreText].concat(parts.months, parts.weeks, parts.days)
+      .filter(Boolean).join("\n");
+    let s = join();
+    if (!cap) return s;
+    ["months", "weeks", "days"].forEach((k) => {
+      while (parts[k].length && s.length > cap) { parts[k].shift(); s = join(); }
+    });
+    return s;
   }
+
+  /* 拼进提示词时用这个（带预算）；其余场合继续用 memoryText（全量） */
+  function memoryForPrompt(mem) { return memoryText(mem, MEM_INJECT); }
 
   /* 「我的人设」：设置里独立存的最多 10 套（全局，存本机）。
      id 指向当前选中的那套；找不到就退第一套。 */
@@ -168,27 +213,118 @@
       appearance: f.myAppearance || p.myAppearance || s.myAppearance || "",
       background: f.myBackground || p.myBackground || s.myBackground || "",
       likes: f.myLikes || p.myLikes || s.myLikes || "",
+      /* 身体状况：以前只存在角色卡里、从没进过提示词 */
+      health: f.myHealth || p.myHealth || s.myHealth || "",
       callMe: f.aiCallMe || p.aiCallMe || ""
     };
   }
 
   /* 角色化对话的 system 文本：角色卡 + 我的设定 + 关系/场景 + 指令 + 认知 + 记忆摘要 */
-  function buildSystemText(ch, s, settings) {
+  /* 一条线能用的图片表情包（10-22：按上传时设的「可用范围」算，不另做归属）。
+     scope=me 是用户自己用的，不列给模型；ai / both 都能让 TA 发。
+     上限 50 个（10-22 用户要求）：清单在**第二段挑表情**时才给它，第一段回复里不出现，
+     所以列多了也不会把正常回复的提示词撑大。 */
+  function stickerNamesFor(s, settings, opts) {
+    const sets = (settings && typeof settings === "object" && Array.isArray(settings.stickers))
+      ? settings
+      : ((window.DL && window.DL.state && window.DL.state.settings) || {});
+    const list = (sets.stickers || []).filter(function (x) {
+      return x && x.name && (x.scope || "both") !== "me";
+    });
+    const mine = list.map(function (x) { return String(x.name); });
+    /* 内置 48 个：手机那边（pickSticker）以前只拿到自添加的清单，
+       用户没加过自定义表情时，模型在手机里一个表情都发不出来。
+       主聊天自己会拼 _pk，所以那边传 { builtin:false }，避免列两遍。
+       上限作用在合并后的清单上 —— 以前两处各切一次，两边都不完整。 */
+    const pack = (opts && opts.builtin === false) ? []
+      : (((window.CONFIG && CONFIG.EMOJI_PACK) || [])
+        .map(function (x) { return x.n; })
+        .filter(Boolean));
+    return pack.concat(mine)
+      .filter(function (n, i, arr) { return n && arr.indexOf(n) === i; })
+      .slice(0, (opts && opts.limit) || 50);
+  }
+
+  /* 那条线「最近新说的话」（10-22 互通）：群聊里也得看得见成员在别处刚聊过什么。
+     主聊天（messages）和手机（phone.msgs）是同一个会话对象的两个列表，各取最近几条。 */
+  function recentLineTalk(line, name, n) {
+    if (!line) return "";
+    const cap = n || 4;
+    const who = String(name || "TA");
+    const pick = function (arr, isPhone) {
+      const out = [];
+      for (let i = (arr || []).length - 1; i >= 0 && out.length < cap; i--) {
+        const m = arr[i];
+        if (!m || m.world || m.image || m.kind === "sys" || m.kind === "recalled") continue;
+        const txt = String(isPhone ? (m.text || "") : (m.content || "")).replace(/\s+/g, " ").trim();
+        if (!txt) continue;
+        const r = m.role === "user" ? "用户" : (m.role === "assistant" ? who : "");
+        if (!r) continue;
+        out.unshift(r + "：" + txt.slice(0, 80));
+      }
+      return out.join("\n");
+    };
+    const a = pick(line.messages || [], false);
+    const b = pick((line.phone && line.phone.msgs) || [], true);
+    const parts = [];
+    if (a) parts.push("主聊天里最近说的：\n" + a);
+    if (b) parts.push("手机上最近说的：\n" + b);
+    return parts.join("\n").slice(0, 700);
+  }
+
+  /* ── 一条线的完整档案（10-23 用户要求「让角色读自己的线」）──────────
+     把这条线里**真实存在**的东西一次读全：关系 / 共同经历 / 场景 / 认知 / 分层摘要 /
+     主聊天与手机的最近对话 / TA 自己记下的思绪 / 图库里的样子。
+     以前每个调用点各拼一遍（群聊漏了思考和图库、视频那边漏了群发言），口径不一致。
+     说明一点：读的动作在前端，桥只是让读本机数据又快又不受 5MB 限制 ——
+     模型看不到文件本身，它看到的是这里拼出来的文字。 */
+  function lineDossier(line, ch, opts) {
+    if (!line) return "";
+    const o = opts || {};
+    const budget = o.budget || 900;
+    const n = o.talk || 4;
+    const parts = [];
+    const put = function (label, v, cap) {
+      const t = String(v || "").trim();
+      if (t) parts.push(label + "：" + (cap ? t.slice(0, cap) : t));
+    };
+    put("和用户的关系", line.relation, 200);
+    put("共同经历", line.shared, 220);
+    put("最近一次的情境", line.scene, 160);
+    put("对用户的认知", line.cognition, 200);
+    let mt = "";
+    try { mt = (line.memory && memoryText) ? String(memoryText(line.memory) || "") : ""; } catch (e) { mt = ""; }
+    put("近期记忆", mt, o.memCap || 320);
+    const talk = recentLineTalk(line, (ch && (ch.name || (ch.fields || {}).aiName)) || "", n);
+    if (talk) parts.push("最近刚说过的：\n" + talk);
+    /* TA 自己记下的思绪（10-20 起有的东西）：以前只有视频/音乐那边读，群里读不到 */
+    try {
+      const tb = (window.Think && window.Think.readBlock) ? String(window.Think.readBlock(line) || "").trim() : "";
+      if (tb) parts.push("TA 自己记下的思绪：" + tb.slice(0, 220));
+    } catch (e) { /* 没有思考记录就跳过 */ }
+    /* 图库：这条线上出现过的样子（外形一致性靠它，群里也该知道） */
+    try {
+      const dg = (ch && ch.id && window.Store && Store.charImageDigest)
+        ? String(Store.charImageDigest(ch.id, 4) || "").trim() : "";
+      if (dg) parts.push("以前的样子（图库）：" + dg.slice(0, 200));
+    } catch (e) { /* ignore */ }
+    return parts.join("\n").slice(0, budget);
+  }
+
+  function buildSystemText(ch, s, settings, opts) {
     if (!ch) return "";
+    const o = opts || {};
     const f = ch.fields || {};
     const my = resolveMy(settings, f);
     const L = [CONFIG.ROLEPLAY_PROMPT, ""];
     /* 表情包（10-19）：只把「能用」的列给模型 —— scope=me 的是用户自己用的，不列。
        写法是 [表情:名字]，渲染层会把它画成图；不写就不发，绝不强求。 */
     const _pk = (window.CONFIG && CONFIG.EMOJI_PACK) || [];
-    const _stk = (settings && settings.stickers) || [];
-    /* 自添加的最多列 12 个：表情包攒到几十张以后，全列进去每次请求都要多烧几百 token，
-       而模型也用不上那么多名字。去重是同名贴纸的保险（存储层已经保证不重名）。 */
-    const _mine = _stk.filter(function (x) { return (x.scope || "both") !== "me" && x.name; })
-      .map(function (x) { return String(x.name); })
-      .filter(function (n, i, arr) { return arr.indexOf(n) === i; })
-      .slice(0, 12);
-    const _names = _pk.map(function (x) { return x.n; }).filter(Boolean).concat(_mine);
+    /* 自添加的按线取（stickerNamesFor）：这条线限定了清单就只列清单里的，
+       没限定就是全局那份「TA 能用」的，最多 12 个名字。 */
+    const _mine = stickerNamesFor(s, settings, { builtin: false });
+    /* 手机那边用双段式（第二段单独挑表情），第一段不要表情清单，传 noEmoji 关掉 */
+    const _names = o.noEmoji ? [] : _pk.map(function (x) { return x.n; }).filter(Boolean).concat(_mine);
     const _emojiHint = _names.length
       ? "【表情包】你可以偶尔发一个表情代替说话（想逗他、害羞、无语、撒娇、被说中的时候）。" +
         "能用的表达：" + _names.join("、") + "。" +
@@ -198,21 +334,33 @@
 
     const _tl = timeLine(ch, s);
     if (_tl) { L.push(_tl); L.push(""); }
+    /* 多媒体标记（视频 / 音乐 / 文档）**不再给角色**（10-23 用户口径）：
+       这三样只在跟听澜对话时触发，角色扮演里不出现 —— 聊天时冒出一句「[[视频]]」
+       很出戏，而且角色本来也不该负责调这些。注入点只剩 chat.js 的助手分支。 */
     L.push("【我（用户）的设定】");
     L.push("名称：" + (my.name || "未设定") + "；你对我的称呼：" + (my.callMe || my.name || "未设定"));
     if (my.persona) L.push("性格：" + my.persona);
     if (my.appearance) L.push("外貌：" + my.appearance);
     if (my.background) L.push("背景：" + my.background);
     if (my.likes) L.push("喜好：" + my.likes);
+    if (my.health) L.push("身体状况：" + my.health);
     L.push("");
     L.push("【你的设定】");
     L.push("名称：" + (f.aiName || ch.name || "未设定"));
-    if (f.age) L.push("年龄：" + f.age);
+    /* 年龄跟着故事时间走（满周岁 +1）：校验用 ageOf，提示词以前却一直给卡片的静态值，
+       模型眼里角色永远停在设定那一刻。这里与校验用同一口径，取不到才退回卡片值。 */
+    const _ageNow = ageOf(ch, s);
+    if (_ageNow != null) L.push("年龄：" + _ageNow + " 岁");
+    else if (f.age) L.push("年龄：" + f.age);
+    /* 性别 / 身体状况 / 生理期：表单里有这四栏，以前一个都没进过提示词（填了等于没填） */
+    if (f.aiGender) L.push("性别：" + f.aiGender);
     if (f.aiPersona) L.push("性格：" + f.aiPersona);
     if (f.aiAppearance) L.push("外貌：" + f.aiAppearance);
     if (f.aiBackground) L.push("背景：" + f.aiBackground);
     if (f.aiLikes) L.push("喜好：" + f.aiLikes);
     if (f.aiStyle) L.push("说话风格：" + f.aiStyle);
+    if (f.aiHealth) L.push("身体状况：" + f.aiHealth);
+    if (f.aiPeriod) L.push("生理期（上次第一天）：" + f.aiPeriod);
     if (f.world) { L.push(""); L.push("【世界观】"); L.push(f.world); }
     const sh = (s && s.shared) || f.shared;
     const rel = (s && s.relation) || f.relation;
@@ -221,7 +369,7 @@
     if (s && s.scene) { L.push(""); L.push("【当前场景】"); L.push(s.scene); }
     if (f.aiDirective) { L.push(""); L.push("【AI 指令】"); L.push(f.aiDirective); }
     if (s && s.cognition) { L.push(""); L.push("【对用户的认知】"); L.push(s.cognition); }
-    const mem = memoryText(s && s.memory);
+    const mem = memoryForPrompt(s && s.memory);
     if (mem) { L.push(""); L.push("【记忆摘要】"); L.push(mem); }
     /* 相熟型的手机角色：人在手机那头，不在一间屋里（10-19） */
     if (ch.phoneKind === "close") {
@@ -252,6 +400,9 @@
     if (f.aiBackground) L.push("背景：" + f.aiBackground);
     if (f.aiLikes) L.push("喜好：" + f.aiLikes);
     if (f.aiStyle) L.push("说话风格：" + f.aiStyle);
+    if (f.aiGender) L.push("性别：" + f.aiGender);
+    if (f.aiHealth) L.push("身体状况：" + f.aiHealth);
+    if (f.aiPeriod) L.push("生理期（上次第一天）：" + f.aiPeriod);
     if (f.world) { L.push(""); L.push("世界观：" + f.world); }
     if (f.aiDirective) { L.push(""); L.push("AI 指令：" + f.aiDirective); }
     return L.join("\n").trim();
@@ -925,6 +1076,13 @@
       "现有记忆：\n" + (memoryText(m) || "（空）") + "\n\n用户的纠正/补充：\n" + text, 2000);
     const parsed = parseMemoryLines(out.text);
     if (!parsed) return { changed: false, usage: out.usage };
+    /* 纠偏是「改错」，不是「删档」。模型偷懒只回一行〖精华〗时，缺的层是空数组，
+       直接赋值等于把日/周/月整层抹掉（不可逆，也没有备份）。
+       任一层比原来少 → 判「输出不完整」，原样保留，什么都没动。 */
+    const shrunk = (oldArr, newArr) => (oldArr || []).length > (newArr || []).length;
+    if (shrunk(m.days, parsed.days) || shrunk(m.weeks, parsed.weeks) || shrunk(m.months, parsed.months)) {
+      return { changed: false, usage: out.usage, why: "模型这次输出不完整，已保留原记忆" };
+    }
     m.core = parsed.core;
     m.months = parsed.months;
     m.weeks = parsed.weeks;
@@ -949,15 +1107,19 @@
     if (!core) return { ok: false, usage: out.usage };
     m.core = core;
     m.days = []; m.weeks = []; m.months = [];
-    m.coveredUntil = startOfToday();
+    /* 水位线不动：coveredUntil 的含义是「原文已经被摘要覆盖到这一刻」，
+       而这里只提纯了摘要、根本没读原文。推上去会让「昨天聊过但还没压缩」的那段原文
+       被永久跳过（既不进摘要，也不再喂给模型）。 */
     if (save) save();
     return { ok: true, usage: out.usage };
   }
 
-  window.Memory = { buildSystemText, personaText, memoryText, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, correctMemory, activePersona,
+  window.Memory = { buildSystemText, personaText, memoryText, memoryForPrompt, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, correctMemory, activePersona,
     /* 表情 → 可读说明（10-19）：手机那边有自己的 msgText，也要用同一套翻译，
        否则模型收到的是 [[s:xxx]] 这种原始标记 */
     emojiReadable, msgText,
+    /* 按线取表情包清单（10-22）：主聊天 / 手机单聊 / 群聊都用它，保证同一套 */
+    stickerNamesFor, recentLineTalk, lineDossier,
     /* 故事时间轴（10-15）：主对话 / 手机 / 世界生成 / 摘要都读它 */
     hasTimeline, timeOffset, nowOf, storyAt, fmtStory, fmtStoryShort, weekdayOf,
     validRange, checkTime, canTimeline, yearsBetween, timeLine, parseYMD, addYears, ageOf, tryJumpTime, DAY_MS, fmtHM,

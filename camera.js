@@ -329,9 +329,18 @@
     if (p.x < L - tol || p.x > R + tol || p.y < T - tol || p.y > B + tol) return null;
     const dL = Math.abs(p.x - L), dR = Math.abs(p.x - R);
     const dT = Math.abs(p.y - T), dB = Math.abs(p.y - B);
-    const hx = Math.min(dL, dR) <= tol ? (dL <= dR ? "w" : "e") : "";
-    const hy = Math.min(dT, dB) <= tol ? (dT <= dB ? "n" : "s") : "";
-    if (hx || hy) return hy + hx;
+    const nearL = dL <= tol, nearR = dR <= tol, nearT = dT <= tol, nearB = dB <= tol;
+    /* 角优先，且**不受 tiny 影响**：角的判据是「离两条边都近」，框越小这个判据越明确。
+       之前把角一起塞进 tiny 的排除里，结果框缩到 72px 以下就再也拖不大 —— 死锁。 */
+    if ((nearL || nearR) && (nearT || nearB)) {
+      return (nearT ? "n" : "s") + (nearL ? "w" : "e");
+    }
+    /* 只对「边」降级：小框里四边的容差会占满整个框，那时点哪都在拖边，框反而挪不动 */
+    const tiny = (r.w < tol * 3) || (r.h < tol * 3);
+    if (!tiny) {
+      if (nearL || nearR) return nearL ? "w" : "e";
+      if (nearT || nearB) return nearT ? "n" : "s";
+    }
     if (p.x > L && p.x < R && p.y > T && p.y < B) return "move";
     return null;
   }
@@ -363,9 +372,52 @@
   }
 
   /* 进裁剪模式先给一个内缩的框：直接就能拖角微调，不必每次重新拖一遍 */
+  /* ── 记住上次的构图（10-25 用户反馈：每次进裁剪都要重新拖一遍）──
+     按「相对底图的比例」存，换一张不同尺寸的照片也能按同样构图套上去。
+     放 localStorage 而不是 settings：它是个纯前端的操作习惯，不进导出、不参与迁移。 */
+  /* 走 Store 而不是 localStorage：这个项目的持久化统一由 Store 管（原生 KV 或 storage 适配），
+     file:// WebView 里 localStorage 有可能被封装禁掉 —— 那种情况下 try/catch 会把异常吞掉，
+     用户看到的就是「记忆功能做了但没生效」，还查不出原因。 */
+  function cropStore() { return (D && D.Store) || window.Store || null; }
+
+  function cropReadKeep() {
+    try {
+      const S = cropStore();
+      if (!S) return null;
+      const v = S.getSettings().cropKeep;
+      if (v && typeof v.l === "number" && typeof v.t === "number"
+        && v.r > v.l && v.b > v.t && v.r <= 1.001 && v.b <= 1.001 && v.l >= -0.001 && v.t >= -0.001) return v;
+    } catch (e) { /* 坏数据当没有 */ }
+    return null;
+  }
+  function cropSaveKeep(r) {
+    if (!r || !cam.base) return;
+    const W = cam.base.width || 1, H = cam.base.height || 1;
+    try {
+      const S = cropStore();
+      if (!S) return;
+      S.saveSettings({ cropKeep: {
+        l: r.x / W, t: r.y / H, r: (r.x + r.w) / W, b: (r.y + r.h) / H
+      } });
+    } catch (e) { /* 存不上就算了，不影响裁剪 */ }
+  }
+  function cropForgetKeep() {
+    try {
+      const S = cropStore();
+      if (S) S.saveSettings({ cropKeep: null });
+    } catch (e) { /* ignore */ }
+  }
+
   function camDefaultCrop() {
     const W = cam.base ? cam.base.width : 100;
     const H = cam.base ? cam.base.height : 100;
+    /* 上次裁过就套上次的构图：同一张照片反复裁同一块时不用每次重拖 */
+    const keep = cropReadKeep();
+    if (keep) {
+      const x = keep.l * W, y = keep.t * H;
+      const w = (keep.r - keep.l) * W, h = (keep.b - keep.t) * H;
+      if (w > 4 && h > 4) return { x: x, y: y, w: w, h: h };
+    }
     const iw = W * 0.84, ih = H * 0.84;
     return { x: (W - iw) / 2, y: (H - ih) / 2, w: iw, h: ih };
   }
@@ -397,24 +449,45 @@
       ctx.lineTo(r.x + r.w, r.y + r.h * i / 3);
       ctx.stroke();
     }
-    /* 边框 */
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = Math.max(1, 2 * u);
-    ctx.strokeRect(r.x, r.y, r.w, r.h);
-    /* 四角 + 四边中点的手柄：告诉用户「这里能拖」 */
-    const hs = Math.max(1.5, 4.5 * u);
-    const xs = [r.x, r.x + r.w / 2, r.x + r.w];
-    const ys = [r.y, r.y + r.h / 2, r.y + r.h];
-    ctx.lineWidth = Math.max(0.8, 1.4 * u);
+    /* 边框：先描一层深色再描白，亮背景上也能看清（纯白框在浅色照片上会“消失”） */
     ctx.strokeStyle = "rgba(0,0,0,.55)";
-    for (let i = 0; i < 3; i++) {
-      for (let j = 0; j < 3; j++) {
-        if (i === 1 && j === 1) continue;                 /* 中间不画 */
-        ctx.fillStyle = (i === 1 || j === 1) ? "rgba(255,255,255,.78)" : "#fff";
-        ctx.fillRect(xs[i] - hs, ys[j] - hs, hs * 2, hs * 2);
-        ctx.strokeRect(xs[i] - hs, ys[j] - hs, hs * 2, hs * 2);
-      }
-    }
+    ctx.lineWidth = Math.max(2, 3.5 * u);
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = Math.max(1, 1.6 * u);
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+    /* 四角方块 + 四边中点短线（10-25 改）：
+       原来八个手柄画成一样大，方块在屏幕上只有 8px、又分不清哪是角哪是边，手指很难对准。
+       现在角=实心大方块（屏幕 ~15px），边=细短线，一眼能分出「拖角改大小 / 拖边改一边」。 */
+    const hs = Math.max(2.5, 7.5 * u);          /* 角手柄半边长（屏幕约 7.5px） */
+    const cs = [r.x, r.y, r.x + r.w, r.y + r.h];
+    const corners = [[cs[0], cs[1]], [cs[2], cs[1]], [cs[0], cs[3]], [cs[2], cs[3]]];
+    corners.forEach((c) => {
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "rgba(0,0,0,.6)";
+      ctx.lineWidth = Math.max(1, 1.6 * u);
+      ctx.beginPath();
+      ctx.rect(c[0] - hs, c[1] - hs, hs * 2, hs * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+    /* 边中点：短横线 / 短竖线，长度是角块的 1.6 倍、粗细取半 */
+    const el = hs * 1.6, et = Math.max(1.2, 2 * u);
+    ctx.fillStyle = "rgba(255,255,255,.92)";
+    ctx.fillRect(r.x + r.w / 2 - el, r.y - et / 2, el * 2, et);          /* 上 */
+    ctx.fillRect(r.x + r.w / 2 - el, r.y + r.h - et / 2, el * 2, et);    /* 下 */
+    ctx.fillRect(r.x - et / 2, r.y + r.h / 2 - el, et, el * 2);          /* 左 */
+    ctx.fillRect(r.x + r.w - et / 2, r.y + r.h / 2 - el, et, el * 2);    /* 右 */
+    /* 尺寸标注：贴在框内左上角，告诉用户裁出来多少像素 */
+    const label = Math.round(r.w) + " × " + Math.round(r.h);
+    const fs = Math.max(10, 26 * u);
+    ctx.font = "600 " + fs + "px sans-serif";
+    const tw = ctx.measureText(label).width + fs * 0.7;
+    ctx.fillStyle = "rgba(0,0,0,.55)";
+    ctx.fillRect(r.x, r.y, tw, fs * 1.5);
+    ctx.fillStyle = "#fff";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, r.x + fs * 0.35, r.y + fs * 0.78);
     ctx.restore();
   }
 
@@ -461,12 +534,21 @@
   }
 
   function camSetTool(t) {
+    const prev = cam.tool;
     cam.tool = t;
-    /* 进裁剪模式先给一个内缩的默认框，用户直接拖手柄微调；
-       切到别的工具【保留】这个框（切回来还能接着调，不必重拖），
-       但不显示 —— camRender 只在 tool==="crop" 时画它。
+    /* 进裁剪模式先给个框：有记忆的构图就套记忆的，没有才内缩 84%。
+       切到别的工具【保留】这个框（切回来还能接着调，不必重拖），只是不显示。
        换底图的地方（裁剪确定 / 旋转 / 重置 / 重拍 / 关闭）会显式清掉，因为坐标全变了。 */
-    if (t === "crop" && !cam.cropRect) cam.cropRect = camDefaultCrop();
+    if (t === "crop") {
+      if (prev === "crop") {
+        /* 再点一次裁剪 = 重置回默认：拖歪了、或想换构图，总得有个出路。
+           连记忆一起清，否则「重置」立刻又被记忆拉回去。 */
+        cropForgetKeep();
+        cam.cropRect = camDefaultCrop();
+      } else if (!cam.cropRect) {
+        cam.cropRect = camDefaultCrop();
+      }
+    }
     cam.drag = null;   /* 切工具时丢掉没抬手的拖动，免得残留 drag 在新工具下继续算 */
     document.querySelectorAll(".cam-tool").forEach((b) => b.classList.toggle("on", b.getAttribute("data-cam") === t));
     const colors = $("#camColors");
@@ -609,8 +691,12 @@
     /* 阈值按屏幕算，和拖动时的最小边长保持一致 */
     const min = CROP_MIN * camUnit();
     if (!r || r.w < min || r.h < min) { UI.toast("裁剪框太小了，拖大一点再裁剪", true); return; }
-    cam.snapshot = camFlatten();
+    /* 裁过一次就把构图记下来：下一张图、下一次编辑都直接套这个比例 */
+    cropSaveKeep(r);
+    /* OPT-08：以前这里连续调两次 camFlatten()，各生成一张全尺寸画布
+       （1600×1200 下每张约 7.7MB），内容却完全一样。只留一张，snapshot 复用同一份。 */
     const flat = camFlatten();
+    cam.snapshot = flat;
     const nc = document.createElement("canvas");
     nc.width = Math.max(1, Math.round(r.w));
     nc.height = Math.max(1, Math.round(r.h));
@@ -661,7 +747,13 @@
     camLoading(false);
     setText("#camHint", why + "，已改用系统相机；拍完仍可在这里裁剪 / 旋转 / 圈画。");
     UI.toast("已改用系统相机", true);
-    setTimeout(() => { const i = $("#camFallbackInput"); if (i) i.click(); }, 400);
+    setTimeout(() => {
+      /* 400ms 里用户可能已经关掉相机：这时别再弹系统相机（同样只判 hidden） */
+      const m = document.getElementById("cameraModal");
+      if (!m || m.hidden) return;
+      const i = $("#camFallbackInput");
+      if (i) i.click();
+    }, 400);
   }
 
   async function camStartStream() {
@@ -673,6 +765,15 @@
     if (!md || !md.getUserMedia) { camFallback("当前环境不支持自研相机"); return; }
     try {
       const stream = await md.getUserMedia({ video: { facingMode: cam.facing }, audio: false });
+      /* 等权限的这段时间用户可能已经把相机关了：这时流不能接上，
+         否则弹窗都没了、摄像头指示灯还亮着（track 泄漏）。
+         ⚠️ 只能判 hidden：相机层是用 `hidden = false` 打开的，**没有** .modal 的 show 类
+         （上一版按 `.show` 判，结果每次启动都被当成「已关闭」，流立刻 stop → 永远转圈）。 */
+      const camUi = document.getElementById("cameraModal");
+      if (!camUi || camUi.hidden) {
+        try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* ignore */ }
+        return;
+      }
       cam.stream = stream;
       const v = $("#camVideo");
       if (!v) { camFallback("相机界面缺失"); return; }

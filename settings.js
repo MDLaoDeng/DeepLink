@@ -96,7 +96,10 @@
   }
 
   /* ── 数据导入导出 + 自动备份 ───────────────────── */
-  const KEY_FIELDS = ["apiKey", "tavilyKey", "customSearchKey", "asrKey", "ttsKey", "imgKey", "visionKey"];
+  /* 导出时抹掉的字段。lock* 也要抹：口令门的凭据不该跟着文件走，
+     换机导入后带着一把别人家的锁，自己都解不开。 */
+  const KEY_FIELDS = ["apiKey", "tavilyKey", "customSearchKey", "asrKey", "ttsKey", "imgKey", "visionKey", "videoKey", "musicKey",
+    "lockSalt", "lockHash", "lockCodeHash"];
 
   function fmtTime(ts) {
     try {
@@ -123,7 +126,35 @@
     return o;
   }
 
-  /* 「不含密钥」导出的文件里，7 个密钥字段是**空串**（不是没有这个键）。
+  /* 导入「不含密钥」的设置时，配置库会被空串覆盖 —— 而 store 读盘是按配置库
+     重算扁平字段的，于是重启后所有 Key 都变空（当下还看得到 Key，第二天全 401）。
+     这里按【配置身份】沿用本机 Key：型号+地址 → 型号 → 同序位 三级匹配。
+     为什么不按序位：用户在别处增删过一行模型配置，下标就错开了，
+     Key 会串到别的服务商头上 —— 请求发得出去、扣的是别人家的钱，或者直接 401。 */
+  function mergeSetsKeepKey(inSets, localSets) {
+    const KINDS = ["main", "asr", "tts", "img", "vision"];
+    /* 先原样带上所有区，再对已知的五个区做「沿用本机 Key」——
+       以后新增模型区也不会因为没写进 KINDS 而被整个丢掉。 */
+    const out = Object.assign({}, inSets || {});
+    KINDS.forEach(function (k) {
+      const a = Array.isArray(inSets && inSets[k]) ? inSets[k] : [];
+      const b = Array.isArray(localSets && localSets[k]) ? localSets[k] : [];
+      out[k] = a.map(function (set, i) {
+        const o = Object.assign({}, set);
+        if (o.apiKey) return o;                    /* 导入文件自己带了 Key，优先 */
+        const sameModel = function (x) { return x && (x.model || "") === (o.model || ""); };
+        const sameBoth = function (x) {
+          return sameModel(x) && (x.baseUrl || "") === (o.baseUrl || "");
+        };
+        const hit = b.filter(sameBoth)[0] || b.filter(sameModel)[0] || b[i];
+        if (hit && hit.apiKey) o.apiKey = hit.apiKey;
+        return o;
+      });
+    });
+    return out;
+  }
+
+  /* 「不含密钥」导出的文件里，9 个密钥字段是**空串**（不是没有这个键）。
      导入时若原样 saveSettings（Object.assign），空串会把本机已经填好的 Key 覆盖成空。
      所以导入前先把空出来的密钥字段整个删掉 —— 保留本机值，也保留导入文件里的非空值。 */
   function stripEmptyKeys(s) {
@@ -163,7 +194,12 @@
         settings: withKeys ? Store.getSettings() : stripKeys(Store.getSettings()),
         characters: withCharImages(Store.getCharacters(), noImg),
         sessions: sessionsForExport(),
-        charImages: Store.dumpCharImages(null, noImg)
+        charImages: Store.dumpCharImages(null, noImg),
+        /* 这三块以前不在导出里：换机以后动态、用量、助手记忆全丢，而且没有别的迁移路径 */
+        moments: Store.getMoments(),
+        usage: Store.getUsage(),
+        usageCats: Store.getUsageCats(),
+        assistantMemory: Store.getAssistantMemory()
       };
     }
     if (scope === "settings") return withKeys ? Store.getSettings() : stripKeys(Store.getSettings());
@@ -230,6 +266,11 @@
     let enc;
     try { enc = await Store.sealWithPass(JSON.stringify(data), pass); }
     catch (e) { UI.toast("加密失败：" + (e.message || e), true); return null; }
+    /* 本机没有 WebCrypto 时 sealWithPass 会降级成「口令混淆」。这个必须说出来：
+       否则用户以为文件是加密的，其实只能挡住「随手打开」。 */
+    if (!Store.canEncrypt()) {
+      UI.toast("这台设备不支持真加密，导出文件用的是口令混淆（能挡住随手打开，挡不住专门破解）。有条件的话换一台设备再导出一次。", true);
+    }
     return { app: "DeepLink", kind: kind, appVersion: CONFIG.APP_VERSION, exportedAt: new Date().toISOString(), enc: enc };
   }
 
@@ -286,7 +327,12 @@
         2) 获取内部文件目录 → /data/data/包名/files
       需要存储权限组（只有上面全写不进去时才动，且会先申请权限）：
         3) 获取外部存储目录 + /Download */
+  /* 目录候选统一由 Store 提供（10-23）：这里、图片保存、文档导出共用同一份规则，
+     路径策略以后再改只改 store.js 一处。 */
   function shareDirCandidates() {
+    try {
+      if (Store && Store.fileDirs) return Store.fileDirs();
+    } catch (e) { /* 老版本没有这个方法，落到下面的兜底 */ }
     const safe = [];
     const perm = [];
     const add = (arr, v) => { const d = String(v || "").replace(/\/+$/, ""); if (d && arr.indexOf(d) < 0) arr.push(d); };
@@ -403,6 +449,32 @@
     return true;
   }
 
+  /* 导入来的 settings 必须先过一遍白名单：
+     ① 本地不认识的键一律丢弃（文件里塞什么进来都不影响本机）
+     ② lock* 全部忽略 —— 文件里带个 lockHash 就能把人锁在门外，这是唯一有实际风险的一条
+     ③ modelSets 每个区最多 6 套（与界面上限一致）
+     ④ 极端超长的文本字段（背景图 base64）截断，防止一导入就把存储顶满 */
+  function sanitizeImportSettings(d) {
+    const src = (d && typeof d === "object") ? d : {};
+    const out = {};
+    Object.keys(src).forEach((k) => {
+      if (!(k in CONFIG.DEFAULT_SETTINGS)) return;
+      if (/^lock/i.test(k)) return;
+      let v = src[k];
+      if (typeof v === "string" && v.length > 4 * 1024 * 1024) v = "";
+      out[k] = v;
+    });
+    if (out.modelSets && typeof out.modelSets === "object") {
+      const sets = {};
+      Object.keys(out.modelSets).forEach((kind) => {
+        const arr = out.modelSets[kind];
+        sets[kind] = Array.isArray(arr) ? arr.slice(0, 6) : arr;
+      });
+      out.modelSets = sets;
+    }
+    return out;
+  }
+
   async function applyImport(payload) {
     if (!payload || typeof payload !== "object" || payload.app !== "DeepLink" && payload.app !== "deeplink") { UI.toast("不是 DeepLink 的导出数据", true); return false; }
     const kind = payload.kind;
@@ -416,19 +488,26 @@
     }
     if (kind === "settings") {
       if (!data || typeof data !== "object") { UI.toast("数据为空", true); return false; }
-      state.settings = Store.saveSettings(stripEmptyKeys(data));
+      const d = stripEmptyKeys(data);
+      if (d.modelSets) d.modelSets = mergeSetsKeepKey(d.modelSets, Store.getSettings().modelSets);
+      state.settings = Store.saveSettings(sanitizeImportSettings(d));
       return true;
     }
     if (kind === "character") return importCharacters([data]);
     if (kind === "characters") return importCharacters(data);
     if (kind === "session") return importSessions([data]);
     if (kind === "full") {
-      if (data && data.settings) state.settings = Store.saveSettings(stripEmptyKeys(data.settings));
+      if (data && data.settings) state.settings = Store.saveSettings(sanitizeImportSettings(data.settings));
       let ok = true;
       if (data && Array.isArray(data.characters)) ok = (await importCharacters(data.characters)) && ok;
       if (data && Array.isArray(data.sessions)) ok = (await importSessions(data.sessions)) && ok;
       /* 全量导出时图库是单独一块（charImages: {角色id: [...]}） */
       if (data && data.charImages && Store.restoreCharImages) Store.restoreCharImages(data.charImages);
+      /* 动态 / 用量 / 助手记忆：文件里有才恢复。老文件没带这几块，跳过即可，不报错 */
+      if (data && Array.isArray(data.moments)) Store.saveMoments(data.moments);
+      if (data && data.usage) Store.saveUsage(data.usage);
+      if (data && data.usageCats) Store.saveUsageCats(data.usageCats);
+      if (data && data.assistantMemory) Store.saveAssistantMemory(data.assistantMemory);
       return ok;
     }
     UI.toast("无法识别的导出类型：" + kind, true);
@@ -440,7 +519,7 @@
     if (!txt) { UI.toast("先粘贴 JSON 或选文件", true); return; }
     let payload;
     try { payload = JSON.parse(txt); } catch (e) { UI.toast("JSON 解析失败：" + (e.message || e), true); return; }
-    if (await applyImport(payload)) { migrateData(true); UI.toast("导入完成"); syncToggles(); renderAll(); renderDataSelects(); }
+    if (await applyImport(payload)) { migrateData(false); fillSettings(); UI.toast("导入完成"); syncToggles(); renderAll(); renderDataSelects(); }
   }
 
   async function importFromFile(file) {
@@ -448,7 +527,7 @@
       const txt = await file.text();
       let payload;
       try { payload = JSON.parse(txt); } catch (e) { UI.toast("文件不是有效 JSON", true); return; }
-      if (await applyImport(payload)) { migrateData(true); UI.toast("导入完成"); syncToggles(); renderAll(); renderDataSelects(); }
+      if (await applyImport(payload)) { migrateData(false); fillSettings(); UI.toast("导入完成"); syncToggles(); renderAll(); renderDataSelects(); }
     } catch (e) { UI.toast("读取文件失败：" + (e.message || e), true); }
   }
 
@@ -474,17 +553,49 @@
     if (UI.pickRefreshAll) UI.pickRefreshAll();
   }
 
+  /* 把任意 data URL 写进「无需存储权限」的那几个候选目录（图片保存走这条）。
+     复用 shareDirCandidates，不再自己拼路径 —— 以前图片保存用的是 <a download>，
+     在 WebView 里点了基本没反应，只能提示「若无反应可长按图片保存」，等于把问题甩给用户。
+     成功返回完整路径，全失败返回 ""。 */
+  function writeDataUrlToSafeDirs(name, dataUrl) {
+    let dirs = [];
+    try { dirs = shareDirCandidates().safe; } catch (e) { dirs = []; }
+    for (let i = 0; i < dirs.length; i++) {
+      const cand = dirs[i] + "/DeepLink/" + name;
+      try {
+        const w = Store.callBridge("保存指定文件", cand, dataUrl);
+        if (w === false) continue;
+        if (Store.hasBridge("判断指定文件") && Store.callBridge("判断指定文件", cand) === false) continue;
+        return cand;
+      } catch (e) { /* 这个目录不通就试下一个 */ }
+    }
+    return "";
+  }
+
   /* 保存图片（AI 文生图 / 自己发的图都走这里） */
   function saveImage(src, name) {
     if (!src) { UI.toast("没有可保存的图片", true); return; }
+    const base = String(name || ("DeepLink_" + Date.now())).replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) || "image";
+    const file = /\.(png|jpe?g|webp|gif)$/i.test(base) ? base : base + ".png";
+    /* 有桥就正经落盘（文件管理器能直接看见），路径也告给用户 */
+    if (String(src).slice(0, 5) === "data:" && Store.hasBridge("保存指定文件")) {
+      const path = writeDataUrlToSafeDirs(file, src);
+      if (path) { UI.toast("已保存：" + path); return; }
+    }
+    /* 外置图（imgRef 那种）本来就是盘上的文件，不需要「再存一次」 */
+    if (String(src).slice(0, 5) !== "data:" && Store.hasBridge && Store.hasBridge("保存指定文件")) {
+      UI.toast("这张是盘上的图片文件，直接在文件管理器里找就行");
+      return;
+    }
+    /* 只有浏览器预览（没有桥）才走下载兜底 */
     try {
       const a = document.createElement("a");
       a.href = src;
-      a.download = name || ("DeepLink_" + Date.now() + ".jpg");
+      a.download = file;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      UI.toast("已尝试保存（若无反应，可长按图片用系统保存）");
+      UI.toast("已尝试下载（浏览器预览用）");
     } catch (e) { UI.toast("保存失败", true); }
   }
 
@@ -526,19 +637,41 @@
   function imageFileBytes() {
     const out = { bytes: 0, count: 0 };
     if (!Store.hasBridge("获取目录排列") || !Store.hasBridge("获取文件大小")) return out;
+    /* 目录要和 Store 的 imgDir() 保持一致：内部文件目录优先，退到外部文件目录 */
     let dir = "";
     try { dir = String(Store.callBridge("获取内部文件目录") || ""); } catch (e) { dir = ""; }
+    if (!dir) { try { dir = String(Store.callBridge("获取外部文件目录") || ""); } catch (e) { dir = ""; } }
     if (!dir) return out;
-    let list = "";
-    try { list = String(Store.callBridge("获取目录排列", dir + "/") || ""); } catch (e) { list = ""; }
-    list.split("\\").forEach(function (raw) {
-      const name = String(raw).replace(/\/+$/, "").trim();
-      if (name.indexOf("dl_img_") !== 0 && name.indexOf("dl_cimg_") !== 0) return;
-      let sz = 0;
-      try { sz = Number(Store.callBridge("获取文件大小", dir + "/" + name)) || 0; } catch (e) { sz = 0; }
-      out.count++;
-      out.bytes += sz;
-    });
+    dir = dir.replace(/\/+$/, "");
+    /* 三个前缀都算本 App 的：对话图 dl_img_、角色图/表情包 dl_cimg_、背景图 dl_bg_。
+       以前只认前两个，而且只扫根目录 —— 但角色图其实是写在 charimg/ 子目录里的，
+       结果是「存储占用」里图片那一项长期偏低，用户看到的数字和实际不符。 */
+    const PREFIXES = ["dl_img_", "dl_cimg_", "dl_bg_"];
+    const isOurs = function (name) {
+      for (let i = 0; i < PREFIXES.length; i++) {
+        if (String(name).indexOf(PREFIXES[i]) === 0) return true;
+      }
+      return false;
+    };
+    const scan = function (base, allowSub) {
+      let list = "";
+      try { list = String(Store.callBridge("获取目录排列", base + "/") || ""); } catch (e) { list = ""; }
+      String(list).split("\\").forEach(function (raw) {
+        const item = String(raw).trim();
+        if (!item) return;
+        if (item.charAt(item.length - 1) === "/") {
+          /* 子目录：图片就存在 charimg/ 里，进去扫一层（只往下走一层，避免死循环） */
+          if (allowSub && item.replace(/\/+$/, "") === "charimg") scan(base + "/charimg", false);
+          return;
+        }
+        if (!isOurs(item)) return;
+        let sz = 0;
+        try { sz = Number(Store.callBridge("获取文件大小", base + "/" + item)) || 0; } catch (e) { sz = 0; }
+        out.count++;
+        out.bytes += sz;
+      });
+    };
+    scan(dir, true);
     return out;
   }
 
@@ -611,7 +744,9 @@
     return (msgs || []).map((m) => {
       if (!m.attachments || !m.attachments.length) return m;
       const c = Object.assign({}, m);
-      c.attachments = m.attachments.map((a) => ({ name: a.name, kind: a.kind, mime: a.mime, size: a.size, desc: a.desc }));
+      /* imgRef 必须留着：它是外置图片的路径（几十字节）。丢了它，恢复备份后
+         该会话所有图片永久「已过期」，而且写盘后不可回滚。 */
+      c.attachments = m.attachments.map((a) => ({ name: a.name, kind: a.kind, mime: a.mime, size: a.size, desc: a.desc, imgRef: a.imgRef }));
       return c;
     });
   }
@@ -778,22 +913,40 @@
     { id: "memory", name: "记忆压缩 / 认知" },
     { id: "daily", name: "日更（场景 / 关系 / 经历）" },
     { id: "world", name: "世界生成" },
-    { id: "status", name: "状态量化" },
     { id: "group", name: "群聊" },
+    /* 6.2.6：文档评析是独立的一次模型调用，以前没有分类、界面直接显示 "doc" */
+    { id: "doc", name: "文档评析" },
     { id: "moment", name: "发布动态筛选" },
     { id: "summary", name: "助手总结" },
-    { id: "diary", name: "情绪日记" },
+    /* 10-25 补：这两件事以前没传类型，被算进「对话」，看不出来花了多少 */
+    { id: "split", name: "角色拆分" },
+    { id: "filter", name: "过滤规则" },
     { id: "phone", name: "手机" },
     { id: "auto", name: "自动发信息" },
     { id: "quickreply", name: "快捷回复" },
     /* 6.2.2 新增两类：这两件事都是真实的模型调用，以前混在「其它 / 记忆压缩」里看不清 */
     { id: "sticker", name: "表情包命名" },
+    /* 10-25 补：图片描述也是独立的视觉模型调用，以前没类型，混在「对话」里 */
+    { id: "vision", name: "图片描述" },
+    /* 10-25 补：视频 / 音乐生成的提示词是独立的一次模型调用。
+       以前把 kind（"video" / "music"）直接当分类传进来，但表里没有这两项，
+       「按类型」只渲染表内的 id —— 这两笔钱一直没人看见，而「合计」里有，两处对不上。 */
+    { id: "video", name: "视频生成" },
+    { id: "music", name: "音乐生成" },
     { id: "caps", name: "模型能力检测" },
     { id: "think", name: "TA 的思考" },
     { id: "fork", name: "回溯重建" },
     { id: "other", name: "其它" }
   ];
-  function catName(id) { const c = USAGE_CATS.filter((x) => x.id === id)[0]; return c ? c.name : id; }
+  /* status / diary 这两个分类从来没有独立调用（状态量化、情绪日记都是并进对话回复里给的），
+     界面永远显示 0，已从表里去掉。旧版本万一记过账，映射成「其它」——
+     否则会显示成 status / diary 这种生 id。 */
+  const OLD_CAT_ALIAS = { status: "状态量化（已并入对话）", diary: "情绪日记（已并入对话）" };
+  function catName(id) {
+    if (OLD_CAT_ALIAS[id]) return OLD_CAT_ALIAS[id];
+    const c = USAGE_CATS.filter((x) => x.id === id)[0];
+    return c ? c.name : id;
+  }
 
   /* 估算花费（元）。单位都是「元 / 百万 tokens」。
      fuzzy（默认）：不分命中/未命中，按输入 / 输出两档粗算 —— 够用且不必较真。
@@ -806,9 +959,12 @@
     const hit = u.cacheHit || 0;
     const miss = (typeof u.cacheMiss === "number") ? u.cacheMiss : Math.max(0, (u.prompt || 0) - hit);
     const comp = u.completion || 0;
-    const inRate = pIn > 0 ? pIn : 2;
-    const outRate = pOut > 0 ? pOut : 8;
-    const hitRate = pHit > 0 ? pHit : 0.2;
+    /* 填 0 是合法输入（本地模型 / 免费额度 / 自己垫付），不能被当成「没填」按默认价算。
+       判据改成「是个 >=0 的有限数」，而不是 >0。 */
+    const rate = (v, d) => (typeof v === "number" && isFinite(v) && v >= 0) ? v : d;
+    const inRate = rate(pIn, 2);
+    const outRate = rate(pOut, 8);
+    const hitRate = rate(pHit, 0.2);
     const cost = ((s.usagePriceMode || "fuzzy") === "fixed")
       ? (hit * hitRate + miss * inRate + comp * outRate) / 1e6
       : ((u.prompt || 0) * inRate + comp * outRate) / 1e6;
@@ -840,10 +996,29 @@
   let phoneWarned = false;
 
   /* 记一次用量：会话 / 角色 / 全局 / 按类型，并做预警。
-     cat = 消耗类型（见 USAGE_CATS）。不传时：有会话 → 对话，无会话 → 记忆类后台任务。 */
+     cat = 消耗类型，必须是 USAGE_CATS 里的 id。
+     不传 / 传了表里没有的值 → 一律落「其它」并在控制台带调用栈点名：
+     那说明有新调用漏登记，别让它静默混进别的桶（BUG-49 就是这么攒下十几处的）。 */
+  const VALID_USAGE_CATS = {};
+  USAGE_CATS.forEach(function (c) { VALID_USAGE_CATS[c.id] = 1; });
+
   function recordUsage(sid, u, characterId, cat) {
     if (!u) return;
-    if (!cat) cat = sid ? "chat" : "memory";
+    if (cat && !VALID_USAGE_CATS[cat]) {
+      /* 表外分类：写进 usageCats 也没人渲染（「按类型」只遍历 USAGE_CATS），
+         钱花了、账上看不见。并进「其它」并点名，否则这种错永远发现不了。 */
+      try {
+        console.warn("[DeepLink] recordUsage 未知分类「" + cat + "」，已并入「其它」", new Error().stack);
+      } catch (e) { /* ignore */ }
+      cat = "other";
+    }
+    if (!cat) {
+      /* OPT-04：以前缺省会猜 chat / memory，于是漏传类型的用量静默混进主桶，
+         看统计根本发现不了（BUG-49 就是这么攒下十几处的）。
+         现在统一落「其它」并在控制台点名：「其它」突然变大 = 有新调用漏传了。 */
+      cat = "other";
+      try { console.warn("[DeepLink] recordUsage 未传类型，已记入「其它」", new Error().stack); } catch (e) { /* ignore */ }
+    }
     if (sid) {
       const list = Store.getSessions();
       const i = list.findIndex((x) => x.id === sid);
@@ -1157,6 +1332,7 @@
 
     /* ── 6.0.0 新增：功能开关 / 采用格式 / 背景 / 用量花费 ── */
     setChecked("#setDailyUpdate", s.dailyUpdate !== false);
+    setChecked("#setToolUse", s.toolUse !== false);
     setChecked("#setWorldGen", s.worldGen !== false);
     setChecked("#setStatusQuant", s.statusQuant !== false);
     setChecked("#setAutoMessage", !!s.autoMessage);
@@ -1213,7 +1389,9 @@
     renderModelSets();
     renderModelBadge();
     avatarDraft.settingsUser = s.avatarUser || "";
-    avatarDraft.settingsAi = s.avatarAi || "";
+    /* 助手默认头像 = 听澜那张（用户 10-22 口径）。老数据里存的是空串，
+       直接显示空预览会让人以为没设头像，所以这里同样回落。 */
+    avatarDraft.settingsAi = s.avatarAi || ((CONFIG && CONFIG.BUILTIN_ASSISTANT && CONFIG.BUILTIN_ASSISTANT.avatar) || "");
     avatarDraft.phoneUser = s.phoneAvatarUser || "";
     renderAvatarPreview("#setAvatarUserPreview", avatarDraft.settingsUser, "user");
     renderAvatarPreview("#setAvatarAiPreview", avatarDraft.settingsAi, "assistant");
@@ -1224,7 +1402,9 @@
     syncCapChecks();
     autoDetectIfStale();
     renderSettingsMemory();
-    renderDataUsage();
+    /* 存储统计要同步问原生桥（每张图一次），200 张图就是 200+ 次主线程调用。
+       以前在这里直接算，表现成「点设置要顿一下」；改成先让设置页出来，随后再填。 */
+    setTimeout(renderDataUsage, 400);
     syncProviderFields();
   }
 
@@ -1625,6 +1805,7 @@
       /* ── 6.0.0：功能开关 / 采用格式 / 用量花费 ──
          （早先只写了「回填」，没写「读取」→ 这几个开关改了保存也不生效，这里补上。） */
       dailyUpdate: checkedOf("#setDailyUpdate"),
+      toolUse: checkedOf("#setToolUse"),
       worldGen: checkedOf("#setWorldGen"),
       statusQuant: checkedOf("#setStatusQuant"),
       autoMessage: checkedOf("#setAutoMessage"),
@@ -1874,6 +2055,16 @@
     let allNames = [];
     try { allNames = Object.keys(window.webapp || {}).filter((k) => typeof window.webapp[k] === "function").sort(); } catch (e) { /* ignore */ }
     out.appendChild(testLine(allNames.length ? null : false, "原生接口：可用 " + allNames.length + " 个" + (allNames.length ? "" : "（纯浏览器环境）")));
+    /* 相册接口是「探测式」接入的：猜不到名字就退回系统选择器，
+       所以这里把探测结果直接打出来，真机上能一眼看出原生桥有没有这个能力。 */
+    let albumInfo = "未探测";
+    try {
+      const ap = (window.DL && window.DL.nativeAlbumProbe) ? window.DL.nativeAlbumProbe() : { pick: [], list: [] };
+      if (ap.pick.length) albumInfo = "已找到 " + ap.pick.join(" / ");
+      else if (ap.list.length) albumInfo = "只有列表接口：" + ap.list.join(" / ") + "（暂未接入）";
+      else albumInfo = "没找到，选图走系统选择器";
+    } catch (e) { albumInfo = "探测出错：" + (e.message || e); }
+    out.appendChild(testLine(true, "原生相册接口：" + albumInfo));
 
     /* ── 原生接口诊断 ──────────────────────────────
        真机上「调了原生却看不出效果」时，唯一可靠的抓手就是接口到底存不存在、返回什么。
@@ -2387,7 +2578,7 @@
       { role: "system", content: sys },
       { role: "user", content: userText }
     ], { maxTokens: 400 });
-    try { if (out && out.usage) recordUsage(null, out.usage, null); } catch (e) { /* ignore */ }
+    try { if (out && out.usage) recordUsage(null, out.usage, null, "other"); } catch (e) { /* ignore */ }
     return String((out && out.text) || "").trim();
   }
   function quizBusy(on, note) {
@@ -2697,17 +2888,21 @@
     var caps = state.settings.modelCaps;
     var name = state.settings.model || "（未设置主模型）";
     if (!caps) { el.textContent = "主模型：" + name + "。还没检测过能力。"; return; }
-    if (caps.unknown) {
+    if (caps.unknown && !caps.manual) {
       el.textContent = "主模型：" + name + "。没检测出结论，上传类型先不限制（下面可以自己勾）。";
       return;
     }
+    /* 显示「实际生效」的那套：手勾优先。以前这里只读 caps，用户勾完「看图」
+       上行还写着「只当文字模型」，界面和行为的结论正好相反。 */
+    var eff = effectiveCaps();
     var on = [];
-    if (caps.vision) on.push("看图");
-    if (caps.asr) on.push("听音");
-    if (caps.tts) on.push("朗读");
-    if (caps.img) on.push("画图");
+    if (eff.vision) on.push("看图");
+    if (eff.asr) on.push("听音");
+    if (eff.tts) on.push("朗读");
+    if (eff.img) on.push("画图");
+    var srcTxt = caps.manual ? "手动指定" : (caps.src || "");
     el.textContent = "主模型：" + name + " · " + (on.length ? "支持 " + on.join(" / ") : "只当文字模型") +
-      (caps.src ? "（" + caps.src + "）" : "");
+      (srcTxt ? "（" + srcTxt + "）" : "");
   }
   /* 按能力放开上传类型：不能看图的就别让选图片，不能听音的别让选音频 */
   /* 手动勾选优先：用户自己知道自己的模型行不行，比任何查表都准。 */
@@ -2777,7 +2972,12 @@
         ? Object.assign({ model: name, src: "模型自述" }, asked)
         : { model: name, unknown: true, src: "未确认（上传类型暂不限制）" };
     }
-    state.settings = Store.saveSettings({ modelCaps: caps });
+    /* 手动勾过的必须留着：用户比内置表清楚自己的模型，点一次「检测」不该把它冲掉。
+       所以只覆盖「机器判定」那部分，manual 原样带回去。 */
+    var prevCaps = state.settings.modelCaps || {};
+    state.settings = Store.saveSettings({
+      modelCaps: Object.assign({}, prevCaps, caps, { manual: prevCaps.manual || null })
+    });
     renderCapsLine();
     applyUploadTypes();
     if (!silent) UI.toast("已记录：" + caps.src);
@@ -3034,7 +3234,7 @@
         return { key: f[0], label: f[1], current: el ? el.value : "" };
       });
       var r = await window.Memory.splitCharacterFields(state.settings, raw, fields);
-      if (r.usage) recordUsage(null, r.usage, "");
+      if (r.usage) recordUsage(null, r.usage, "", "other");
       var n = 0;
       PERSONA_FIELDS.forEach(function (f) {
         var v = r.fields[f[0]];
@@ -3157,6 +3357,9 @@
     codeCopy: codeCopy, codeClose: codeClose, renderLockState: renderLockState
   };
   Object.keys(api).forEach(function (k) {
+    /* 同上（roleplay.js）：只转发现有函数，undefined 成员会让调用点抛
+       「Cannot read property 'apply' of undefined」，看着像框架问题。 */
+    if (typeof api[k] !== "function") return;
     D[k] = function () { syncModules(); return api[k].apply(null, arguments); };
   });
 

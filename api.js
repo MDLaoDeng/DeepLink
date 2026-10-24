@@ -3,6 +3,8 @@
   const MAX_TOOL_ROUNDS = 4;
   /* 有些 OpenAI 兼容端点不认 stream_options（含用量统计），报 400 时自动去掉重试 */
   let streamUsageSupported = true;
+  /* 端点认不认 tools：一旦某个 400 明确说是工具的问题，就不再带工具了（只在本进程内记忆） */
+  let toolsSupported = true;
   /* 有些 OpenAI 兼容端点不认 thinking / reasoning_effort，会直接 400 —— 去掉重试一次并记住 */
   let thinkingSupported = true;
 
@@ -140,6 +142,14 @@
       }
       /* 有些 OpenAI 兼容端点不认 thinking / reasoning_effort，也会直接 400 ——
          去掉它重试一次，并记住（thinkingSupported），免得后续每次请求都先失败一遍。 */
+      /* 端点不认 tools / tool_choice（老模型、部分国内中转）也会 400。
+         去掉工具重试一次并记下来 —— 否则「让角色读自己的线」这个默认开关
+         会直接让所有对话发不出去。 */
+      if (res.status === 400 && toolsSupported && opts.tools && opts.tools.length &&
+          /tool|function|tool_choice/i.test(detail)) {
+        toolsSupported = false;
+        return streamOnce(settings, messages, Object.assign({}, opts, { tools: [] }), cb, signal);
+      }
       if (res.status === 400 && thinkingSupported && opts.thinking && /thinking|reasoning_effort/i.test(detail)) {
         thinkingSupported = false;
         return streamOnce(settings, messages, opts, cb, signal);
@@ -161,10 +171,37 @@
     let finishReason = null;
     let usage = null;
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    /* 读一段带空闲上限：服务端吊住连接（不发数据也不关）时 reader.read() 会永远挂着，
+       界面就永久停在「生成中」，只能杀进程。每次读自己带一个 60 秒的计时器，读到就清掉——
+       不共用全局 interval，省得异常路径上漏清理。 */
+    function readWithTimeout(ms) {
+      let t = 0;
+      return Promise.race([
+        reader.read(),
+        new Promise((_, rej) => {
+          t = setTimeout(() => {
+            /* 超时不能只 reject：那条连接还挂着，主动 cancel 让服务端知道我们走了，
+               也顺带让挂起的 read() 结束，不留一个永不 settle 的 promise。 */
+            try { reader.cancel(); } catch (e) { /* ignore */ }
+            rej(new Error("连接超时（" + Math.round(ms / 1000) + " 秒没有收到数据）"));
+          }, ms);
+        })
+      ]).then((r) => { clearTimeout(t); return r; },
+        (e) => { clearTimeout(t); throw e; });
+    }
+
+    let streamDone = false;
+    while (!streamDone) {
+      const { value, done } = await readWithTimeout(60000);
+      if (done) {
+        /* 收尾：解码器里剩下的字节、以及最后一行可能没有换行 —— 都得再走一遍解析。
+           以前 done 就 break，末尾那几个 delta（常见于收尾包）会被直接丢掉。 */
+        buffer += decoder.decode();
+        if (buffer.trim() && buffer.slice(-1) !== "\n") buffer += "\n";
+        streamDone = true;
+      } else {
+        buffer += decoder.decode(value, { stream: true });
+      }
 
       let nl;
       while ((nl = buffer.indexOf("\n")) >= 0) {
@@ -177,6 +214,12 @@
 
         let json;
         try { json = JSON.parse(payload); } catch (e) { continue; }
+        /* 不少兼容端点用 200 + {"error":{...}} 报限额 / 参数错。
+           以前只读 usage 和 choices，于是这种响应表现成「空回答」，真实原因全丢。 */
+        if (json && json.error) {
+          const em = json.error.message || json.error.msg || json.error.type || json.error;
+          throw new Error("接口返回错误：" + String(em).slice(0, 200));
+        }
         if (json.usage) usage = json.usage;
         const choice = json.choices && json.choices[0];
         if (!choice) continue;
@@ -235,11 +278,11 @@
         thinking: { type: "disabled" }
       };
       if (o.maxTokens) body.max_tokens = o.maxTokens;
-      const res = await fetchRetry(endpoint(settings), {
+      const res = await fetchWithTimeout(endpoint(settings), {
         method: "POST",
         headers: headers(settings),
         body: JSON.stringify(body)
-      });
+      }, 90000);
       if (!res.ok) {
         let detail = "";
         try { detail = (await res.text()).slice(0, 500); } catch (e) { /* ignore */ }
@@ -249,7 +292,12 @@
       }
       const data = await res.json();
       const choice = data.choices && data.choices[0];
-      return { text: (choice && choice.message && choice.message.content) || "", usage: normUsage(data.usage) };
+      return {
+        text: (choice && choice.message && choice.message.content) || "",
+        usage: normUsage(data.usage),
+        /* 截断判据：长任务（世界生成 / 记忆压缩）靠它知道自己被长度上限切了 */
+        finishReason: (choice && choice.finish_reason) || ""
+      };
     },
 
     /* 图片转文字：一次性描述调用。imageUrl 传的是「能直接用的地址」——
@@ -271,7 +319,7 @@
         }]
       };
       if (maxTokens) body.max_tokens = maxTokens;
-      const res = await fetchRetry(endpoint(v), { method: "POST", headers: headers(v), body: JSON.stringify(body) });
+      const res = await fetchWithTimeout(endpoint(v), { method: "POST", headers: headers(v), body: JSON.stringify(body) }, 90000);
       if (!res.ok) {
         let detail = "";
         try { detail = (await res.text()).slice(0, 300); } catch (e) { /* ignore */ }
@@ -281,14 +329,21 @@
       }
       const data = await res.json();
       const choice = data.choices && data.choices[0];
-      return { text: (choice && choice.message && choice.message.content) || "", usage: normUsage(data.usage) };
+      return {
+        text: (choice && choice.message && choice.message.content) || "",
+        usage: normUsage(data.usage),
+        /* 截断判据：长任务（世界生成 / 记忆压缩）靠它知道自己被长度上限切了 */
+        finishReason: (choice && choice.finish_reason) || ""
+      };
     },
 
     /* 完整对话（含搜索工具循环） */
     async run(params, cb) {
       const settings = params.settings;
       const messages = params.messages.slice();
-      const tools = params.search ? [SEARCH_TOOL] : [];
+      /* 工具清单（10-23）：联网搜索 + 调用方额外给的（比如「读自己的线」）。
+         两套可以同时开：模型自己决定调哪个。 */
+      const tools = [].concat(params.search ? [SEARCH_TOOL] : [], params.extraTools || []);
       const sources = [];
       let content = "";
       let reasoning = "";
@@ -331,14 +386,26 @@
         });
 
         for (const call of calls) {
-          let query = "";
-          try { query = (JSON.parse(call.function.arguments || "{}").query || "").trim(); }
-          catch (e) { query = (call.function.arguments || "").trim(); }
+          const fnName = (call.function && call.function.name) || "";
+          let argsObj = {};
+          try { argsObj = JSON.parse((call.function && call.function.arguments) || "{}") || {}; }
+          catch (e) { argsObj = {}; }
+          let query = String(argsObj.query || "").trim();
 
-          if (cb.onToolCall) cb.onToolCall(call.function.name, query);
+          if (cb.onToolCall) cb.onToolCall(fnName, query);
 
           let resultText = "";
-          if (query && params.search) {
+          /* 不是搜索工具 → 交给调用方注册的执行器（本项目的 tools.js）。
+             执行器抛错只影响这一条工具结果，不进上层错误分支 ——
+             读不到资料不该让整条回复变成「发送失败」。 */
+          if (params.runTool && fnName !== SEARCH_TOOL.function.name) {
+            try {
+              resultText = String(await params.runTool(fnName, argsObj) || "");
+            } catch (e) {
+              resultText = "读取失败：" + (e && e.message ? e.message : "未知错误");
+            }
+            if (!resultText) resultText = "（没有读到内容）";
+          } else if (query && params.search) {
             try {
               const out = await params.search(query);
               (out.results || []).forEach((r) => sources.push(r));
@@ -351,6 +418,7 @@
           } else {
             resultText = "未获得搜索结果。";
           }
+          /* 上面两条路都可能已经写过 resultText，这里不再覆盖 */
 
           messages.push({
             role: "tool",
@@ -365,7 +433,7 @@
 
     /* 连接自检：一次最小非流式请求 */
     async ping(settings) {
-      const res = await fetchRetry(endpoint(settings), {
+      const res = await fetchWithTimeout(endpoint(settings), {
         method: "POST",
         headers: headers(settings),
         body: JSON.stringify({
@@ -375,7 +443,7 @@
           max_tokens: 8,
           stream: false
         })
-      });
+      }, 90000);
       if (!res.ok) {
         let detail = "";
         try { detail = (await res.text()).slice(0, 300); } catch (e) { /* ignore */ }
@@ -404,6 +472,18 @@
       if (!isNetErr(e)) throw e;
       await new Promise((r) => setTimeout(r, 600));
       return await fetch(url, init);
+    }
+  }
+  /* 带超时的请求：摘要 / 看图 / 连接自检 这三个后台调用以前没有超时，
+     弱网或接口不响应时 Promise 永不 settle —— 界面卡在「正在压缩…」，
+     连带发送、日更整条链路都被堵住。默认 90 秒（长文本摘要一般 20~40 秒）。 */
+  async function fetchWithTimeout(url, init, ms) {
+    const c = new AbortController();
+    const t = setTimeout(function () { try { c.abort(); } catch (e) { /* ignore */ } }, ms || 90000);
+    try {
+      return await fetchRetry(url, Object.assign({}, init, { signal: c.signal }));
+    } finally {
+      clearTimeout(t);
     }
   }
 

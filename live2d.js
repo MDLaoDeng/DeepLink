@@ -336,6 +336,12 @@
               g.bindTexture(g.TEXTURE_2D, t);
               g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, g.RGBA, g.UNSIGNED_BYTE, im);
               info.gl = "不污染（能上传）";
+              /* 探测用完立刻释放上下文：Chrome 每页活跃 WebGL 上下文有限（约 16 个），
+                 连点几次「测试」会把正式渲染用的那个挤掉，表现为画面忽然变黑。 */
+              try {
+                var lose = g.getExtension("WEBGL_lose_context");
+                if (lose) lose.loseContext();
+              } catch (e0) { /* 老内核没有这个扩展就算了 */ }
             }
           } catch (e) { info.gl = "会污染：" + (e && e.message ? e.message : e); }
           probeRead(DEFAULT_MODEL, function (r) { info.xhr = r; finish(); });
@@ -380,6 +386,43 @@
         cur = null;
       }
     }
+
+    /* ── 渲染自检（10-24）──────────────────────────────
+       有些机器/驱动的 WebGL 就是画不对：模型出来是色块、碎片、糊成一团。
+       以前是「照样画」，用户只看到一团乱码，也不知道能不能用。
+       做法：画起来之后取三帧采样，颜色种类极少（一片纯色）或几乎没有非透明像素
+       就判定渲染失败 → 停止循环 → 通知上层换成首帧静态图。 */
+    function sampleSanity(gl, w, h) {
+      try {
+        /* 采样块必须按画布收敛：画布被设成 1×1 时（历史上真出现过）固定读 48×48 会越界，
+           GL 报错返回全 0 → ratio=0 → 明明没坏也被判成「渲染坏了」，白退静态图 */
+        var n = Math.min(48, Math.max(1, Math.min(w | 0, h | 0)));
+        var px = new Uint8Array(n * n * 4);
+        gl.readPixels(Math.max(0, (w - n) >> 1), Math.max(0, (h - n) >> 1), n, n,
+          gl.RGBA, gl.UNSIGNED_BYTE, px);
+        var solid = 0, colors = {}, diff = 0, dn = 0;
+        for (var i = 0; i < px.length; i += 4) {
+          var r = px[i], g = px[i + 1], b = px[i + 2], a = px[i + 3];
+          if (r || g || b || a) solid++;
+          /* 量化到 5 位，避免抗锯齿噪声把颜色数撑大 */
+          colors[(r >> 3) + "," + (g >> 3) + "," + (b >> 3)] = 1;
+        }
+        /* 相邻像素平均差（横向）：正常立绘是大片平滑色块 + 少量边缘，值很小；
+           渲染错乱（碎片 / 色块拼贴）时几乎每个像素都在跳，值会很大。
+           这是唯一能抓住「颜色很多、也不空白」那种乱码画面的指标。 */
+        for (var yy = 0; yy < n; yy++) {
+          for (var xx = 1; xx < n; xx++) {
+            var a1 = (yy * n + xx) * 4, b1 = (yy * n + xx - 1) * 4;
+            diff += Math.abs(px[a1] - px[b1]) + Math.abs(px[a1 + 1] - px[b1 + 1]) + Math.abs(px[a1 + 2] - px[b1 + 2]);
+            dn += 3;
+          }
+        }
+        return { ratio: solid / (n * n), colors: Object.keys(colors).length, edge: dn ? (diff / dn) : 0 };
+      } catch (e) { return null; }
+    }
+
+    /* 渲染坏了要有人知道（通话页据此换回静态头像）。默认空，调用方按需设置。 */
+    var onBrokenHook = null;
 
     /* 在 canvas 上渲染模型。成功 resolve()，任何失败 reject(err)。 */
     function attach(canvas, modelUrl) {
@@ -436,7 +479,8 @@
         if (!W || !H) { W = canvas.width; H = canvas.height; }
         var matrix = buildMatrix(canvas.width, canvas.height, W, H);
 
-        cur = { gl: gl, model: model, tex: r.tex, matrix: matrix, dead: false, motions: null, mv: null, mt: 0, physics: null };
+        cur = { gl: gl, model: model, tex: r.tex, matrix: matrix, W: W, H: H, dead: false, broken: false, samples: [], motions: null, mv: null, mt: 0, physics: null };
+        cur.onBroken = onBrokenHook;
         /* 动作 / 物理都放后台加载：先把画面点亮再说，加载好再让它动、让头发飘 */
         loadMotions(base, r.json).then(function (sets) {
           if (cur && !cur.dead) cur.motions = sets;
@@ -475,7 +519,14 @@
             /* 物理放在最后：它读上面设好的角度参数（PARAM_ANGLE_*）、写头发参数，
                所以必须在这些参数设完之后、model.update() 之前跑。 */
             if (cur.physics) cur.physics.update(model);
-            if (typeof model.setMatrix === "function") model.setMatrix(matrix);
+            /* 矩阵必须按「当前画布尺寸」重算：视频通话会改 canvas 大小，
+               而 viewport 是每帧设的、矩阵却只在加载时算过一次 —— 两者不一致，
+               表现就是画面被拉伸（不是裁剪，是长宽比错了）。 */
+            if (typeof model.setMatrix === "function") {
+              cur.matrix = buildMatrix(canvas.width, canvas.height,
+                cur.W || canvas.width, cur.H || canvas.height);
+              model.setMatrix(cur.matrix);
+            }
             /* 每帧显式设 viewport 并清屏：canvas 尺寸变了（视频通话会改）而 viewport 不会自动跟着变，
                表现就是画面被按旧尺寸裁成一块一块的。10-21 补。 */
             try {
@@ -485,6 +536,33 @@
             } catch (e2) { /* ignore */ }
             model.update();
             model.draw();
+            /* 每帧画完立刻采样（readPixels 必须在同一帧的 draw 之后读，
+               隔帧读会因为缓冲区被清而拿到空的）。前三帧只观察不下结论，
+               避免把「还没画完」误判成坏。 */
+            if (cur.samples.length < 3) {
+              var sn = sampleSanity(gl, canvas.width, canvas.height);
+              if (sn) cur.samples.push(sn);
+              if (cur.samples.length === 3) {
+                var worst = cur.samples.reduce(function (a, b) {
+                  return (b.colors < a.colors) ? b : a;
+                });
+                /* 判据：非透明像素不到 3%（基本空白）或颜色不到 8 种（一片平涂）。
+                   正常的角色立绘颜色几百种，绝不会踩到这两条。 */
+                /* 三条判据任中其一就算坏：
+                   · 非透明不到 3%（基本空白）
+                   · 颜色不到 8 种（一片平涂）
+                   · 相邻像素平均差 > 40（碎片 / 色块拼贴 —— 就是真机截图那种）
+                   正常立绘的 edge 通常在 20 以下，40 留了足够余量，不会误杀。 */
+                if (worst.ratio < 0.03 || worst.colors < 8 || worst.edge > 40) {
+                  cur.dead = true;
+                  cur.broken = true;
+                  try {
+                    if (typeof cur.onBroken === "function") cur.onBroken(worst);
+                  } catch (e3) { /* ignore */ }
+                  return;
+                }
+              }
+            }
           } catch (e) {
             /* 画一帧出错：停掉，别刷屏。attach 已经 resolve，上层不会因此挂掉。 */
             cur.dead = true;
@@ -552,6 +630,26 @@
       try { out.push("画布 " + g.drawingBufferWidth + "×" + g.drawingBufferHeight); } catch (e) { /* ignore */ }
       try { out.push("stencil " + g.getParameter(g.STENCIL_BITS) + " 位"); } catch (e) { /* ignore */ }
       try { out.push("depth " + g.getParameter(g.DEPTH_BITS) + " 位"); } catch (e) { /* ignore */ }
+      /* 下面这几项是排查「画成一锅色块」用的：
+         如果 模型画布 和 缓冲区 的比例差很远，或者矩阵里出现 NaN / 0，
+         问题就在矩阵那一层，不在着色器；两者正常却仍然碎片，才该怀疑 GPU / 运行时。 */
+      try {
+        var cw = cur.model.getCanvasWidth(), chh = cur.model.getCanvasHeight();
+        out.push("模型画布 " + Math.round(cw) + "×" + Math.round(chh));
+        out.push("比例 " + (cw && chh ? (cw / chh).toFixed(3) : "?") + " / 缓冲 " +
+          (g.drawingBufferHeight ? (g.drawingBufferWidth / g.drawingBufferHeight).toFixed(3) : "?"));
+      } catch (e) { /* ignore */ }
+      try {
+        var m = cur.matrix || [];
+        var bad = false;
+        for (var i = 0; i < m.length; i++) { if (!isFinite(m[i])) { bad = true; break; } }
+        out.push("矩阵 " + (bad ? "含非法值!" : "正常"));
+        out.push("缩放 " + (m[0] !== undefined ? Number(m[0]).toFixed(4) : "?") +
+                 "," + (m[5] !== undefined ? Number(m[5]).toFixed(4) : "?"));
+        out.push("平移 " + (m[12] !== undefined ? Number(m[12]).toFixed(3) : "?") +
+                 "," + (m[13] !== undefined ? Number(m[13]).toFixed(3) : "?"));
+      } catch (e) { /* ignore */ }
+      try { out.push("DPR " + (window.devicePixelRatio || 1)); } catch (e) { /* ignore */ }
       try {
         var er = g.getError();
         out.push("GL 错误 " + (er === 0 ? "无" : er));
@@ -574,7 +672,9 @@
       capable: capable, attach: attach, detach: detach, defaultModel: DEFAULT_MODEL,
       tap: tap, createPhysics: createPhysics, probe: probe, diag: diag,
       readBytes: readBytes,
-      channel: function () { return lastChannel; }
+      channel: function () { return lastChannel; },
+      /* 用法：D.live2d.onBroken(function (info) { ... })，info = { ratio, colors } */
+      onBroken: function (fn) { onBrokenHook = (typeof fn === "function") ? fn : null; }
     };
 
     window.__dlScripts = window.__dlScripts || [];

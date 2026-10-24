@@ -291,7 +291,9 @@
 
       for (var i = 0; i < lines.length; i++) {
         var ln = lines[i];
-        var head = /^\s*(\d+)\s*[.、)）]\s*(\d{4}-\d{2}-\d{2}|\d{1,2}月\d{1,2}日|\d{1,2}[.\/]\d{1,2})/.exec(ln);
+        /* 序号可选：worldParts 在展示时就把「1. 」去掉了，applyWorld 收到的是框内文本，
+           只剩「3月12日 …」。只认「序号 + 日期」会一条都对不上 → 整批想法被丢掉。 */
+        var head = /^\s*(?:(\d+)\s*[.、)）]\s*)?(\d{4}-\d{2}-\d{2}|\d{1,2}月\d{1,2}日|\d{1,2}[.\/]\d{1,2})/.exec(ln);
         if (head) {
           flushDay();
           var raw = head[2];
@@ -314,6 +316,12 @@
         out.push(ln);
       }
       flushDay();
+      /* 一个天头都没认出来（用户改写过框首、或模型没按格式写）：
+         宁可记到「今天」，也不能让想法连着占位符一起消失。 */
+      if (!any && marks.length) {
+        add(s, dayStr(nowOf(s)), marks.join("\n"), "world");
+        any = true;
+      }
       if (any) save();
       return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
     }
@@ -328,7 +336,9 @@
       "4. 三百字以内，分 2~5 条，用「- 」起头。\n" +
       "5. 只输出正文。";
 
-    async function digest(sid) {
+    /* alsoRead=false：只压不读（对话设置里那个「压缩」按钮）。
+       自动流程（tick）不传，保持「压缩完让角色读一次」的老行为。 */
+    async function digest(sid, alsoRead) {
       var s = live(sid);
       if (!s) return "";
       if (!enabled(s)) return "";
@@ -365,9 +375,11 @@
       t2.digest = text;
       t2.digestTo = pending[pending.length - 1].d;
       t2.digestAt = nowOf(s2);
-      /* 压缩完就让角色读一次 */
-      t2.readText = text;
-      t2.readAt = t2.digestAt;
+      /* 压缩完就让角色读一次（手动点「压缩」时不要，见 alsoRead） */
+      if (alsoRead !== false) {
+        t2.readText = text;
+        t2.readAt = t2.digestAt;
+      }
       save();
       return text;
     }

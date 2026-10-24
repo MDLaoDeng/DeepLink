@@ -10,6 +10,13 @@
  * 本文件不新增依赖、不改行为、不动版号。
  */
 (function () {
+  /* 内置助手的对外名字（10-22 用户口径：不再出现「助手」三个字，就叫听澜）。
+     取 CONFIG.BUILTIN_ASSISTANT.name，取不到才退回「听澜」这个兜底。 */
+  function aiName() {
+    var c = window.CONFIG && window.CONFIG.BUILTIN_ASSISTANT;
+    return (c && c.name) || "听澜";
+  }
+
   /* 打包工具不一定按 index.html 的顺序执行脚本：app.js 可能晚于本文件。
      那时 window.DL 还不存在 —— 等它就绪后再初始化一次。返回 false = 还没就绪。 */
   var booted = false;  /* boot 幂等：DOMContentLoaded 与补拍 retry 各会调一次，别重复绑事件 / 分裂状态 */
@@ -153,6 +160,7 @@
       box.appendChild(l);
     });
     bindCharPhoneAvatar();
+    bindCharAvatar();
     bindPeriodField();
   }
 
@@ -160,7 +168,18 @@
      留空 → 回落到角色头像（见 phone.js 的 avatarOf）。选图 / AI 生成都走同一份草稿。 */
   function bindCharPhoneAvatar() {
     const pick = $("#cfPhAvPick"), file = $("#cfPhAvInput");
-    if (pick && file) pick.addEventListener("click", function () { file.click(); });
+    if (pick && file) pick.addEventListener("click", function () {
+      if (window.DL && DL.openAlbum) {
+        DL.openAlbum(function (url) {
+          if (!url) { file.click(); return; }
+          const done = (u) => { avatarDraft.charPhone = u; renderAvatarPreview("#cfPhAvPreview", u, "assistant"); };
+          if (window.DL.shrinkDataUrl) DL.shrinkDataUrl(url, 256, 0.88).then(done);
+          else done(url);
+        });
+        return;
+      }
+      file.click();
+    });
     if (file) file.addEventListener("change", async function (e) {
       const f = e.target.files && e.target.files[0];
       e.target.value = "";
@@ -184,6 +203,60 @@
         f.aiAppearance || "", f.aiPersona || ""].filter(Boolean).join("；");
       genAvatarByAi("charPhone", "#cfPhAvPreview", "char", look);
     });
+  }
+
+  /* 角色卡自己的头像（10-24 用户要求：角色页原来根本没有设置入口，
+     只有「手机页专用头像」，想换角色的脸只能去手机页那栏猜）。 */
+  function bindCharAvatar() {
+    const pick = $("#cfAvPick"), file = $("#cfAvInput");
+    if (pick && file && !pick.dataset.bound) {
+      pick.dataset.bound = "1";
+      pick.addEventListener("click", function () {
+        /* 先走自研相册（读手机存储目录），用户在那里选「系统选择器」时才回退 */
+        if (window.DL && DL.openAlbum) {
+          DL.openAlbum(function (url) {
+            if (!url) { file.click(); return; }
+            const done = (u) => { avatarDraft.char = u; renderAvatarPreview("#cfAvPreview", u, "assistant"); };
+            if (window.DL.shrinkDataUrl) DL.shrinkDataUrl(url, 256, 0.88).then(done);
+            else done(url);
+          });
+          return;
+        }
+        file.click();
+      });
+    }
+    if (file && !file.dataset.bound) {
+      file.dataset.bound = "1";
+      file.addEventListener("change", async function (e) {
+        const f = e.target.files && e.target.files[0];
+        e.target.value = "";
+        if (!f) return;
+        try {
+          const url = await readAvatarFile(f);
+          avatarDraft.char = url;
+          renderAvatarPreview("#cfAvPreview", url, "assistant");
+        } catch (err) { UI.toast(err.message || "头像读取失败", true); }
+      });
+    }
+    const clr = $("#cfAvClear");
+    if (clr && !clr.dataset.bound) {
+      clr.dataset.bound = "1";
+      clr.addEventListener("click", function () {
+        avatarDraft.char = "";
+        renderAvatarPreview("#cfAvPreview", "", "assistant");
+      });
+    }
+    const ai = $("#cfAvAi");
+    if (ai && !ai.dataset.bound) {
+      ai.dataset.bound = "1";
+      ai.addEventListener("click", function () {
+        const ch = curChar();
+        const f = (ch && ch.fields) || {};
+        const look = [f.aiName || (ch && ch.name) || "", f.age ? ("年龄：" + f.age) : "",
+          f.aiAppearance || "", f.aiPersona || ""].filter(Boolean).join("；");
+        genAvatarByAi("char", "#cfAvPreview", "char", look);
+      });
+    }
   }
 
   /* 生理期只在女性角色上出现；性别改了就跟着显隐（用户口径 10-19）。 */
@@ -225,11 +298,15 @@
       return b;
     };
     const aid = agentId();
-    bar.appendChild(chip("", "助手", state.settings.avatarAi || "", aid === ""));
+    /* 助手（对外叫听澜）不在这栏：它已经是侧栏第一栏那个入口本身了
+       （index.html 的 data-side="assistant"，文案「听澜」）。
+       这栏只放真正的角色卡 —— 以前在这里多摆一格同名的，看着像两个助手。 */
+    const TING = (window.DL && window.DL.tinglanId) || "c_tinglan";
+    const allChars = Store.getCharacters();
     /* 纯手机角色不进这一栏：它们只活在手机里，入口在侧栏「手机角色」那一栏。
        以前这里不过滤 → 点它会在主对话里打开那条 phoneOnly 的线，
        等于把「只活在手机里」这条设计从后门破掉了。 */
-    Store.getCharacters().filter((c) => !c.phoneOnly).slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).forEach((c) => bar.appendChild(chip(c.id, c.name || "角色", c.avatar || "", aid === c.id)));
+    allChars.filter((c) => !c.phoneOnly && c.id !== TING).slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).forEach((c) => bar.appendChild(chip(c.id, c.name || "角色", c.avatar || "", aid === c.id)));
     const add = document.createElement("button");
     add.type = "button";
     add.className = "char-chip add";
@@ -497,7 +574,11 @@
       if (!String(f[k] == null ? "" : f[k]).trim()) miss.push(labelOf(k));
     });
     const timelineOn = !!(ses && ses.time && typeof ses.time.start === "number");
-    if (timelineOn && !String(f[CHAR_REQUIRED_AGE] == null ? "" : f[CHAR_REQUIRED_AGE]).trim()) {
+    /* 出生年份填 0 = 无限年龄：年龄框会被禁用并清空（syncAgeField），
+       这时若还要求「当前年龄」，用户既发不出消息、也没有任何地方能补这一栏。
+       判据与 Memory.canTimeline 的无限年龄分支保持一致。 */
+    const infAge = String((ch && ch.fields && ch.fields.birth) || "").slice(0, 4) === "0000";
+    if (timelineOn && !infAge && !String(f[CHAR_REQUIRED_AGE] == null ? "" : f[CHAR_REQUIRED_AGE]).trim()) {
       miss.push(labelOf(CHAR_REQUIRED_AGE));
     }
     return miss;
@@ -603,13 +684,18 @@
       const fields = [{ key: "charName", label: "角色名（用于列表显示）", current: $v("#charName") }]
         .concat(keys.map(([key, label]) => ({ key: key, label: label, current: $v("#cf_" + key) })));
       const r = await Memory.splitCharacterFields(state.settings, raw, fields);
-      if (r.usage) recordUsage(null, r.usage, ch.id);
+      if (r.usage) recordUsage(null, r.usage, ch.id, "split");
+      /* 模型经常把年龄、身高这类返回成**数字**（"age": 17），
+         以前只认字符串 → 数字型字段一个都落不进表单。「AI 拆分没拆年龄」就是这个原因。 */
+      const asText = (v) => (typeof v === "number") ? String(v)
+        : (typeof v === "string" ? v.trim() : "");
       let n = 0;
-      if (typeof r.fields.charName === "string" && r.fields.charName.trim()) { setVal("#charName", r.fields.charName.trim()); n++; }
+      const cnS = asText(r.fields.charName);
+      if (cnS) { setVal("#charName", cnS); n++; }
       /* 只写 keys 里的：勾了「只拆角色相关」时，AI 就算把关于「我」的内容也返回了，也不落进表单 */
       keys.forEach(([key]) => {
-        const v = r.fields[key];
-        if (typeof v === "string" && v.trim()) { setVal("#cf_" + key, v.trim()); n++; }
+        const sv = asText(r.fields[key]);
+        if (sv) { setVal("#cf_" + key, sv); n++; }
       });
       setText("#charSplitState", n
         ? ("已填入 " + n + " 项" + (onlyRole ? "（只拆了角色相关，关于「我」的几栏没动）" : "") + "，检查/修改后点「保存设定」")
@@ -631,6 +717,9 @@
       setDisplay("#charForm", has ? "" : "none");
       setDisplay("#charEmpty", has ? "none" : "");
       setDisplay("#charTools", has ? "" : "none");
+      /* 「手机角色类型」只对手机角色有意义：现实扮演角色根本没有「通过手机联系」
+         这一说，露出来只会让人误填成「相熟型」然后一聊就被「填齐设定」拦住。 */
+      setDisplay("#phoneKindField", (has && ch.phoneOnly) ? "" : "none");
       if (ch) {
         setVal("#charName", ch.name || "");
         CHAR_FIELDS.forEach(([key]) => setVal("#cf_" + key, (ch.fields && ch.fields[key]) || ""));
@@ -639,10 +728,12 @@
         const ym = /^(\d{4})-/.exec(bv);
         setVal("#cf_birth_year", ym ? String(Number(ym[1])) : "");
         syncAgeField(ch);
+        avatarDraft.char = ch.avatar || "";
+        renderAvatarPreview("#cfAvPreview", avatarDraft.char, "assistant");
         avatarDraft.charPhone = ch.phoneAvatar || "";
         renderAvatarPreview("#cfPhAvPreview", avatarDraft.charPhone, "assistant", ch.avatar || "");
         syncPeriodField();
-        setVal("#cfPhoneKind", ch.phoneKind === "close" ? "close" : "casual");
+        setVal("#cfPhoneKind", ch.phoneKind === "close" ? "close" : "casual");        setVal("#cfCharFormat", ch.format || "");
         const cf = Memory.ensureFilter(ch);
         setVal("#charFilterRule", cf.rule || "");
         setVal("#charFilterEvery", cf.every || 10);
@@ -723,16 +814,21 @@
       const dd = String(d.getDate()).padStart(2, "0");
       ch.fields.aiPeriod = d.getFullYear() + "-" + mm + "-" + dd;
     }
+    /* 角色头像：清除后要真的变空（所以直接取草稿，不回落到 ch.avatar） */
+    ch.avatar = avatarDraft.char || "";
     /* 手机页专用头像：空串 = 跟随角色头像（不要写成 ch.avatar，那样会锁死） */
     ch.phoneAvatar = avatarDraft.charPhone || "";
-    ch.phoneKind = $v("#cfPhoneKind") === "close" ? "close" : "casual";
+        /* 现实扮演角色没有手机类型：保存时按角色身份收敛，别把旧值带进去 */
+        ch.phoneKind = ch.phoneOnly ? ($v("#cfPhoneKind") === "close" ? "close" : "casual") : "casual";
+    /* 角色级「采用格式」：留空 = 跟随全局；填了 = 这个角色的所有线都用它（会话还能再覆盖） */
+    ch.format = $v("#cfCharFormat").trim();
     const cf = Memory.ensureFilter(ch);
     cf.rule = $v("#charFilterRule").trim();
     cf.every = readFilterEvery();
     saveChar(ch);
-    /* 开场白（10-20）：保存后这个角色的每条线都补上它（已有的不重复插） */
-    let introN = 0;
-    try { introN = applyIntroToSessions(ch); } catch (e) { introN = 0; }
+    /* 开场白不再自动插进会话：它只是缓存在角色卡上的「原句」，
+       由聊天页的「发送开场白」按钮落到当前这条线（各线独立，点一次落一条）。
+       原来的 applyIntroToSessions 保留着，给「一键补到所有线」这类手动入口用。 */
     /* 草稿（导入酒馆卡来的）**在这一刻才落库** —— 用户口径：导入不自动保存，必须手点「保存设定」。
        落库同时把这条线切过去，并按需补一条主线对话。 */
     if (charDraft) {
@@ -743,7 +839,7 @@
       const mine = Store.getSessions().filter(function (s) { return (s.characterId || "") === ch.id; });
       if (!mine.length) newSession();
     }
-    UI.toast(introN ? ("角色已保存，开场白已放进 " + introN + " 条会话") : "角色已保存");
+    UI.toast("角色已保存");
     renderCharList();
     renderCharBar();
     const s = session();
@@ -762,7 +858,7 @@
     try {
       const usage = await Memory.updateCognition(s, saveSession, state.settings, extra);
       await Store.memReady();
-      if (usage) recordUsage(null, usage, s.characterId);
+      if (usage) recordUsage(null, usage, s.characterId, "daily");
       fillSessionForm(session());
       UI.toast("认知已更新");
     } catch (e) {
@@ -782,7 +878,7 @@
       const chars = Store.getCharacters();
       const nameOf = function (id) {
         for (let i = 0; i < chars.length; i++) { if (chars[i].id === id) return chars[i].name || "角色"; }
-        return id ? "角色" : "助手";
+        return id ? "角色" : aiName();
       };
       const memberNames = (from.members || []).map(nameOf).filter(Boolean).join("、");
       const txt = Memory.recentTranscript(Memory.allMsgs(from), 0, 60, from);
@@ -819,7 +915,7 @@
     try {
       const r = await Memory.updateRelationShared(s, saveSession, state.settings, base, extra);
       await Store.memReady();
-      if (r && r.usage) recordUsage(null, r.usage, s.characterId);
+      if (r && r.usage) recordUsage(null, r.usage, s.characterId, "daily");
       fillSessionForm(session());
       /* 以前无论更新到没有都报「已更新」，只更新一半也报成功，用户以为是玄学。
          现在按实际拿到的字段说实话。 */
@@ -948,7 +1044,7 @@
     try {
       const r = await Memory.correctMemory(s, txt, saveSession, state.settings);
       await Store.memReady();
-      if (r.usage) recordUsage(null, r.usage, s.characterId);
+      if (r.usage) recordUsage(null, r.usage, s.characterId, "memory");
       if (!r.changed) { UI.toast("没读出可用的记忆，换个说法再试", true); return; }
       setVal("#sessionCorrectInput", "");
       fillSessionForm(session());
@@ -970,7 +1066,7 @@
          模型没给出摘要时 ok=false，此刻记忆【一点没动】—— 这时不能报「已再压缩」骗人。 */
       const r = await Memory.reCompress(s, saveSession, state.settings);
       await Store.memReady();
-      if (r && r.usage) recordUsage(null, r.usage, s.characterId);   /* 这轮 token 确实花了，照记 */
+      if (r && r.usage) recordUsage(null, r.usage, s.characterId, "memory");   /* 这轮 token 确实花了，照记 */
       fillSessionForm(session());
       if (!r || !r.ok) { UI.toast("再压缩没成功：模型没有返回摘要，记忆保持原样，稍后再试", true); return; }
       UI.toast("已再压缩，上下文已提纯");
@@ -1001,7 +1097,7 @@
     if (!cf.rule) { if (!silent) UI.toast("先写筛选规则", true); return null; }
     if (!silent) UI.toast("正在按规则精简近期对话…");
     const res = await Memory.applyFilter(s, cf.rule, saveSession, state.settings);
-    if (res && res.usage) recordUsage(null, res.usage, ch.id);
+    if (res && res.usage) recordUsage(null, res.usage, ch.id, "memory");
     return res;
   }
 
@@ -1031,7 +1127,7 @@
     UI.toast("AI 正在整理规则…");
     try {
       const out = await Memory.generateFilterRule(state.settings, draft);
-      if (out.usage) recordUsage(null, out.usage, ch.id);
+      if (out.usage) recordUsage(null, out.usage, ch.id, "filter");
       const rule = (out.text || "").trim() || draft;
       setVal("#charFilterRule", rule);
       const ok = await UI.confirmDialog("AI 筛选规则", "AI 理解为：\n\n" + rule + "\n\n采用并立即按它精简近期对话？");
@@ -1082,7 +1178,7 @@
       if (notify) UI.toast("正在更新当前场景…");
       sceneBusy = true;
       Memory.updateScene(s, saveSession, state.settings, since).then((res) => {
-        if (res && res.usage) recordUsage(null, res.usage, s.characterId || "");
+        if (res && res.usage) recordUsage(null, res.usage, s.characterId || "", "daily");
         /* 只有真的产出了场景才推进 sceneAt；空输出照样推进的话，
            这一段对话的场景就永远补不上、也不会再重试。 */
         if (res && res.changed) {
@@ -1144,13 +1240,20 @@
     const chars = Store.getCharacters();
     Store.getSessions().forEach((sess) => {
       const isRoleplay = !!(sess.characterId || "");
-      if (!isRoleplay && !state.settings.assistantCompress) return;
+      const isGroup = !!sess.isGroup;
+      /* 群聊压缩（10-22 补）：群没有 characterId，原来会被当成「助手线」——
+         助手压缩关着就直接跳过，开着又按助手线压（只压 messages、不认 phone.msgs 里的群消息）。
+         现在群单独走一条：一律参与，且不做「对我的认知」（群里没有单一视角）。 */
+      if (!isRoleplay && !isGroup && !state.settings.assistantCompress) return;
       const ch = isRoleplay ? chars.find((c) => c.id === sess.characterId) : null;
       const seed = ch ? { relation: (ch.fields && ch.fields.relation) || "", shared: (ch.fields && ch.fields.shared) || "" } : null;
       tasks.push(async () => {
         try {
           const res = await Memory.runCompression(sess, saveSession, state.settings, { cognition: isRoleplay, seed: seed }, null);
-          if (res && res.usage) recordUsage(null, res.usage, sess.characterId || "");
+          /* 群的用量单独归到「记忆」这名下，别混进某个角色的账单（它本来就不属于任何人） */
+          /* 这里以前是 isGroup ? "memory" : "" —— 单聊传空串，靠 recordUsage 的缺省兜底才落进「记忆」。
+           缺省已经改成落「其它」了，所以必须显式写 memory，否则单聊压缩会被记成「其它」。 */
+          if (res && res.usage) recordUsage(null, res.usage, sess.characterId || "", "memory");
           return res ? res.days : 0;
         } catch (e) { console.warn("[DeepLink] 会话压缩失败", sess.id, e); return 0; }
       });
@@ -1208,6 +1311,17 @@
       setVal("#setSessionRelation", s.relation || "");
       setVal("#setSessionShared", s.shared || "");
       setVal("#setSessionCognition", s.cognition || "");
+      /* 记下「打开弹窗时」这四个字段的值。保存时只回写用户真改过的 ——
+         弹窗开着的这段时间里，日更 / 压缩 / 纠偏可能刚写过新值，
+         拿表单旧快照无条件覆盖等于把它们的工作清掉（10-23）。 */
+      try {
+        window.DL.state.sessionFormInit = {
+          scene: $v("#setSessionScene") || "",
+          relation: $v("#setSessionRelation") || "",
+          shared: $v("#setSessionShared") || "",
+          cognition: $v("#setSessionCognition") || ""
+        };
+      } catch (e) { /* 记不上就退回「全部回写」的老行为，不影响功能 */ }
       /* 本线年龄 + 混搭模式（10-20） */
       setVal("#setSessionAge", s.age == null ? "" : String(s.age));
       setChecked("#setSessionAutoFreeze", !!s.autoFreeze);
@@ -1345,11 +1459,56 @@
       .trim();
   }
 
+  /* HTML → Markdown：勾了「保留卡里的代码格式」时用它。
+     只保留能渲染成排版的那几样（加粗、斜体、列表、标题、引用、换行），
+     其余标签丢掉 —— 目的不是省字符，而是让设定在表单里看得出结构。 */
+  function htmlToMarkdown(v) {
+    let s = String(v == null ? "" : v);
+    s = s.replace(/<style[\s\S]*?<\/style>/gi, "");
+    s = s.replace(/<\s*br\s*\/?>/gi, "\n");
+    s = s.replace(/<\s*\/\s*(p|div|section|article|li|h[1-6]|tr|blockquote|details)\s*>/gi, "\n");
+    s = s.replace(/<\s*(b|strong)[^>]*>/gi, "**").replace(/<\s*\/\s*(b|strong)\s*>/gi, "**");
+    s = s.replace(/<\s*(i|em)[^>]*>/gi, "*").replace(/<\s*\/\s*(i|em)\s*>/gi, "*");
+    s = s.replace(/<li[^>]*>/gi, "- ");
+    s = s.replace(/<h([1-6])[^>]*>/gi, function (m, n) { return "\n" + "######".slice(0, Number(n)) + " "; });
+    s = s.replace(/<blockquote[^>]*>/gi, "> ");
+    s = s.replace(/<[^>]*>/g, "");
+    s = s.replace(/&nbsp;/gi, " ").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&apos;/gi, "'").replace(/&amp;/gi, "&");
+    s = s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+    return s.trim();
+  }
+
+  /* 从卡里抽出 <style> 段，塞进角色级「采用格式」。
+     只抽 CSS：成段的 HTML 模板搬进去是噪音，模型会照着写一堆标签。 */
+  function extractCardCss() {
+    const out = [];
+    for (let i = 0; i < arguments.length; i++) {
+      const s = String(arguments[i] || "");
+      const re = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+      let m;
+      while ((m = re.exec(s))) {
+        const css = String(m[1] || "").trim();
+        if (css) out.push(css);
+      }
+    }
+    const all = out.join("\n\n");
+    /* 截断要落在规则边界上：切在声明中间会留下半条规则，后面整段样式失效 */
+    if (all.length <= 4000) return all;
+    const cut = all.slice(0, 4000);
+    const lastBrace = cut.lastIndexOf("}");
+    return lastBrace > 0 ? cut.slice(0, lastBrace + 1) : "";
+  }
+
   function tavernToFields(card, opts) {
     const d = tavernCardData(card) || {};
     const doSubst = !(opts && opts.substUser === false);   /* 默认替换 */
+    /* 保留代码格式：设定转 Markdown（看得出结构），卡里的 CSS 进「采用格式」，
+       开场白保留富文本原样。不勾：全部压成纯文字，开场白也一样。 */
+    const keepCode = !!(opts && opts.keepCode);
+    const conv = keepCode ? htmlToMarkdown : htmlToText;
     const fields = {};
-    const put = (k, v) => { const s = htmlToText(joinArr(v)); if (s) fields[k] = s; };
+    const put = (k, v) => { const s = conv(joinArr(v)); if (s) fields[k] = s; };
     put("aiName", d.name || card.name);
     put("aiPersona", d.personality);
     put("aiBackground", d.description);
@@ -1373,7 +1532,9 @@
     return {
       name: name,
       fields: fields,
-      intro: substPlaceholders(first ? String(first) : "", name, doSubst),
+      /* 开场白：保留代码时留原文（渲染器按卡片处理），否则压成纯文字 */
+      intro: substPlaceholders(first ? (keepCode ? String(first) : htmlToText(String(first))) : "", name, doSubst),
+      format: keepCode ? extractCardCss(first, d.description, d.scenario) : "",
       greetings: alts.map(function (x) {
         return substPlaceholders(String(joinArr(x) || ""), name, doSubst);
       }).filter(Boolean),
@@ -1385,7 +1546,7 @@
     const isPng = /\.png$/i.test(file.name || "") || file.type === "image/png";
     return new Promise((resolve) => {
       const fr = new FileReader();
-      fr.onload = () => {
+      fr.onload = async () => {
         try {
           let card = null;
           if (isPng) {
@@ -1397,7 +1558,9 @@
           }
           const mapped = tavernToFields(card, {
             /* 勾选框：把卡里的 {{user}} 换成「我的人设 → 我的名称」 */
-            substUser: !(document.getElementById("charImportUser") && !document.getElementById("charImportUser").checked)
+            substUser: !(document.getElementById("charImportUser") && !document.getElementById("charImportUser").checked),
+            /* 勾选框：保留卡里的代码格式（CSS 进采用格式栏、设定转 Markdown） */
+            keepCode: !!(document.getElementById("charImportKeepCode") && document.getElementById("charImportKeepCode").checked)
           });
           const now = Date.now();
           const c = {
@@ -1405,6 +1568,8 @@
             name: mapped.name, avatar: "", fields: mapped.fields,
             /* 开场白原文（富文本）与备选开场：由 chat.js 落到会话的第一条消息 */
             intro: mapped.intro || "",
+            /* 卡里抽出来的 CSS：落到角色级「采用格式」（勾了保留代码才有） */
+            format: mapped.format || "",
             greetings: mapped.greetings || [],
             ctxFilter: { rule: "", every: 10 }, usage: null, pinned: false,
             createdAt: now, updatedAt: now
@@ -1417,14 +1582,24 @@
           renderCharBar();
           /* 「导入后用 AI 拆分」（用户口径）：酒馆卡信息杂，交给 AI 归位更省事。
              走「再次拆分」那条（以刚填好的字段为源重新整理）—— 不会清空没提到的栏。 */
-          const impAI = document.getElementById("charImportAI");
-          if (impAI && impAI.checked) {
-            UI.toast("已解析角色卡「" + mapped.name + "」，正在用 AI 拆分…");
-            setText("#charSplitState", "AI 正在拆分（酒馆卡里的代码 / 格式会一起理解）…");
+          /* 酒馆卡的信息是散的，不拆分直接填进去基本不是人话 —— 改成默认且强制。
+             没配 Key 时降级成纯文本导入（不阻断），配好 Key 后还能点「再次拆分」。 */
+          if (!state.settings || !state.settings.apiKey) {
+            UI.toast("已解析角色卡「" + mapped.name + "」（填入 " + mapped.count + " 项）。没配 API Key，先按纯文本填进来，配好后可点「再次拆分」");
             resolve(true);
-            runCharSplit(true);
-          } else {
-            UI.toast("已解析角色卡「" + mapped.name + "」（填入 " + mapped.count + " 项）。确认后点「保存设定」才存下来");
+            return;
+          }
+          UI.toast("已解析角色卡「" + mapped.name + "」，正在用 AI 拆分…");
+          setText("#charSplitState", "AI 正在拆分（酒馆卡里的代码 / 格式会一起理解）…");
+          /* 等拆分落库再放行。以前是先 resolve(true) 再跑拆分，调用方会在拆分飞行途中
+             继续干活（切会话 / 切角色是常事），拆出来的字段就写进了别人身上。
+             拆分前再确认一次目标角色没被切走，切走了就不拆，免得拆错人。 */
+          const targetId = c.id;
+          try {
+            if (curChar() && curChar().id === targetId) await runCharSplit(true);
+          } catch (e) {
+            UI.toast("AI 拆分失败，可点「再次拆分」重试", true);
+          } finally {
             resolve(true);
           }
         } catch (e) {
@@ -1611,12 +1786,19 @@
     ].join("\n");
     /* 天数越多、写得越细，给的额度越大（上限兜住成本）。
        10-20：每天多了一段〖想法〗，额度按天再放宽一点。 */
-    const maxTokens = Math.max(900, Math.min(3600, 500 + days * 420));
+    /* 逐天写的价值在细节感，超过三周必然是流水账：额度按最多 20 天给。
+       超出的天数不砍掉，靠下面的「截断提示」让用户自己决定要不要分两次生成。 */
+    const daysEff = Math.min(days, 20);
+    const maxTokens = Math.max(900, Math.min(3600, 500 + daysEff * 420));
     const res = await Api.summarize(state.settings, [
       { role: "system", content: sys },
       { role: "user", content: body }
     ], { maxTokens: maxTokens });
     if (res && res.usage) recordUsage(null, res.usage, s.characterId, "world");
+    /* 被长度上限截断时明确说出来：以前照常当成功采纳，用户只会觉得「后面几天没写」。 */
+    if (res && res.finishReason === "length") {
+      UI.toast("空档太长，后段被长度上限截断了。想补全就分两次生成（先补前两周）", true);
+    }
     return (res && res.text) || "";
   }
   /* 采纳：作为一条「补写」消息放进这条线的末尾（用户看得见，也能删） */
@@ -1845,6 +2027,10 @@
     syncSessionParamFields: syncSessionParamFields, fillSessionForm: fillSessionForm
   };
   Object.keys(api).forEach(function (k) {
+    /* 只转发现有函数：api 里一旦有 undefined 成员，D[k]() 会在
+       api[k].apply 处直接抛「Cannot read property 'apply' of undefined」，
+       错误看着像框架问题，实际是某个成员名写错了 —— 跳过它比整模块崩掉好。 */
+    if (typeof api[k] !== "function") return;
     D[k] = function () { syncModules(); return api[k].apply(null, arguments); };
   });
 

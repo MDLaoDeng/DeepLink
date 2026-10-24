@@ -89,6 +89,14 @@
   const K_SESSIONS = "aicode.sessions.v1";
   const K_CURRENT = "aicode.current.v1";
   const K_CHARS = "aicode.characters.v1";
+  /* 关键表的备份键（ADV-03）：会话与角色卡都是「整表写入」，
+     一旦写坏 / 主键被清掉就是「聊天记录全没了」。写之前把上一版留在这里，
+     读不到主键时能退回来。settings 这类小表不备份 —— 坏了重填就行。 */
+  const K_BAK_SESSIONS = "aicode.bak.sessions";
+  const K_BAK_CHARS = "aicode.bak.characters";
+  const BAK_MAP = {};
+  BAK_MAP[K_SESSIONS] = K_BAK_SESSIONS;
+  BAK_MAP[K_CHARS] = K_BAK_CHARS;
   const K_USAGE = "aicode.usage.v1";
   const K_USAGECAT = "aicode.usagecat.v1";
   /* 手机「动态」：全局一条时间线。可见范围记在每条动态自己的 lines 里（会话 id 数组） */
@@ -119,13 +127,18 @@
      它的「数据存储与获取类」接口和 localStorage 几乎一样，但**同步、无 5MB 上限**：
        webapp.存储指定文本(key, value) / webapp.获取指定文本(key, 默认值) / webapp.删除指定存储(key)
      容器/浏览器里没有这个对象 → 自动退回 localStorage，行为完全不变。 */
+  /* ⚠️ aicode.devsalt.v1 必须在名单里：它是 dl2 记忆密文的外层密钥材料，
+     漏了它，迁移后原生读不到盐 → devSalt() 生成新盐覆盖写 → 盘上所有密文永久解不开。
+     盐和密文必须同生共死，这是「整机搬家」，一个键都不能少。 */
   const NATIVE_KEYS = ["aicode.settings.v1", "aicode.sessions.v1", "aicode.current.v1",
-    "aicode.characters.v1", "aicode.usage.v1", "aicode.usagecat.v1", "aicode.moments.v1", "aicode.assistantmem.v1", "aicode.backups.v1", "aicode.charimg.v1"];
+    "aicode.characters.v1", "aicode.usage.v1", "aicode.usagecat.v1", "aicode.moments.v1", "aicode.assistantmem.v1", "aicode.backups.v1", "aicode.charimg.v1",
+    "aicode.devsalt.v1"];
   let backend = null;
   /* 迁移是否已经跑过一遍。跑过之后，原生返回空就代表「这个键真的没有」，
      不能再回落到 localStorage —— 那是迁移时留下的旧快照，会让「清空 / 删除」读回旧值。
      见 readRaw 的注释。 */
   let nativeMigrated = false;
+  let migrateRetry = 0;   /* 迁移失败后的重试次数（有上限，避免永久失败时每 5 秒重来一次） */
 
   function nativeKV() {
     try {
@@ -159,18 +172,30 @@
   function migrateToNative() {
     const w = nativeKV();
     if (!w) return;
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k || NATIVE_KEYS.indexOf(k) < 0) continue;
+    /* 逐个键各自 try：任何一个键写失败都算【没搬完】，绝不能置 nativeMigrated。
+       置了之后 readRaw 会停止回落 localStorage，那些没搬过去的键当场读成空 ——
+       用户看到「历史全没了」，接着新建会话还会把仅存的数据覆盖掉。 */
+    let failed = false;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || NATIVE_KEYS.indexOf(k) < 0) continue;
+      try {
         if (w["获取指定文本"](k, "")) continue;   /* 原生已有 → 不覆盖 */
         const v = localStorage.getItem(k);
         if (v == null) continue;
-        w["存储指定文本"](k, v);
-      }
-    } catch (e) { /* ignore */ }
-    /* 迁移已经跑过一遍：此后原生返回空即为「这个键真的没有」，
+        const r = w["存储指定文本"](k, v);
+        if (r === false) { failed = true; break; }
+      } catch (e) { failed = true; break; }
+    }
+    if (failed) {
+      migrateRetry++;
+      if (migrateRetry <= 3) setTimeout(migrateToNative, 5000);
+      else console.warn("[DeepLink] 数据迁移多次失败，仍按 localStorage 读取（不会丢数据）");
+      return;
+    }
+    /* 确实搬完了一遍：此后原生返回空即为「这个键真的没有」，
        readRaw 不再回落 localStorage（否则会读回这里的旧快照）。 */
+    migrateRetry = 0;   /* 成功过就把失败计数清掉，否则以后再失败一次就直接放弃 */
     nativeMigrated = true;
   }
   /* 统一调用原生桥：不存在或抛错都安全空转（返 undefined），保证无桥环境（浏览器/测试/预览）行为不变 */
@@ -209,9 +234,46 @@
      以前调用方（尤其 saveSettings）根本不看这个返回值，于是「设置已保存」照样弹出来，
      重启后全回落。这里记一笔，界面在关键保存点查一下就能如实报错。 */
   let lastWriteOk = true;
-  function writeRaw(key, value) {
+  /* 纯写，不碰备份 —— 给「写备份」自己用，避免递归 */
+  function rawSet(key, val) {
     try {
-      if (pickBackend() === "native") { nativeKV()["存储指定文本"](key, String(value)); lastWriteOk = true; return true; }
+      if (pickBackend() === "native") {
+        const r = nativeKV()["存储指定文本"](key, String(val));
+        return r !== false;
+      }
+      localStorage.setItem(key, String(val));
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /* m3：备份节流。同一张表 5 分钟内只备份一次。
+     不节流的话，saveSessions（12 个调用点）每写一次都要「读全表 + 再写一份全表备份」，
+     角色卡那边一次保存本来就要写两次（明文兜底 + 密文），叠上备份就是 2 读 4 写。
+     破坏性写入（用户清空 / 导入覆盖 / 恢复备份）由调用方传 forceBak 强制备份。 */
+  const BAK_LAST = {};
+  const BAK_GAP = 5 * 60 * 1000;
+
+  function writeRaw(key, value, forceBak) {
+    /* ADV-03：关键表写之前把「上一版」存成备份。
+       顺序很讲究：先备份旧值、再写新值。备份失败绝不能挡住主写入。 */
+    const bk = BAK_MAP[key];
+    if (bk && (forceBak || !BAK_LAST[bk] || Date.now() - BAK_LAST[bk] > BAK_GAP)) {
+      try {
+        const old = readRaw(key);
+        if (old != null && String(old).length > 2 && rawSet(bk, String(old))) {
+          BAK_LAST[bk] = Date.now();
+        }
+      } catch (e) { /* ignore */ }
+    }
+    try {
+      if (pickBackend() === "native") {
+        const r = nativeKV()["存储指定文本"](key, String(value));
+        /* 原生明确回 false = 没写成（配额满 / 库被锁）。以前一律当成功，
+           于是「已保存」照弹、重启全回落。抛出去交给外层 catch 记 lastWriteOk。 */
+        if (r === false) throw new Error("原生存储写入失败");
+        lastWriteOk = true;
+        return true;
+      }
       localStorage.setItem(key, value);
       lastWriteOk = true;
       return true;
@@ -542,9 +604,47 @@
       { memory: (s && s.memory) || null, cognition: (s && s.cognition) || "" },
       memExtraOf(s)));
   }
+  /* ── 弱加密：没有 WebCrypto 时的退路 ───────────────────────
+     **不是加密，是混淆**：口令派生一条字节流做异或，挡的是「捡到文件随手打开」。
+     前缀 dlpw1: 必须保留 —— 导入端靠它认路线，界面靠 canEncrypt() 提示用户这是弱保护。 */
+  function weakStream(pass, len) {
+    const p = String(pass || "\u0000");
+    const n = p.length || 1;
+    const out = new Uint8Array(len);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < len; i++) {
+      h ^= p.charCodeAt(i % n) || 0x27;
+      h = (h * 16777619) >>> 0;
+      h ^= (i * 131) & 0xff;
+      h = (h * 16777619) >>> 0;
+      out[i] = h & 0xff;
+    }
+    return out;
+  }
+  function weakSeal(text, pass) {
+    const raw = new TextEncoder().encode(String(text == null ? "" : text));
+    const ks = weakStream(pass, raw.length);
+    const buf = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) buf[i] = raw[i] ^ ks[i];
+    return "dlpw1:" + bytesToB64(buf);
+  }
+  function weakOpen(str, pass) {
+    try {
+      const buf = b64ToBytes(String(str).slice(6));
+      const ks = weakStream(pass, buf.length);
+      const raw = new Uint8Array(buf.length);
+      for (let i = 0; i < buf.length; i++) raw[i] = buf[i] ^ ks[i];
+      return new TextDecoder().decode(raw);
+    } catch (e) { return null; }
+  }
+
   /* 用「用户自设口令」加密（口令不存进 App，用于导出文件、只有本人能解） */
   async function sealWithPass(text, pass) {
-    if (!cryptoOk()) throw new Error("当前环境不支持加密接口");
+    /* 没有 WebCrypto（非安全上下文 / 老内核）时不再直接失败：
+       导出是换机的唯一手段，直接拒绝等于这台机器无法迁移数据。
+       降级成「口令混淆」，用 dlpw1: 前缀**明确标记**，导入时按标记走弱路线；
+       界面另外提示一句，不让人以为这是真加密。 */
+    if (!cryptoOk()) return weakSeal(text, pass);
     const enc = new TextEncoder();
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -555,6 +655,8 @@
     return "dlp1:" + bytesToB64(salt) + ":" + bytesToB64(iv) + ":" + bytesToB64(ct);
   }
   async function openWithPass(str, pass) {
+    /* 弱加密（没有 WebCrypto 时导出的）按前缀识别，走同一条还原路径 */
+    if (typeof str === "string" && str.slice(0, 6) === "dlpw1:") return weakOpen(str, pass);
     if (!cryptoOk() || typeof str !== "string" || str.slice(0, 5) !== "dlp1:") return null;
     const parts = str.slice(5).split(":");
     if (parts.length !== 3) return null;
@@ -591,6 +693,10 @@
     const jobs = [];
     (list || []).forEach((s) => {
       if (!s || !s.id || brokenMem[s.id]) return;   /* 解不开的会话：绝不重新加密，否则老密文会被盖掉 */
+      /* M1：有密文、却没有本轮的明文 → 说明还没解（启动未完成 / 刚从备份恢复）。
+         这时 memPlainOf 只能拼出 {memory:null, cognition:""} 的空载荷，
+         加密下去就把磁盘上的真记忆盖掉了。brokenMem 只挡「解不开」，挡不住「这轮还没解」。 */
+      if (!plainMem[s.id] && !s.memory && (cipherMem[s.id] || s.memEnc)) return;
       const text = memPlainOf(s);
       if (encPlain[s.id] === text && cipherMem[s.id]) return;
       jobs.push({ id: s.id, text: text });
@@ -661,6 +767,17 @@
     charsUnlocked = true;
     let raw;
     try { raw = readRaw(K_CHARS); } catch (e) { raw = undefined; }
+    /* M2：主键读不到 → 试备份。口径与会话完全一致：只有 null / undefined / "" 视为「键丢了」，
+       "[]" 是用户真的清空，绝不回滚。以前这里直接 charsPlain = [] 就返回，
+       于是 BAK_MAP 给角色卡留的那份备份只写不读 —— 纯成本、零收益。 */
+    if (raw === undefined || raw === null || raw === "") {
+      let bak = null;
+      try { bak = readRaw(K_BAK_CHARS); } catch (e) { bak = null; }
+      if (bak && String(bak).length > 2) {
+        console.warn("[DeepLink] 角色卡主键读不到，已从备份恢复");
+        raw = bak;
+      }
+    }
     if (raw === undefined || raw === null || raw === "") { charsPlain = []; return; }
     const v = safeParse(raw, null);
     if (Array.isArray(v)) {
@@ -808,6 +925,20 @@
          甚至顺手 newSession() 再存一遍 —— 用户看到的就是「对话历史全空了」。
          读失败的正确语义是「这次没读到」，不是「没有」。 */
       if (readError) return sessionsCache || [];
+      /* 主键彻底没了（不是「用户删空」——删空写的是 "[]"，会走到下面）→ 试试备份。
+         以前这里直接返回空数组，然后上层渲染成「对话历史全空了」。
+         注意：备份只在「读到 null/undefined」时用，"[]" 绝不动 —— 那是用户真的清空了。 */
+      if (raw === undefined || raw === null) {
+        let bk = null;
+        try { bk = readRaw(K_BAK_SESSIONS); } catch (e) { bk = null; }
+        if (bk && String(bk).length > 2) {
+          const bakList = safeParse(bk, null);
+          if (Array.isArray(bakList) && bakList.length) {
+            console.warn("[DeepLink] 会话主键读不到，已从备份恢复 " + bakList.length + " 条");
+            raw = bk;
+          }
+        }
+      }
       if (raw === undefined) { sessionsCache = []; return sessionsCache; }
       const list = safeParse(raw, []);
       const arr = Array.isArray(list) ? list : [];
@@ -827,28 +958,46 @@
       sessionsCache = arr;
       return sessionsCache;
     },
-    saveSessions(list) {
+    saveSessions(list, opts) {
       const arr = list || [];
+      /* allowEmpty：调用方明确知道自己在清空（用户主动删掉最后一条会话）。
+         守卫要防的是「误清」，不是「合法删」——由调用方声明意图，别让守卫去猜。 */
+      const allowEmpty = !!(opts && opts.allowEmpty);
       const prevCount = (sessionsCache || []).length;
-      sessionsCache = arr;
-      arr.forEach((s) => {
-        if (!s || !s.id) return;
-        if (brokenMem[s.id]) return;   /* 解不开的会话：不进缓存（进了就会被当「已解开」而清掉明文） */
-        plainMem[s.id] = Object.assign(
-          { memory: s.memory || null, cognition: s.cognition || "" }, memExtraOf(s));
-      });
-      if (readError) return false;
-      /* 防呆：本来有会话、这次却要写空 —— 多半是上游读失败或误清，跳过落盘
-         （内存状态照常更新，deleteSession 后紧接着会新建会话，不会卡住）。
-         宁可少一次删除，也不要把历史洗掉。 */
-      if (!arr.length && prevCount > 0) {
+      /* 防呆必须放在「更新缓存」之前：被拒的空写若已经把 sessionsCache 清空，
+         下一步的 prevCount 就变 0，闸门失效，磁盘上的历史会被整个覆盖。 */
+      if (!readError && !allowEmpty && !arr.length && prevCount > 0) {
         console.warn("[DeepLink] 会话列表将写为空白，已拒绝写入（疑似误清）");
         return false;
       }
-      hoistImages(arr);   /* 把内联图片搬进文件（无桥 / 失败都原样留着，见上面三条底线） */
-      const ok = writeRaw(K_SESSIONS, JSON.stringify(persistedSessions(arr)));
+      /* 读盘失败期间一律不写：这时 sessionsCache 可能是空的 / 半截的，
+         写下去就是把磁盘上真正的那份覆盖成「我们这次看到的样子」。
+         allowEmpty 也不放行 —— 连盘上有什么都不知道，凭什么清空。 */
+      if (readError) return false;
+      arr.forEach((s) => {
+        if (!s || !s.id) return;
+        if (brokenMem[s.id]) return;   /* 解不开的会话：不进缓存（进了就会被当「已解开」而清掉明文） */
+        /* 只有调用方确实带了这几项时才刷新缓存：导入 / 恢复时，解不开密文的会话
+           memory 是 undefined，无条件写会把缓存洗成 null，紧跟的 queueMemEncrypt
+           就会用空载荷重新加密、把盘上的旧密文盖掉。 */
+        if (s.memory !== undefined || s.cognition !== undefined || s.scene !== undefined ||
+            s.relation !== undefined || s.shared !== undefined) {
+          plainMem[s.id] = Object.assign(
+            { memory: s.memory || null, cognition: s.cognition || "" }, memExtraOf(s));
+        }
+      });
+      hoistImages(arr);   /* 把内联图片搬进文件（无桥 / 失败都原样留着，见上面三条底线 */
+      /* allowEmpty = 用户在主动清空：这种写之前必须留一份上一版 */
+      const ok = writeRaw(K_SESSIONS, JSON.stringify(persistedSessions(arr)), allowEmpty);
+      /* 【关键】只有真写成了才认这份缓存。
+         以前先 sessionsCache = arr 再写，写失败（配额满 / 桥被锁）时缓存已经是新的：
+         getSessions() 命中缓存就再也不读盘，下一次任何保存都会把磁盘上那份
+         覆盖成这次失败的内容 —— 一次写失败最终变成「历史只剩一条」。
+         没写成 → 缓存保持原样，下次还会回盘上读真实数据。 */
+      if (!ok) return false;
+      sessionsCache = arr;
       memPending = queueMemEncrypt(arr).catch(() => {});
-      return ok;
+      return true;
     },
 
     /* 启动时解一次记忆密文（异步）。只跑一次，后来者拿到的是同一个 Promise ——
@@ -914,6 +1063,45 @@
     hasImage(att) { return !!(att && att.kind === "image" && (att.dataUrl || att.imgRef)); },
     /* 最近一次写盘是否成功（见 writeRaw 上面的注释）。界面在关键保存点查它 */
     writeOk() { return lastWriteOk; },
+
+    /* 可写目录候选（10-23 提到这里，三处共用一份）。
+       safe：**不需要额外申请存储权限**的 App 私有目录，外部优先（文件管理器能看见），
+             外部拿不到再退内部。
+       perm：需要权限的公共目录（Download），只作为用户明确要「存到相册/下载」时的备选。
+       以前 settings.js 与 media.js 各拼一套，路径规则一改就得改两处。 */
+    fileDirs() {
+      const safe = [], perm = [];
+      const add = (arr, v) => {
+        const d = String(v || "").replace(/\/+$/, "");
+        if (d && arr.indexOf(d) < 0) arr.push(d);
+      };
+      if (hasBridge("获取外部文件目录")) add(safe, callBridge("获取外部文件目录"));
+      if (hasBridge("获取内部文件目录")) add(safe, callBridge("获取内部文件目录"));
+      if (hasBridge("获取外部存储目录")) {
+        const e = String(callBridge("获取外部存储目录") || "").replace(/\/+$/, "");
+        if (e) add(perm, e + "/Download");
+      }
+      return { safe: safe, perm: perm };
+    },
+
+    /* 在候选目录里挑第一个真能写进去的，返回目录（全是空 = 没有写入能力）。
+       判据比「桥返回非 false」硬一点：写完之后再用「判断指定文件」复核一次，
+       因为部分封装里 save 失败是静默返回 undefined。 */
+    pickWritableDir(probeName) {
+      const name = String(probeName || ".dl_write_probe.txt");
+      const dirs = Store.fileDirs().safe;
+      for (let i = 0; i < dirs.length; i++) {
+        const cand = dirs[i] + "/" + name;
+        try {
+          const w = callBridge("保存指定文件", cand,
+            "data:text/plain;charset=utf-8," + encodeURIComponent("probe"));
+          if (w === false) continue;
+          if (hasBridge("判断指定文件") && callBridge("判断指定文件", cand) === false) continue;
+          return dirs[i];
+        } catch (e) { /* 换下一个 */ }
+      }
+      return "";
+    },
     /* 背景图外置：返回落到哪个路径（空串 = 没桥 / 没写成，调用方就继续留 dataURL）。
        背景这类大图塞进 settings 会一路顶到 localStorage 配额，能不塞就不塞。 */
     saveBgImage(dataUrl) {
@@ -1286,7 +1474,8 @@
     deleteSession(id) {
       let list = this.getSessions();
       list = list.filter((s) => s.id !== id);
-      this.saveSessions(list);
+      /* 删掉最后一条时会写空数组 —— 这是用户的合法操作，显式放行 */
+      this.saveSessions(list, { allowEmpty: true });
       /* 顺手清掉这条会话的备份快照：不清就是永久孤儿（每会话最多 2 份，白占存储、
          而且再也点不进去）。 */
       try {
@@ -1302,6 +1491,14 @@
         removeRaw(K_SESSIONS);
         removeRaw(K_CURRENT);
         removeRaw(K_BACKUPS);
+        /* OPT-01：以前漏了 K_CHARS —— 接上「清空数据」后角色卡会原样留着，
+           用户以为清干净了，重启又冒出十几个角色和它们的记忆。 */
+        removeRaw(K_CHARS);
+        /* 备份必须一起删：只删主键不删备份，下次启动会从备份把「刚清空的东西」恢复回来 */
+        removeRaw(K_BAK_SESSIONS);
+        removeRaw(K_BAK_CHARS);
+        /* 节流表也要清：不清的话下次写盘会以为「刚备份过」而跳过 */
+        Object.keys(BAK_LAST).forEach(function (k) { delete BAK_LAST[k]; });
       } catch (e) { /* ignore */ }
       sessionsCache = null;
       memUnlocked = false;
