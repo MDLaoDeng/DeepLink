@@ -547,7 +547,8 @@
 
   function openPhoneSettings() {
     var box = document.createElement("div");
-    box.className = "ph-set";
+    /* stack：给直接子块统一 16px 间距，见 app.css 的 .ph-set-stack */
+    box.className = "ph-set ph-set-stack";
 
     var pv = document.createElement("div");
     pv.className = "ph-set-pv";
@@ -2628,6 +2629,9 @@
     if (!body) return;
     body.innerHTML = "";
     body.appendChild(bodyEl);
+    /* body 现在是滚动容器（内容多的弹层在里面滚）：必须显式归零，
+       否则从上一次的同名弹层（或浏览器自己的滚动锚定）接着滚，一打开就停在中间。 */
+    body.scrollTop = 0;
     ps.sheetOk = onOk || null;
     show($("#phoneSheet"), true);
   }

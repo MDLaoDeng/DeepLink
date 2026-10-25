@@ -2107,6 +2107,9 @@ html.kb-open .phone-layer {
 
 /* 手机头像设置（底部弹层里的那块） */
 .ph-avset { padding: 4px 0 2px; }
+/* 「这条线」十来个字段挤在一起时，字段之间只有 14px（含标签的 6px），
+   真机上看就是一片连着的框。这里统一拉开到 16px。 */
+.ph-avset > * + * { margin-top: 16px; }
 .ph-avset-pv { display: flex; justify-content: center; margin-bottom: 14px; }
 /* 头像预览：选择器必须是 .avatar（avatarEl 用的是这个类），
    以前写的 .ph-av 匹配不到 → 头像只有 30px、被 overflow:hidden 裁成小方块。 */
@@ -2115,7 +2118,7 @@ html.kb-open .phone-layer {
 .ph-avset-row { display: flex; }
 .ph-avset-row .btn { flex: 1; }
 /* 不用 gap：Chrome 83 的 flex 不支持 */
-.ph-avset-row .btn + .btn { margin-left: 10px; }
+.ph-avset-row .btn + .btn { margin-left: 12px; }
 .ph-avset-hint {
   margin: 12px 0 0; font-size: 14px; line-height: 1.6;
   color: var(--text-dim); text-align: center;
@@ -2123,6 +2126,12 @@ html.kb-open .phone-layer {
 
 /* 手机设置（齿轮进来）：背景预览 + 模糊/亮度滑块 */
 .ph-set { padding: 4px 0 2px; }
+/* 表单型弹层（手机设置 / 这条线）：给「直接子块」统一垂直间距。
+   原来 row 与紧跟的整行按钮之间没有任何 margin —— 预览块、两个并排按钮、
+   「这条线（头像/昵称/…）」三块在真机上贴成一片，就是反馈里说的「连在一起」。
+   只加在 .ph-set-stack 上：菜单型弹层（成员列表 / 转发列表）要保持紧凑，不能被拉散。 */
+.ph-set-stack > * + * { margin-top: 16px; }
+.ph-set-stack .ph-avset-hint { margin-top: 10px; }
 .ph-set-pv {
   width: 100%; height: 132px; border-radius: 16px; margin-bottom: 12px;
   background-color: var(--panel-2); background-size: cover; background-position: center;
@@ -2132,7 +2141,7 @@ html.kb-open .phone-layer {
 .ph-set-row { display: flex; }
 .ph-set-row .btn { flex: 1; }
 /* 不用 gap：Chrome 83 的 flex 不支持 */
-.ph-set-row .btn + .btn { margin-left: 10px; }
+.ph-set-row .btn + .btn { margin-left: 12px; }
 .ph-set-slider { display: block; margin-top: 14px; }
 .ph-set-slider-top {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -2144,7 +2153,7 @@ html.kb-open .phone-layer {
 .ph-set-hint { margin: 14px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-mute); }
 
 /* 「这条线」设置里的普通字段（音色 / live2D 模型） */
-.ph-set-field { display: block; margin-top: 14px; }
+.ph-set-field { display: block; margin-top: 16px; }
 .ph-set-field > span { display: block; font-size: 14px; color: var(--text-dim); margin-bottom: 6px; }
 .ph-set-field input, .ph-set-field select { width: 100%; }
 .phone-item-mid { flex: 1; min-width: 0; margin: 0 10px; }
@@ -2343,6 +2352,11 @@ body.no-image .ph-image img { display: none; }
   width: 100%; padding: 16px 18px calc(16px + env(safe-area-inset-bottom));
   background-color: var(--panel); border-top-left-radius: 18px; border-top-right-radius: 18px;
   border-top: 1px solid var(--border);
+  /* 「这条线」有十几个字段，内容一多卡片就顶出屏幕 —— 标题和关闭按钮全被推到可视区之外
+     （真机截图里整块内容从屏幕最上沿开始、上面还缺一截）。这里限住高度，
+     标题与底部按钮固定，中间那段自己滚。 */
+  display: flex; flex-direction: column;
+  max-height: calc(100% - 8px);
 }
 /* 手机页右上角的加号：无框（10-17 用户要求） */
 #phoneAddBtn { border: 0; background-color: transparent; }
@@ -2365,9 +2379,9 @@ body.no-image .ph-image img { display: none; }
 .ph-add-tx b { font-size: 14px; font-weight: 600; color: var(--text); }
 .ph-add-tx i { font-style: normal; font-size: 12px; color: var(--text-mute); margin-top: 2px; line-height: 1.35; }
 #phoneAddCancel { width: 100%; margin-top: 4px; }
-.phone-sheet-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 12px; }
-.phone-sheet-body { margin-bottom: 12px; }
-.phone-sheet-actions { display: flex; justify-content: flex-end; }
+.phone-sheet-title { flex: none; font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 12px; }
+.phone-sheet-body { flex: 0 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; margin-bottom: 12px; }
+.phone-sheet-actions { flex: none; display: flex; justify-content: flex-end; }
 .phone-sheet-actions > *:not(:last-child) { margin-right: 10px; }
 .ph-field { display: flex; flex-direction: column; margin-bottom: 12px; }
 .ph-field > span { font-size: 14px; color: var(--text-dim); margin-bottom: 6px; }
