@@ -418,7 +418,9 @@ body {
 /* 顶栏元素多（菜单 / 标题 / 模型 / 时间 / 角色 / 手机 / 日夜），间距收紧一点，
    否则 420px 宽的机器上标题会被挤成一个字 */
 .topbar > *:not(:last-child) { margin-right: 6px; }
-.topbar-title { flex: 1; font-weight: 600; font-size: 15px; overflow: hidden;
+/* 标题必须留出最小宽度：顶栏东西多（菜单/标题/模型/时间/角色/手机/日夜），
+   不给下限时 360dp 的机器上标题会被挤成一个「新…」。 */
+.topbar-title { flex: 1 1 auto; min-width: 3em; font-weight: 600; font-size: 15px; overflow: hidden;
   white-space: nowrap; text-overflow: ellipsis; }
 .pill {
   font-size: 11px; padding: 3px 9px; border-radius: 999px;
@@ -427,7 +429,10 @@ body {
 }
 
 /* 顶栏可点的「主模型」徽章 */
-.model-pill { display: inline-flex; align-items: center; flex: none; font: inherit; font-size: 11px; cursor: pointer; }
+.model-pill { display: inline-flex; align-items: center; flex: 0 1 auto; min-width: 0;
+  font: inherit; font-size: 11px; cursor: pointer; }
+/* 让模型名可被压缩：宽度不够时它先省略，而不是把标题挤没 */
+.model-pill #modelBadge { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-pill:active { border-color: var(--accent); color: var(--accent); }
 .model-pill .pill-caret { margin-left: 4px; display: inline-flex; align-items: center; }
 
@@ -2778,6 +2783,11 @@ body.no-image .ph-moment-img img { display: none; }
 .opening-btn .ic { width: 18px; height: 18px; margin-right: 8px; flex: none; }
 .opening-btn:active { transform: translateX(-50%) scale(.96); color: var(--accent); border-color: var(--accent); }
 .opening-btn[hidden] { display: none !important; }
+/* 主聊天的开场白按钮挂在输入栏上方：.composer 是 position:relative，
+   bottom:100% 就是「贴住输入栏顶边往上」。原来写 bottom:14px 是相对 #main 的，
+   正好落在输入栏内部、压在 chip 行上，把「深度思考 / 思考·高」挡掉了。
+   手机页那个 #phoneOpeningBtn 用的是 .phone-opening（top:42%），不受这条影响。 */
+.composer > .opening-btn { bottom: calc(100% + 8px); }
 /* ⚠️ 这里不要再写 #phoneChatView{position:relative}。
    id 选择器特异性高于 .phone-view，一写就把 absolute 的 top/bottom 撑满废掉，
    聊天视图退回「内容高度」—— 表现就是手机页只占上半屏、输入栏吊在中间、下面一大片空。
@@ -3181,3 +3191,11 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 .ph-set-field input::placeholder,
 .ph-set-field textarea::placeholder { color: var(--text-mute); }
 
+/* ── 窄屏顶栏让位（10-26）────────────────────────────────────
+   360dp 的机器上，标题+模型徽章+时间文字+三个图标挤不下：标题只剩一个字。
+   把时间文字收起来（对话设置里仍有完整时间），宽度让给标题。 */
+@media (max-width: 380px) {
+  .head-clock .hc-text { display: none; }
+  .topbar > *:not(:last-child) { margin-right: 4px; }
+  .topbar .icon-btn { width: 32px; }
+}
