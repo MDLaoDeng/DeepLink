@@ -432,9 +432,20 @@
     if (Object.keys(imgs).length && Store.restoreCharImages) Store.restoreCharImages(imgs);
     for (let k = 0; k < valid.length; k++) {
       const s = valid[k];
+      /* 导出的文件里只带密文：记忆、认知，以及「当前场景 / 当前关系 / 共同经历」都在 memEnc 里。
+         这里原来只解回前两项，三项被留成 undefined，紧跟的 saveSessions 就按空写回 ——
+         表现是「导入完之后那三栏全空了」，而且不给任何提示（与「从备份恢复」那条同一个坑，
+         那边当时补过、这条漏了）。 */
       if (s.memEnc && s.memory === undefined && s.cognition === undefined) {
         const txt = await Store.decryptMem(s.memEnc);
-        if (txt) { try { const p = JSON.parse(txt); s.memory = p.memory; s.cognition = p.cognition; } catch (e) { /* ignore */ } }
+        if (txt) {
+          try {
+            const p = JSON.parse(txt);
+            s.memory = p.memory;
+            s.cognition = p.cognition;
+            MEM_EXTRA_FIELDS.forEach((k2) => { if (p[k2] !== undefined) s[k2] = p[k2]; });
+          } catch (e) { /* ignore */ }
+        }
       }
     }
     const list = Store.getSessions();

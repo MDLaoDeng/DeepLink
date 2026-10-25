@@ -450,6 +450,55 @@
       ]);
     }
 
+    /* ── 自动取景 ────────────────────────────────────────────
+       有的模型画布开得极大、人物只占中间一小块（nico 是 1280×1380，人不到画布的六成），
+       按画布算矩阵就只能得到「人物小小一只、还偏在一边」。这里在首帧后整幅读一次像素，
+       按「非透明内容的包围盒」把模型放大到铺满。
+       box 存的是归一化包围盒（0~1，y 向上 —— 与 readPixels 的坐标系同向）。
+       只做一次；之后每帧仍从 buildMatrix 重算基础矩阵，再把这份 box 叠上去，
+       所以转屏 / 视频通话改画布尺寸都不会破坏它。 */
+    function applyFrameBox(m, box) {
+      if (!box) return m;
+      var bw = Math.max(0.02, box.w), bh = Math.max(0.02, box.h);
+      var k = Math.min(0.92 / bw, 0.92 / bh);
+      if (!isFinite(k) || k <= 0) return m;
+      if (k > 2.4) k = 2.4;                        /* 只剩几个像素时别放大到离谱 */
+      var cx = 2 * box.cx - 1, cy = 2 * box.cy - 1;
+      /* NDC 空间：x' = k*(x - cx)，直接改缩放与平移分量 */
+      m[0] *= k;
+      m[5] *= k;
+      m[12] = k * (m[12] - cx);
+      m[13] = k * (m[13] - cy);
+      return m;
+    }
+    /* 读一帧的包围盒；不需要调（已经铺满 / 只小一点点）就返回 null。
+       成本：整幅 readPixels（720×1520 ≈ 1.1M 像素，手机上几十毫秒），
+       只在首帧跑一次，且画布特别大时直接跳过 —— 宁可显示小一点，也别让人等。 */
+    function measureBox(gl, cw, ch) {
+      if (!cw || !ch || cw * ch > 1600 * 1600) return null;
+      var buf = new Uint8Array(cw * ch * 4);
+      try { gl.readPixels(0, 0, cw, ch, gl.RGBA, gl.UNSIGNED_BYTE, buf); }
+      catch (e) { return null; }
+      var x0 = cw, x1 = -1, y0 = ch, y1 = -1;
+      for (var y = 0; y < ch; y++) {
+        var row = y * cw * 4;
+        for (var x = 0; x < cw; x++) {
+          if (buf[row + x * 4 + 3] > 16) {
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+          }
+        }
+      }
+      if (x1 < x0 || y1 < y0) return null;         /* 全透明：这幅画面本身就是坏的，别动 */
+      var bw = (x1 - x0 + 1) / cw, bh = (y1 - y0 + 1) / ch;
+      if (bw > 0.96 && bh > 0.96) return null;     /* 本来就铺满（带背景层的模型会走到这里） */
+      var k = Math.min(0.92 / bw, 0.92 / bh);
+      if (!(k > 1.15)) return null;                /* 只放大「明显偏小」的，免得为了 10% 抖动 */
+      return { cx: (x0 + x1 + 1) / 2 / cw, cy: (y0 + y1 + 1) / 2 / ch, w: bw, h: bh };
+    }
+
     /* ── 环境探测（真机定位用）────────────────────────────
        打包后是 file://，而 fetch 在 file:// 下必然失败 —— 但「文件没进包」和
        「协议被拒」报的是同一句 Failed to fetch，光看提示分不出来。
@@ -641,7 +690,7 @@
         if (!W || !H) { W = canvas.width; H = canvas.height; }
         var matrix = buildMatrix(canvas.width, canvas.height, W, H);
 
-        cur = { gl: gl, model: model, tex: r.tex, matrix: matrix, W: W, H: H, dead: false, broken: false, samples: [], motions: null, mv: null, mt: 0, physics: null, pose: null };
+        cur = { gl: gl, model: model, tex: r.tex, matrix: matrix, W: W, H: H, dead: false, broken: false, samples: [], motions: null, mv: null, mt: 0, physics: null, pose: null, box: null, framed: false };
         cur.onBroken = onBrokenHook;
         /* 动作 / 物理都放后台加载：先把画面点亮再说，加载好再让它动、让头发飘 */
         loadMotions(base, r.json).then(function (sets) {
@@ -703,6 +752,8 @@
             if (typeof model.setMatrix === "function") {
               cur.matrix = buildMatrix(canvas.width, canvas.height,
                 cur.W || canvas.width, cur.H || canvas.height);
+              /* 自动取景：只对「画布大、人物小」的模型叠一层放大（见 measureBox） */
+              if (cur.box) applyFrameBox(cur.matrix, cur.box);
               model.setMatrix(cur.matrix);
             }
             /* 每帧显式设 viewport 并清屏：canvas 尺寸变了（视频通话会改）而 viewport 不会自动跟着变，
@@ -738,10 +789,10 @@
                    · 颜色不到 3 种（一片平涂）。原来是 8，会把「近乎单色的模型」误杀 ——
                      实测黑猫 hijiki、白猫 tororo 曾被当成渲染失败直接退静态头像。
                      现在颜色键带 alpha（透明与纯黑分开算），纯色填充只会有 1 种，3 是安全线。
-                   · 相邻像素平均差 > 60（碎片 / 色块拼贴 —— 就是真机截图那种）
+                   · 相邻像素平均差 > 40（碎片 / 色块拼贴 —— 就是真机截图那种）
                    实测：shizuku 34（五官细节密）、nico 7、z16 13；碎片画面是随机跳变，会到 60 以上。
-                   阈值从 40 提到 60，是因为采样块从 48×48 改成 32×32 后局部细节更密，
-                   34 距 40 只剩 6，留着会误杀。这条只是粗筛，真正兜底的是 ratio。 */
+                   阈值定在 40（不是 60）：34 距 40 只剩 6，已经是最紧的一条，再抬就兜不住了。
+                   这条只是粗筛，真正兜底的是 ratio。 */
                 if (worst.ratio < 0.03 || worst.colors < 3 || worst.edge > 40) {
                   /* 自己收尾：停循环 + 删纹理 + 摘 GL。以前只置 dead 就等调用方 detach，
                      别处接 onBroken 忘了 detach 就是每通电话泄漏 6 张 1024² 纹理。 */
@@ -752,6 +803,14 @@
                     if (typeof hook === "function") hook(info);
                   } catch (e3) { /* ignore */ }
                   return;
+                }
+                /* 三帧都判正常 → 顺手做一次自动取景。
+                   放在这里而不是 attach 之后立刻做：要等姿势文件的部件透明度落到终态，
+                   否则量到的包围盒可能包含还没隐藏的那套手臂。 */
+                if (!cur.framed) {
+                  cur.framed = true;
+                  try { cur.box = measureBox(gl, canvas.width, canvas.height); }
+                  catch (e6) { cur.box = null; }
                 }
               }
             }
@@ -886,6 +945,14 @@
         out.push("采样 " + (cur.broken ? "判定坏" : "正常") +
           (sw ? ("（非透明 " + (sw.ratio * 100).toFixed(0) + "% · 颜色 " + sw.colors +
                  " · 边缘 " + sw.edge.toFixed(1) + "）") : "（还没采到）"));
+      } catch (e) { /* ignore */ }
+      try {
+        /* 自动取景：模型画布大、人物只占中间一块时，按包围盒放大过一次 */
+        var bx = cur.box;
+        out.push("取景 " + (bx
+          ? ("放大 " + Math.min(0.92 / Math.max(0.02, bx.w), 0.92 / Math.max(0.02, bx.h)).toFixed(2) +
+             "×（内容占 " + (bx.w * 100).toFixed(0) + "% × " + (bx.h * 100).toFixed(0) + "%）")
+          : (cur.framed ? "原样（本来就满幅）" : "待测")));
       } catch (e) { /* ignore */ }
       try {
         var ph = cur.physics;

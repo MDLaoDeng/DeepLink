@@ -749,6 +749,7 @@
   let charsUnlocked = false;
   let charsSeq = 0;
   let charsPending = Promise.resolve();
+  let charsWriteFail = 0;     /* 加密失败导致没落盘的次数（诊断用，见 charsKeyInfo） */
 
   async function encryptChars(text) {
     if (!cryptoOk()) return "";
@@ -801,8 +802,13 @@
     charsPlain = [];
   }
 
-  /* 写盘：内容没变就补写一次现有密文；变了就先原样写明文兜底、再异步换密文 ——
-     所以任何时刻磁盘上都有能用的数据（明文或密文），不会出现「密文空 → 角色全丢」。 */
+  /* 写盘：内容没变就补写一次现有密文；变了就【先加密、成功才落盘】。
+     ⚠️ 这里原来是「先原样写明文兜底，再异步换密文」—— 好处是任何时刻磁盘上都有能用的数据，
+     代价是每次改角色卡都有一段明文落盘，而 .bak 还会把这份明文再备份一份。
+     用户的威胁模型是「捡到手机的人翻存储」，那这个窗口就是实打实的漏洞，所以改成方案 A：
+     加密失败就这次不写（内存里的改动还在，下次保存会再试），宁可不落盘也不落明文。
+     没有 WebCrypto 的机器只能写明文 —— 那种机器本来就没有加密能力（界面已提示是弱保护），
+     不写等于角色卡永远存不进去。 */
   function queueCharsEncrypt() {
     if (charsPlain === null) return;
     const text = JSON.stringify(charsPlain);
@@ -810,13 +816,23 @@
       try { writeRaw(K_CHARS, JSON.stringify({ v: 1, enc: charsCipher })); } catch (e) { /* ignore */ }
       return;
     }
-    try { writeRaw(K_CHARS, JSON.stringify(charsPlain)); } catch (e) { /* ignore */ }
-    if (!cryptoOk()) return;
+    if (!cryptoOk()) {
+      try { writeRaw(K_CHARS, JSON.stringify(charsPlain)); } catch (e) { /* ignore */ }
+      return;
+    }
     const seq = ++charsSeq;
     charsPending = (async () => {
       let c = "";
       try { c = await encryptChars(text); } catch (e) { c = ""; }
-      if (seq !== charsSeq || !c) return;
+      if (seq !== charsSeq) return;         /* 又被改了：这次的结果已过时，交给后面那次 */
+      if (!c) {
+        /* 加密失败：整个不写。内存里的改动还在，下一次保存会重试；
+           磁盘上保留上一版密文，不会出现「明文 + 密文混着」的中间态。 */
+        charsWriteFail++;
+        console.warn("[DeepLink] 角色卡加密失败，本次未落盘（磁盘保留上一版）");
+        try { if (window.UI && window.UI.toast) window.UI.toast("角色卡没保存：加密失败，请重试", true); } catch (e) { /* ignore */ }
+        return;
+      }
       charsCipher = c;
       charsEncText = text;
       try { writeRaw(K_CHARS, JSON.stringify({ v: 1, enc: c })); } catch (e) { /* ignore */ }
@@ -1359,7 +1375,7 @@
       return true;
     },
     /* 诊断用：角色卡加密状态 */
-    charsKeyInfo() { return { enc: !!charsCipher, broken: charsBroken, count: (charsPlain || []).length }; },
+    charsKeyInfo() { return { enc: !!charsCipher, broken: charsBroken, count: (charsPlain || []).length, fail: charsWriteFail }; },
     /* 等最近一次角色卡加密落盘（供导出前/自检 await） */
     charsReady() { return charsPending; },
 
