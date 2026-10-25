@@ -234,13 +234,9 @@
       groups.forEach(function (g) {
         var su = g.setup || {};
         var len = Number(su.length) || 0;
-        /* 【10-25 修复】setup.length 有两种写法：
-           · 模型单位（官方样本是几十的量级，如 30）—— PhysicsHair 认这个
-           · 归一化单位（shizuku 是 length 0.17 / mass 0.1）—— 说明还要乘画布尺寸
-           把 0.17 直接喂进去，等于弹簧长度不到一个单位、质量 0.1，物理积分直接发散：
-           头发被甩成一丝丝的、脸被撕开，看着就是「色块碎片」。本机用同一套参数复现过
-           （关掉物理立刻正常），所以这里宁可不动，也不发散。 */
-        if (len > 0 && len < 1) { skipped++; return; }
+        /* setup 的三个值按原样喂（对照 pixi-live2d-display 的 Live2DPhysics：它也是原值直传，
+           不做任何单位换算）。曾有一版把 length<1 当成「归一化」直接跳过 —— 那是误判：
+           当时画面上的「头发被甩散」其实是贴图没翻转造成的采样错位。 */
         var hair = new P();
         try { hair.setup(len, Number(su.regist) || 0, Number(su.mass) || 0); }
         catch (e) { return; }
@@ -261,8 +257,12 @@
       return {
         list: hairs,
         skipped: skipped,
-        update: function (model) {
-          for (var i = 0; i < hairs.length; i++) { try { hairs[i].update(model); } catch (e) { /* 单条挂了不影响别的 */ } }
+        update: function (model, elapsed) {
+          /* elapsed 传秒：参考实现（pixi）也是 physicsHair.update(model, elapsed)，
+             不传的话弹簧拿不到步长，摆动会不自然。 */
+          for (var i = 0; i < hairs.length; i++) {
+            try { hairs[i].update(model, elapsed); } catch (e) { /* 单条挂了不影响别的 */ }
+          }
         }
       };
     }
@@ -282,7 +282,14 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
+      /* 【2026-10-25 关键修复】Cubism 2 的 UV 原点在左下，而 <img>/canvas 上传时原点在左上。
+         不翻转就会整张图上下颠倒地采样：头发采到皮肤、瞳孔采到空白，
+         表现是「每块网格都错位、细的地方碎成丝」——被误判成「渲染碎片 / 驱动问题」很久。
+         只加这一行，同一份模型立刻和官方示例图一致。
+         顺序要紧：两个 pixelStorei 都必须在 texImage2D 之前，且每次上传都要设（状态是全局的）。 */
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);   /* 还原，别影响后续别的贴图上传 */
       return t;
     }
 
@@ -528,7 +535,7 @@
             trySet(model, "PARAM_EYE_R_OPEN", eye);
             /* 物理放在最后：它读上面设好的角度参数（PARAM_ANGLE_*）、写头发参数，
                所以必须在这些参数设完之后、model.update() 之前跑。 */
-            if (cur.physics) cur.physics.update(model);
+            if (cur.physics) cur.physics.update(model, dt);
             /* 矩阵必须按「当前画布尺寸」重算：视频通话会改 canvas 大小，
                而 viewport 是每帧设的、矩阵却只在加载时算过一次 —— 两者不一致，
                表现就是画面被拉伸（不是裁剪，是长宽比错了）。 */

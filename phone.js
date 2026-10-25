@@ -2920,8 +2920,18 @@
     /* 量不到（层还没显示 / display:none）就退到稳妥值，别给出 1×1 的画布 */
     if (!w || w < 20) w = 320;
     if (!h || h < 20) h = 480;
-    if (cv.width !== w) cv.width = w;
-    if (cv.height !== h) cv.height = h;
+    /* 【2026-10-25 修复】画布的 backing store 要吃 DPR。
+       以前直接 cv.width = 量到的 CSS 像素：DPR 2 的机器上，1280×1380 的模型被画进
+       240×320 的缓冲，再由合成器拉大 2 倍 —— 头发丝、瞳孔、睫毛这类一两像素宽的东西
+       直接被抹掉，看起来像「糊成一团 / 碎渣」。CSS 那边仍是 100%×100%，所以显示尺寸不变。
+       DPR 封顶 2：3x 屏上按 3 倍画，像素数是 9 倍，安卓 WebView 顶不住。
+       矩阵自己会读 canvas.width/height，所以这里改了它自动跟着变，不用另算。 */
+    var dpr = 1;
+    try { dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1)); } catch (e) { dpr = 1; }
+    var bw = Math.max(1, Math.round(w * dpr));
+    var bh = Math.max(1, Math.round(h * dpr));
+    if (cv.width !== bw) cv.width = bw;
+    if (cv.height !== bh) cv.height = bh;
   }
   /* 画布在 attach 之后尺寸若变了，矩阵会失配 —— 所以 attach 前必须量准；
      挂断 / 关视频时把画布收回到兜底尺寸，避免残留上一通的大画布。 */
