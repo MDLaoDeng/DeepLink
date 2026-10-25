@@ -991,8 +991,12 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 .drop-hint.show { display: flex; animation: fade-slide .25s both; }
 
 /* ── 弹窗 ─────────────────────────────────────────── */
+/* z-index 80 —— 必须高于手机层（.phone-layer = 70），否则在手机页里打开的相册 / 选图弹层
+   会被手机页整个盖住（2026-10-25 真机反馈：选表情的相册、这条线的选择框都看不见）。
+   上限也要守住：设置页 88 / 子页 90 / 抽屉 95 / 相机 120 / 二级浮层 400 / 提示条 460 都比它高，
+   改这个数之前先把这串层级看一遍，别一抬就把设置页顶到弹窗下面去。 */
 .modal {
-  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 60; display: flex; align-items: flex-end;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 80; display: flex; align-items: flex-end;
   background-color: var(--scrim);
   opacity: 0; pointer-events: none; transition: opacity .3s ease;
 }
@@ -3144,3 +3148,36 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   position: absolute; right: 4px; top: 4px; width: 20px; height: 20px; border-radius: 50%;
   background-color: var(--accent); color: #fff; font-size: 13px; line-height: 20px; text-align: center;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   2026-10-25 手机页修补（DSH）
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* 1) 弹层要压在手机页之上（.phone-layer = 70）。
+   WB 2026-10-25：这条已并回原规则（`.modal` 的 z-index 直接改成 80），
+   这里不再重复写一遍 —— 同一属性两处定义，将来改原规则会被这里的旧值反压回去。 */
+
+/* 2) 右上角加号：像微信那样从底部升起，而不是「啪」地出现。
+   .phone-sheet 只切 hidden，没有过渡；这里补一层遮罩淡入 + 卡片上滑。 */
+.phone-sheet:not([hidden]) { animation: ph-sheet-fade .2s ease both; }
+.phone-sheet:not([hidden]) .phone-sheet-card {
+  animation: ph-sheet-up .24s cubic-bezier(.22, .8, .24, 1) both;
+}
+@keyframes ph-sheet-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ph-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+
+/* 3) 手机设置 / 这条线里的输入框：跟别处表单一致，不再露出原生控件。
+   原来只有 .ph-set-field input { width:100% }，没有底色和边框，所以在真机上就是浏览器默认样式。 */
+.ph-set-field input,
+.ph-set-field select,
+.ph-set-field textarea {
+  width: 100%; padding: 10px 12px; border-radius: 12px; font: inherit;
+  color: var(--text); background-color: var(--panel-2); border: 1px solid var(--border);
+  -webkit-appearance: none; appearance: none;
+}
+.ph-set-field input:focus,
+.ph-set-field select:focus,
+.ph-set-field textarea:focus { border-color: var(--accent); }
+.ph-set-field input::placeholder,
+.ph-set-field textarea::placeholder { color: var(--text-mute); }
+
