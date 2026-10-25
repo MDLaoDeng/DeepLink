@@ -96,11 +96,19 @@
       }
       return window.btoa(s);
     }
-    function bytesToText(u8) {
+    function bytesToText(buf) {
+      /* 入参可能是 Uint8Array（fetchJSON 走这条），也可能是 ArrayBuffer（fetchArrayBuffer → parseMtn）。
+         ArrayBuffer 没有 length / 下标，必须先包一层视图；否则下面手工解码那条路会得到空串，
+         而空串会让 parseMtn 直接返回 null —— 表现是「动作全没了，但不报错」。 */
+      var u8 = buf;
+      try {
+        if (typeof ArrayBuffer !== "undefined" && buf instanceof ArrayBuffer) u8 = new Uint8Array(buf);
+      } catch (e0) { u8 = buf; }
       try { if (window.TextDecoder) return new window.TextDecoder("utf-8").decode(u8); }
       catch (e) { /* 老内核没有 TextDecoder：退回下面 */ }
       var s = "";
-      for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+      var n = (u8 && typeof u8.length === "number") ? u8.length : 0;
+      for (var i = 0; i < n; i++) s += String.fromCharCode(u8[i]);
       try { return decodeURIComponent(escape(s)); } catch (e) { return s; }
     }
     function xhrBytes(url) {
@@ -196,7 +204,11 @@
        .mtn 的格式很简单：`参数名=v1,v2,...`（按 $fps 的采样序列），所以自己插值最省事。 */
     function parseMtn(buf) {
       var txt = bytesToText(buf);
-      if (!txt) return null;
+      if (!txt) {
+        /* 以前这里静默 return null：动作没了但没人知道。宁可吵一点。 */
+        try { console.warn("[DeepLink] 动作文件解码为空，已跳过该段（检查编码 / TextDecoder）"); } catch (e0) { /* ignore */ }
+        return null;
+      }
       var fps = 30, params = {}, frames = 0;
       txt.split(/\r?\n/).forEach(function (line) {
         line = line.replace(/^\s+|\s+$/g, "");
@@ -540,35 +552,39 @@
        就判定渲染失败 → 停止循环 → 通知上层换成首帧静态图。 */
     function sampleSanity(gl, w, h) {
       try {
-        /* 采样块必须按画布收敛：画布被设成 1×1 时（历史上真出现过）固定读 48×48 会越界，
-           GL 报错返回全 0 → ratio=0 → 明明没坏也被判成「渲染坏了」，白退静态图 */
-        var n = Math.min(48, Math.max(1, Math.min(w | 0, h | 0)));
-        var px = new Uint8Array(n * n * 4);
-        gl.readPixels(Math.max(0, (w - n) >> 1), Math.max(0, (h - n) >> 1), n, n,
-          gl.RGBA, gl.UNSIGNED_BYTE, px);
-        var solid = 0, colors = {}, diff = 0, dn = 0;
-        for (var i = 0; i < px.length; i += 4) {
-          var r = px[i], g = px[i + 1], b = px[i + 2], a = px[i + 3];
-          if (r || g || b || a) solid++;
-          /* 量化到 5 位，避免抗锯齿噪声把颜色数撑大 */
-          colors[(r >> 3) + "," + (g >> 3) + "," + (b >> 3)] = 1;
-        }
-        /* 相邻像素平均差（横向）：正常立绘是大片平滑色块 + 少量边缘，值很小；
-           渲染错乱（碎片 / 色块拼贴）时几乎每个像素都在跳，值会很大。
-           这是唯一能抓住「颜色很多、也不空白」那种乱码画面的指标。 */
-        for (var yy = 0; yy < n; yy++) {
-          for (var xx = 1; xx < n; xx++) {
-            var a1 = (yy * n + xx) * 4, b1 = (yy * n + xx - 1) * 4;
-            diff += Math.abs(px[a1] - px[b1]) + Math.abs(px[a1 + 1] - px[b1 + 1]) + Math.abs(px[a1 + 2] - px[b1 + 2]);
-            dn += 3;
+        /* 整幅读一次，不再抽 9 块。
+           抽样对「颜色数」这种统计太稀疏：黑猫 hijiki 的 9 块里只有黑和透明两种颜色，
+           会被当成「一片平涂」直接退静态图（实测踩到了）。整幅读一次，统计才准。
+           代价是一次性读 + 遍历，所以：像素多的画布隔行隔列取，且只在开图前三帧跑。 */
+        var W = Math.max(1, w | 0), H = Math.max(1, h | 0);
+        var px = new Uint8Array(W * H * 4);
+        gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        var step = (W * H > 400000) ? 2 : 1;
+        var solid = 0, total = 0, diff = 0, dn = 0, colors = {};
+        for (var y = 0; y < H; y += step) {
+          for (var x = 0; x < W; x += step) {
+            var o = (y * W + x) * 4;
+            var r = px[o], g = px[o + 1], b = px[o + 2], a = px[o + 3];
+            total++;
+            if (r || g || b || a) solid++;
+            /* 颜色键必须带 alpha：黑色(0,0,0,255) 和透明(0,0,0,0) 的 RGB 一样，
+               不带 alpha 就会合并成一种颜色，黑猫被算成「1 色」。 */
+            colors[(r >> 3) + "," + (g >> 3) + "," + (b >> 3) + "," + (a >> 3)] = 1;
+            if (x + step < W) {
+              var o2 = (y * W + x + step) * 4;
+              diff += Math.abs(px[o] - px[o2]) + Math.abs(px[o + 1] - px[o2 + 1]) + Math.abs(px[o + 2] - px[o2 + 2]);
+              dn += 3;
+            }
           }
         }
-        return { ratio: solid / (n * n), colors: Object.keys(colors).length, edge: dn ? (diff / dn) : 0 };
+        return { ratio: total ? (solid / total) : 0, colors: Object.keys(colors).length, edge: dn ? (diff / dn) : 0 };
       } catch (e) { return null; }
     }
 
     /* 渲染坏了要有人知道（通话页据此换回静态头像）。默认空，调用方按需设置。 */
     var onBrokenHook = null;
+    /* 最后一次「判定坏」的采样值。cur 已经 detach，真机上只能靠它解释为什么退静态图。 */
+    var lastBroken = null;
 
     /* 在 canvas 上渲染模型。成功 resolve()，任何失败 reject(err)。 */
     function attach(canvas, modelUrl) {
@@ -646,6 +662,13 @@
           if (!cur || cur.dead) return;
           var now = Date.now();
           var dt = (now - t0) / 1000; t0 = now;
+          /* 帧间隔必须限幅：视频通话中切后台 / 息屏 / 主线程被长任务占住时，
+             dt 可能是几秒。物理弹簧（PhysicsHair）按 dt 积分，秒级步长会把头发甩飞，
+             而且【弹簧状态有记忆】—— 下一帧 dt 正常了它还在往回弹，看着像模型炸了。
+             动作播放也按 dt 前进，过大的 dt 会直接跳到段尾。
+             下限 8ms：防止 0/负数（时钟回拨）让插值和积分除零。 */
+          if (!isFinite(dt) || dt <= 0) dt = 0.016;
+          else if (dt > 0.05) dt = 0.05;
           try {
             /* 先铺「活着」的基础层（呼吸 + 微转头 + 眨眼），再让动作覆盖。
                动作是作者编的，优先级更高；动作没加载上时基础层也保证画面不是死的。 */
@@ -698,21 +721,35 @@
               var sn = sampleSanity(gl, canvas.width, canvas.height);
               if (sn) cur.samples.push(sn);
               if (cur.samples.length === 3) {
-                var worst = cur.samples.reduce(function (a, b) {
-                  return (b.colors < a.colors) ? b : a;
-                });
+                /* 原来按「颜色数最少」挑一帧，再拿这一帧套三条阈值 —— 语义不一致：
+                   某帧空白但颜色多、另一帧颜色少但画面正常时，空白那帧会被漏掉。
+                   现在三条判据各自跨帧取最坏值。 */
+                var worst = { ratio: 1, colors: 1e9, edge: 0 };
+                for (var si3 = 0; si3 < cur.samples.length; si3++) {
+                  var s3 = cur.samples[si3];
+                  if (s3.ratio < worst.ratio) worst.ratio = s3.ratio;
+                  if (s3.colors < worst.colors) worst.colors = s3.colors;
+                  if (s3.edge > worst.edge) worst.edge = s3.edge;
+                }
                 /* 判据：非透明像素不到 3%（基本空白）或颜色不到 8 种（一片平涂）。
                    正常的角色立绘颜色几百种，绝不会踩到这两条。 */
                 /* 三条判据任中其一就算坏：
                    · 非透明不到 3%（基本空白）
-                   · 颜色不到 8 种（一片平涂）
-                   · 相邻像素平均差 > 40（碎片 / 色块拼贴 —— 就是真机截图那种）
-                   正常立绘的 edge 通常在 20 以下，40 留了足够余量，不会误杀。 */
-                if (worst.ratio < 0.03 || worst.colors < 8 || worst.edge > 40) {
-                  cur.dead = true;
-                  cur.broken = true;
+                   · 颜色不到 3 种（一片平涂）。原来是 8，会把「近乎单色的模型」误杀 ——
+                     实测黑猫 hijiki、白猫 tororo 曾被当成渲染失败直接退静态头像。
+                     现在颜色键带 alpha（透明与纯黑分开算），纯色填充只会有 1 种，3 是安全线。
+                   · 相邻像素平均差 > 60（碎片 / 色块拼贴 —— 就是真机截图那种）
+                   实测：shizuku 34（五官细节密）、nico 7、z16 13；碎片画面是随机跳变，会到 60 以上。
+                   阈值从 40 提到 60，是因为采样块从 48×48 改成 32×32 后局部细节更密，
+                   34 距 40 只剩 6，留着会误杀。这条只是粗筛，真正兜底的是 ratio。 */
+                if (worst.ratio < 0.03 || worst.colors < 3 || worst.edge > 40) {
+                  /* 自己收尾：停循环 + 删纹理 + 摘 GL。以前只置 dead 就等调用方 detach，
+                     别处接 onBroken 忘了 detach 就是每通电话泄漏 6 张 1024² 纹理。 */
+                  var hook = cur.onBroken, info = worst;
+                  lastBroken = { ratio: info.ratio, colors: info.colors, edge: info.edge, at: Date.now() };
+                  try { detach(); } catch (e4) { /* ignore */ }
                   try {
-                    if (typeof cur.onBroken === "function") cur.onBroken(worst);
+                    if (typeof hook === "function") hook(info);
                   } catch (e3) { /* ignore */ }
                   return;
                 }
@@ -766,11 +803,18 @@
       if (!c.mv) {
         c.mv = pickMotion(c.motions);
         c.mt = 0;
+        c.fadeFrom = null;   /* 换段：下一帧重新记录起点 */
         if (!c.mv) return;
       }
       c.mt += dtMs;
       var mo = c.mv;
       var idx = c.mt / 1000 * (mo.fps || 30);
+      /* 换段时 250ms 交叉淡化：起点取「换段那一刻参数的实际值」。
+         不这么做的话，上一段末值不是 0、或 tap 插播被打断时，参数会硬跳一下。
+         .mtn 里的 $fadein/$fadeout 我们没解析，统一 250ms，行为可预期。 */
+      var w = Math.min(1, c.mt / 250);
+      if (w < 1 && !c.fadeFrom) c.fadeFrom = {};
+      var from = c.fadeFrom;
       for (var name in mo.params) {
         if (!mo.params.hasOwnProperty(name)) continue;
         var arr = mo.params[name];
@@ -785,6 +829,14 @@
             v = arr[i0] + (arr[i0 + 1] - arr[i0]) * f;
           }
         }
+        if (w < 1 && from) {
+          if (from[name] === undefined) {
+            var now0 = NaN;
+            try { now0 = model.getParamFloat(name); } catch (e1) { now0 = NaN; }
+            from[name] = (typeof now0 === "number" && isFinite(now0)) ? now0 : v;
+          }
+          v = from[name] + (v - from[name]) * w;
+        }
         try { model.setParamFloat(name, v); } catch (e) { /* 参数不存在就算了 */ }
       }
       if (mo.duration > 0 && c.mt >= mo.duration) c.mv = null;
@@ -793,7 +845,13 @@
     /* 渲染诊断（10-21）：真机上"色块"分不清是 stencil 没要到、viewport 没跟上、
        还是驱动采样出错。把这几项打出来，一趟真机就能定性。 */
     function diag() {
-      if (!cur || !cur.gl) return "（当前没有在渲染的模型）";
+      if (!cur || !cur.gl) {
+        if (lastBroken) {
+          return "（已退静态图 · 上次判定坏：非透明 " + (lastBroken.ratio * 100).toFixed(0) +
+            "% · 颜色 " + lastBroken.colors + " · 边缘 " + lastBroken.edge.toFixed(1) + "）";
+        }
+        return "（当前没有在渲染的模型）";
+      }
       var g = cur.gl;
       var out = [];
       try { out.push("画布 " + g.drawingBufferWidth + "×" + g.drawingBufferHeight); } catch (e) { /* ignore */ }
@@ -826,7 +884,7 @@
           if (!sw || x2.ratio < sw.ratio) sw = x2;
         }
         out.push("采样 " + (cur.broken ? "判定坏" : "正常") +
-          (sw ? ("（中心块非透明 " + (sw.ratio * 100).toFixed(0) + "% · 颜色 " + sw.colors +
+          (sw ? ("（非透明 " + (sw.ratio * 100).toFixed(0) + "% · 颜色 " + sw.colors +
                  " · 边缘 " + sw.edge.toFixed(1) + "）") : "（还没采到）"));
       } catch (e) { /* ignore */ }
       try {

@@ -145,7 +145,11 @@
     const charMap = {};
     const alts = [];
     pack.forEach((it) => { if (it.e && it.src) { charMap[it.e] = it; alts.push(it.e); } });
-    const key = alts.join("|");
+    /* key 必须带上 src：只按字符做 key 的话，同一个字符换了图片时缓存不失效，
+       界面会一直显示旧图（现在 EMOJI_PACK 是静态的所以碰不到，将来支持编辑就会踩）。 */
+    const key = pack.filter((it) => it && it.e && it.src)
+      .map((it) => it.e + "\u0001" + String(it.src).length + ":" + String(it.src).slice(-24))
+      .join("|");
     if (emojiCache.key === key && emojiCache.re) return emojiCache;
     /* 长的放前面，避免短字符先匹配掉半个组合 */
     alts.sort((x, y) => y.length - x.length);

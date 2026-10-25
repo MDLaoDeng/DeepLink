@@ -2885,6 +2885,8 @@
     var L2 = window.DL && window.DL.live2d;
     if (!L2 || !L2.attach || !state.settings.live2dEnabled || !L2.capable()) return;
     sizeCallCanvas(canvas);
+    /* 打开时再量一次：这一步之后画布会从 hidden 变可见，尺寸可能才最终落定 */
+    setTimeout(syncCallCanvasSize, 60);
     /* 这条线在「这条线」设置里单独选过模型就用它的，否则跟全局 */
     var lineModel = String((sessionById(ps.sid) || {}).live2dModel || "") || state.settings.live2dModel;
     /* 渲染坏了（色块 / 碎片）就退回静态头像，并说清原因 ——：
@@ -2933,6 +2935,20 @@
     if (cv.width !== bw) cv.width = bw;
     if (cv.height !== bh) cv.height = bh;
   }
+  /* 通话画布尺寸同步：转屏 / 窗口 resize / 手机模块展开收起都会改 CSS 尺寸，
+     而 backing store 只在 attach 时量过一次 —— 不跟就会「画面被拉伸或变糊」
+     （矩阵是每帧按 canvas.width/height 重算的，所以问题不在矩阵，在这份缓冲没更新）。
+     常驻一个监听，内部先判「是否在视频通话中」，不在直接返回，零成本。 */
+  function syncCallCanvasSize() {
+    if (!callState || !callState.video) return;
+    sizeCallCanvas($("#phoneCallCanvas"));
+  }
+  try {
+    /* 延迟 60ms 再量：转屏 / 收放动画过程中量到的是中间态尺寸（这个坑在别处踩过） */
+    window.addEventListener("resize", function () { setTimeout(syncCallCanvasSize, 60); });
+    window.addEventListener("orientationchange", function () { setTimeout(syncCallCanvasSize, 60); });
+  } catch (e) { /* ignore */ }
+
   /* 画布在 attach 之后尺寸若变了，矩阵会失配 —— 所以 attach 前必须量准；
      挂断 / 关视频时把画布收回到兜底尺寸，避免残留上一通的大画布。 */
   function resetCallCanvas() {
