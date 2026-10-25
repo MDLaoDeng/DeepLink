@@ -865,7 +865,7 @@
     bubble.appendChild(content);
 
     /* 状态量化：折叠框放在气泡下方（默认收起，点开是各项数值条） */
-    if (msg.status && typeof msg.status === "object") bubble.appendChild(statusEl(msg.status));
+    if (msg.status && typeof msg.status === "object") bubble.appendChild(statusEl(msg.status, msg.statusCarry));
 
     /* 只出了思考、正文是空的：常见于「思考把长度上限吃满」或「模型把话都写在思考里」。
        以前这种气泡既没有提示、也点不出操作栏（操作栏挂了 msg.content 的条件），
@@ -916,13 +916,15 @@
   }
 
   /* 状态量化：气泡下方的一条可折叠状态（开心 72 · 害羞 40 …） */
-  function statusEl(st) {
+  function statusEl(st, carry) {
     const names = Object.keys(st || {});
     const det = document.createElement("details");
     det.className = "msg-status";
     const head = names.slice(0, 3).map((k) => escapeHtml(k) + " " + st[k]).join(" · ");
+    /* carry：这条回复没写状态行，数值是从上一条沿用来的 —— 必须标出来，别让人当成新数据 */
     det.innerHTML = '<summary><span class="st-ic">' + iconSvg("chart-box-outline") +
-      '</span><span class="st-label">状态' + (head ? " · " + head : "") +
+      '</span><span class="st-label">状态' + (carry ? '<span class="st-carry">延续上一条</span>' : "") +
+      (head ? " · " + head : "") +
       '</span><span class="caret">' + iconSvg("chevron-right") + "</span></summary>";
     const body = document.createElement("div");
     body.className = "st-body";
@@ -1540,6 +1542,7 @@
     toast, openModal, closeModal, confirmDialog, confirmDanger, askDialog,
     pickBind, pickRefreshAll,
     applyTheme, buildModeSwitch, buildThemeGrid, sessionListEl,
-    isNearBottom, scrollToBottom, copyText
+    isNearBottom, scrollToBottom, copyText,
+    statusEl   /* 回归测试要用：验证「延续上一条」标记 */
   };
 })();

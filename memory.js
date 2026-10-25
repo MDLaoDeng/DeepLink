@@ -873,23 +873,24 @@
   async function updateRelationShared(rec, save, settings, base, newText) {
     if (!settings.apiKey) return { usage: null, changed: false, relation: false, shared: false };
     const b = base || {};
-    const input = "初始设定：\n关系：" + (b.relation || "（无）") + "\n经历：" + (b.shared || "（无）") +
-      "\n\n现有内容：\n关系：" + (rec.relation || "（无）") + "\n经历：" + (rec.shared || "（无）") +
-      "\n\n新增记忆：\n" + ((newText || "").trim() || "（无）");
+    /* 【10-26 语义收紧】共同经历 =「这段对话开始之前」已有的经历，来自初始设定，不随聊天变化；
+       对话开始之后发生的事属于记忆。所以这里只更新 relation，也不再往输入里塞 shared ——
+       以前把记忆+原文都喂进去、让它顺手改写 shared，结果这一项和记忆摘要高度重合。 */
+    const input = "初始关系：\n" + (b.relation || "（无）") +
+      "\n\n当前关系：\n" + (rec.relation || "（无）") +
+      "\n\n近期内容（只用来判断关系走到哪一步）：\n" + ((newText || "").trim() || "（无）");
     let usage = null;
     let gotRel = false;
-    let gotShared = false;
-    for (let attempt = 0; attempt < 2 && !(gotRel && gotShared); attempt++) {
+    for (let attempt = 0; attempt < 2 && !gotRel; attempt++) {
       const ask = attempt === 0 ? input
-        : input + "\n\n（注意：上一次只返回了部分字段。请重新输出，务必同时给出 relation 与 shared，两项都要有内容。）";
-      const out = await summarize(settings, CONFIG.COMPRESS_PROMPTS.relationShare, ask, 700);
+        : input + "\n\n（注意：上一次没有给出可用的 relation。请重新输出，只输出 {\"relation\":\"…\"}，relation 必须有内容。）";
+      const out = await summarize(settings, CONFIG.COMPRESS_PROMPTS.relationShare, ask, 400);
       usage = Api.sumUsage(usage, out.usage);
       const got = relationFromText(out.text);
-      if (!gotRel && got.relation) { rec.relation = got.relation; gotRel = true; }
-      if (!gotShared && got.shared) { rec.shared = got.shared; gotShared = true; }
+      if (got.relation) { rec.relation = got.relation; gotRel = true; }
     }
-    if ((gotRel || gotShared) && save) save();
-    return { usage: usage, changed: gotRel || gotShared, relation: gotRel, shared: gotShared };
+    if (gotRel && save) save();
+    return { usage: usage, changed: gotRel, relation: gotRel, shared: false };
   }
 
   /* 用近期原文更新「当前场景」（会话级动态值）。sinceTs = 上次更新覆盖到的时间点 */

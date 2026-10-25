@@ -887,7 +887,7 @@
       if (!line) { skipped.push(m.name); return; }
       const parts = [];
       if (groupMem) parts.push("群聊里发生的事：" + groupMem);
-      if (gShared) parts.push("大家共同经历的：" + gShared);
+      if (gShared) parts.push("大家在**这段对话开始之前**就共同经历过的（对话之后的事看记忆）：" + gShared);
       if (gScene) parts.push("群聊的当前情境：" + gScene);
       if (gRecent) parts.push("群里最近聊到的：\n" + gRecent);
       /* 这个角色对其它成员的看法：逐条写主语，绝不打散融成一段 */
@@ -997,7 +997,7 @@
         const nm = (hit && hit.name) || (rec.fromTitle || (k === "__assistant__" ? aiName() : "角色"));
         const parts = [];
         if (rec.relation) parts.push("和用户的关系：" + rec.relation);
-        if (rec.shared) parts.push("共同经历：" + rec.shared);
+        if (rec.shared) parts.push("对话开始前的共同经历：" + rec.shared);
         if (rec.scene) parts.push("最近的情境：" + rec.scene);
         if (rec.cognition) parts.push("对用户的认知：" + rec.cognition);
         /* 导入时还存了那条线自己的「日/周/月记忆摘要」（memberMem[k].memory）。
@@ -1133,10 +1133,10 @@
     /* 状态量化：让模型在末尾附一行状态，本地解析出来后收进折叠框（不显示在正文里）。
        开关关掉时一个字都不加 —— 不花多余 token。 */
     if (ch && statusOn(s)) {
-      systemText += "\n\n【状态】在本次回复的最后单独一行输出你的状态，格式：" +
-        "〖状态 开心:72 低落:12 生气:5 害羞:40 兴奋:60〗（每项是 0~100 的整数，按此刻真实情况给，" +
-        "可增删项）。这一行会被单独解析出来、以状态条展示，请务必不要写进正文里。" +
-        "括号就用这对方头括号〖〗，别换成【】或 []；键和值之间用英文冒号，各项之间用空格。";
+      systemText += "\n\n【状态】**每一条回复都必须**在最后单独一行输出你的状态，一条都不能少（哪怕情绪没变，也要照写一遍，数值可以一样）。格式：" +
+        "〖状态 开心:72 低落:12 生气:5 害羞:40 兴奋:60〗（每项是 0~100 的整数，可增删项）。" +
+        "这一行会被单独解析出来、以状态条展示：不要写进正文、不要放进代码块或引用、不要加解释。" +
+        "括号就用这对方头括号〖〗；键和值之间用英文冒号；各项之间用空格。";
     }
 
     /* 「采用格式」：本会话单独设了就用它，否则用「设置」里的全局。追加到最后，
@@ -1239,14 +1239,35 @@
       || /(?:^|\n)[ \t]*状态[ \t]*[：:][ \t]*([^\n]+)/.exec(src);
     if (!m) return { content: src, status: null };
     const st = {};
-    m[1].split(/[\s,，;；|/、]+/).filter(Boolean).forEach((seg) => {
-      const kv = /^([^:：=]+)[:：=]\s*(-?\d+(?:\.\d+)?)\s*%?$/.exec(seg);
+    /* 全角数字先转半角：模型偶尔会写成 ７２，正则认不出来 */
+    const seg0 = m[1].replace(/[\uFF10-\uFF19]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFEE0));
+    seg0.split(/[\s,，;；|/、]+/).filter(Boolean).forEach((seg) => {
+      /* 认三种写法：开心:72 / 开心=72 / 开心 72 */
+      const kv = /^([^:：=]+)[:：=]\s*(-?\d+(?:\.\d+)?)\s*%?$/.exec(seg)
+        || /^([^\s:：=]+)\s+(-?\d+(?:\.\d+)?)\s*%?$/.exec(seg);
       if (!kv) return;
       st[kv[1].trim()] = Math.max(0, Math.min(100, Math.round(Number(kv[2]))));
     });
     if (!Object.keys(st).length) return { content: src, status: null };
     const content = src.replace(m[0], "").replace(/\n{3,}/g, "\n\n").trim();
     return { content: content, status: st };
+  }
+
+  /* 上一条带状态的消息。模型这次没写状态行时沿用它 —— 否则卡片会「时有时无」。 */
+  function lastStatusBefore(s) {
+    const msgs = (s && s.messages) || [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (!m || m.role !== "assistant") continue;
+      let v = null;
+      try {
+        v = (typeof activeVariant === "function") ? activeVariant(m)
+          : (m.variants ? m.variants[m.vi || 0] : m);
+      } catch (e) { v = null; }
+      const st = v && v.status;
+      if (st && typeof st === "object" && Object.keys(st).length) return st;
+    }
+    return null;
   }
 
   /* 转向 api.js 的切分（把思考里混着的正文提出来）。api.js 没就绪时退化成「不切」，
@@ -1388,6 +1409,7 @@
           reasoning: final.reasoning,
           sources: final.sources,
           status: final.status || null,
+          statusCarry: !!final.statusCarry,
           q: typeof o.q === "number" ? o.q : 0
         };
         if (errorText) variant.error = errorText;
@@ -1546,6 +1568,12 @@
       if (statusOn(snap)) {
         const ex = extractStatus(fin.content);
         if (ex.status) { fin.status = ex.status; fin.content = ex.content; }
+        else {
+          /* 这次没解析到状态行（模型漏写 / 写歪）：沿用上一条的数值并打标记。
+             宁可显示一个标了「延续」的旧值，也别让整块卡片凭空消失。 */
+          const prev = lastStatusBefore(snap);
+          if (prev) { fin.status = prev; fin.statusCarry = true; }
+        }
       }
       /* 多媒体标记（[[视频]] / [[音乐]] / [[文档]]）：从正文里摘掉再落库，
          对应的活放到 commit 之后异步跑 —— 不能让生成视频把这条回复卡在这里。 */
@@ -1818,7 +1846,7 @@
         /* 群聊：这条是谁说的（单聊会话里恒为空，等于没加） */
         speaker: m.speaker, speakerName: m.speakerName,
         /* 状态量化：本条的状态数值（没开 / 没解析出来时为 null） */
-        status: v.status || null };
+        status: v.status || null, statusCarry: !!v.statusCarry };
     }
     view.world = !!m.world;      /* 剧情卡：渲染成居中的卡片，不当气泡 */
     view.offline = !!m.offline;  /* 双线：手机那一轮对应的「线下侧写」，渲染成旁白 */

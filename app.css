@@ -3199,3 +3199,9 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   .topbar > *:not(:last-child) { margin-right: 4px; }
   .topbar .icon-btn { width: 32px; }
 }
+
+/* 状态条：「沿用上一条」的小标记（模型这次没写状态行时才会出现） */
+.msg-status .st-carry {
+  margin: 0 6px 0 6px; padding: 1px 6px; border-radius: 999px;
+  font-size: 11px; color: var(--text-dim); background-color: var(--border);
+}

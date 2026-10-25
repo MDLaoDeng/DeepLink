@@ -597,7 +597,7 @@
 
       <div class="settings-section">
         <h3 class="sec-head">功能开关 · 日更<button class="btn ghost mini" type="button" data-reset="feats">重置本区</button></h3>
-        <label class="check-field"><input type="checkbox" id="setDailyUpdate"><span>日更：场景 / 共同经历 / 关系 每天各更新一次（默认开）</span></label>
+        <label class="check-field"><input type="checkbox" id="setDailyUpdate"><span>日更：场景 / 关系 每天各更新一次（默认开；共同经历不随聊天变）</span></label>
         <label class="check-field"><input type="checkbox" id="setToolUse"><span>让角色按需读取这条线自己的资料（工具调用：记忆摘要 / 思绪 / 图库 / 旧对话检索。默认开；模型不支持时会自动退回普通回答，每次多读一次就要多一轮请求）</span></label>
         <label class="check-field"><input type="checkbox" id="setWorldGen"><span>世界生成：久未上线后生成三段剧情解释角色这段时间做了什么（可关）</span></label>
         <label class="check-field"><input type="checkbox" id="setStatusQuant"><span>状态量化：气泡下方显示害羞 / 愤怒 / 开心等数值（可关）</span></label>
@@ -784,7 +784,7 @@
         <h3>角色扮演 · 本对话 <span id="sessionLineBadge" class="pill">主线</span></h3>
         <label class="field"><span>本线年龄（留空 = 用角色卡的；年龄随时间系统变化）</span><input id="setSessionAge" type="text" inputmode="numeric" placeholder="例：17（留空则按出生日期推算）"></label>
         <label class="field"><span>当前关系（本对话专属，随记忆自动更新）</span><textarea id="setSessionRelation" rows="2" placeholder="此刻两人的关系状态…"></textarea></label>
-        <label class="field"><span>共同经历（本对话专属，随记忆自动更新）</span><textarea id="setSessionShared" rows="4" placeholder="两人共同经历的关键事件与约定…"></textarea></label>
+        <label class="field"><span>共同经历（只写这段对话开始之前的事）</span><textarea id="setSessionShared" rows="4" placeholder="开局之前两人共同经历过什么…（聊天之后发生的事不用写这里，那些属于记忆）"></textarea></label>
         <label class="field"><span>当前场景（本对话专属，随对话自动更新）</span><textarea id="setSessionScene" rows="3" placeholder="此刻在哪、发生什么、什么氛围…"></textarea></label>
         <label class="field"><span>场景自动更新间隔（轮，默认 10）</span><input id="setSessionSceneEvery" type="number" min="1" step="1" inputmode="numeric"></label>
         <label class="field"><span>采用格式（本会话；留空则跟随角色，角色也空就跟随全局）</span><textarea id="setSessionFormat" rows="3" placeholder="留空：按「角色 → 全局」的顺序取第一个填了的"></textarea></label>
@@ -814,7 +814,7 @@
         <div class="char-actions">
           <button id="sessionReCompress" class="btn ghost" type="button">再压缩</button>
           <button id="sessionCognitionUpdate" class="btn ghost" type="button">更新认知</button>
-          <button id="sessionRelationUpdate" class="btn ghost" type="button">更新关系与经历</button>
+          <button id="sessionRelationUpdate" class="btn ghost" type="button">更新当前关系</button>
           <button id="sessionSetMain" class="btn ghost" type="button">设为主线</button>
         </div>
         <label class="check-field"><input type="checkbox" id="setSessionAutoBackup"><span>自动备份本对话（存 App 内快照，去掉图片数据，保留最近 2 份）</span></label>
@@ -1277,7 +1277,7 @@
                 <li>“我的名称/性格/外貌/背景/喜好”留空会自动沿用「设置」里的全局「我的设定」。</li>
                 <li>每个角色一套对话：第一条是<b>主线</b>，之后新建的算<b>支线</b>；在「对话设置」里可以把任意一条设为<b>主线</b>。</li>
                 <li><b>当前关系 / 共同经历 / 当前场景 / 对我的认知 / 记忆压缩</b>都是<b>按对话分开记</b>：主线与每条支线各一套，互不影响；都在那条对话的「对话设置」里。</li>
-                <li>其中<b>当前关系、共同经历随记忆一起自动更新</b>，<b>当前场景每聊若干轮自动刷新</b>（默认 10 轮，可在「对话设置」里改）——三样都随时能手改，改完以你写的为准。它们跟角色卡里的「共同经历（初始）/ 当前关系（初始）」不是一回事：角色卡里那份是<b>开局设定</b>，这三项记的是<b>这条对话现在走到哪了</b>。</li>
+                <li>其中<b>当前关系随记忆一起自动更新</b>，<b>当前场景每聊若干轮自动刷新</b>；<b>共同经历不再随聊天变</b>（它只记对话开始之前的事，聊天之后的内容进记忆）（默认 10 轮，可在「对话设置」里改）——三样都随时能手改，改完以你写的为准。它们跟角色卡里的「共同经历（初始）/ 当前关系（初始）」不是一回事：角色卡里那份是<b>开局设定</b>，这三项记的是<b>这条对话现在走到哪了</b>。</li>
                 <li>「对我的认知」随对话自动更新，也能手改或点「更新认知」重算；历史太长就「再压缩」。</li>
                 <li><b>记忆栏</b>：对话设置里能看到<b>本对话</b>的记忆（日/周/月摘要 + 精华），「再压缩」就在它下面；角色弹窗（角色名下）能看到<b>该角色所有对话</b>的记忆；「设置 → 角色记忆总览」一次看全部角色，不用一个个切。</li>
                 <li><b>记忆纠偏</b>：记忆栏下面可以写一段话让 AI 纠正记忆（如“小满其实是高中同学”）。出于对智能体的尊重，无法让你直接改角色记忆，只能用纠偏做一定量的纠正——记忆很珍贵，别滥用。</li>
@@ -1417,7 +1417,7 @@
                 勾上「<b>投到手机（手机模式）</b>」，主动消息就发进<b>手机聊天</b>而不是主对话；配合文生图那栏的「手机里允许角色主动分享图片」，它还会按性格<b>顺手发张图</b>。</p>
               <p><b>助手总结</b>：不会自动跑，<b>你主动问才出</b>——给一份关系剖析报告。</p>
               <p><b>情绪日记</b>：你<b>主动写</b>才生效；AI 会参考日记，把角色的发言往你期望的方向引导。</p>
-              <p><b>其它小改</b>：自定义聊天背景（全局默认 + 单会话覆盖）· 酒馆角色卡导入（PNG / JSON）· 「采用格式」输入框 · 场景 / 共同经历 / 关系的<b>日更</b>（默认开）· 用量新增<b>花费估算</b>。</p>
+              <p><b>其它小改</b>：自定义聊天背景（全局默认 + 单会话覆盖）· 酒馆角色卡导入（PNG / JSON）· 「采用格式」输入框 · 场景 / 关系的<b>日更</b>（默认开）· 用量新增<b>花费估算</b>。</p>
             </div>
             <div class="guide-sec">
               <h4>十六、群聊：成员绑线、彼此的认知、同步到各自线</h4>

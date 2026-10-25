@@ -100,7 +100,7 @@
     ["aiPeriod", "你的生理期（女性填上次第一天，格式 2026-10-01；没填按 28 天规律推一个）", "date"],
     ["aiStyle", "你的说话风格", "textarea"],
     ["world", "世界观", "textarea"],
-    ["shared", "共同经历（初始）", "textarea"],
+    ["shared", "共同经历（对话开始前）", "textarea"],
     ["relation", "当前关系（初始）", "textarea"],
     ["aiDirective", "AI 指令（单独对 AI 说的注意事项）", "textarea"]
   ];
@@ -911,18 +911,15 @@
     if (!extra.trim()) { UI.toast("还没有可参考的对话或记忆，先聊几句再试", true); return; }
     const ch = characterFor(s);
     const base = ch ? { relation: (ch.fields && ch.fields.relation) || "", shared: (ch.fields && ch.fields.shared) || "" } : null;
-    UI.toast("正在更新关系与经历…");
+    UI.toast("正在更新当前关系…");
     try {
       const r = await Memory.updateRelationShared(s, saveSession, state.settings, base, extra);
       await Store.memReady();
       if (r && r.usage) recordUsage(null, r.usage, s.characterId, "daily");
       fillSessionForm(session());
-      /* 以前无论更新到没有都报「已更新」，只更新一半也报成功，用户以为是玄学。
-         现在按实际拿到的字段说实话。 */
-      if (!r || !r.changed) UI.toast("没能读出可用的关系/经历，稍后再点一次", true);
-      else if (r.relation && r.shared) UI.toast("关系与经历已更新");
-      else if (r.relation) UI.toast("这次只更新到「关系」，「经历」再点一次", true);
-      else UI.toast("这次只更新到「经历」，「关系」再点一次", true);
+      /* 共同经历已收紧为「对话开始前」，不再随聊天更新；这里只更新当前关系。 */
+      if (!r || !r.changed) UI.toast("没能读出可用的关系，稍后再点一次", true);
+      else UI.toast("当前关系已更新");
     } catch (e) {
       UI.toast("更新失败：" + (e.message || e), true);
     }
