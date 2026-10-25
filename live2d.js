@@ -296,11 +296,16 @@
         if (ids.length > 1) gs.push(ids);
       });
       if (!gs.length) return null;
+      var primed = false;   /* 第一帧直接给终态：开场不做渐变 */
       return {
         groups: gs,
         update: function (model, dt) {
-          /* 250ms 过渡：姿态切换时淡出旧的、淡入新的，而不是硬切 */
-          var step = Math.min(1, Math.max(0.08, (dt || 0.016) / 0.25));
+          /* 250ms 过渡：姿态切换时淡出旧的、淡入新的，而不是硬切。
+             但【第一帧不能渐变】—— 部件初始不透明度都是 1，若从这里开始慢慢降，
+             视频通话刚打开的头半秒会看到两套手臂半透明地叠在一起（像四条胳膊的鬼影），
+             正好是截图的时机。所以第一帧直接落到终态。 */
+          var step = primed ? Math.min(1, Math.max(0.08, (dt || 0.016) / 0.25)) : 1;
+          primed = true;
           for (var gi = 0; gi < gs.length; gi++) {
             var ids = gs[gi], vis = 0;
             for (var i = 0; i < ids.length; i++) {
