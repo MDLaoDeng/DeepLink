@@ -188,11 +188,58 @@
        呼吸 / 眨眼只是参数驱动的死板效果；模型自带 idle 动作才有真实的抬手、转头。
        逐个 fetch → Live2DMotion.loadMotion(ArrayBuffer)；任何一个挂了都只是少一段动作，
        不影响别的。注意：本版 live2d.min.js 【不含物理类】，所以头发 / 裙子不会飘。 */
+    /* 自己解析 .mtn。
+       ⚠️ 不能用运行时的 Live2DMotion.updateParam(model, 时间) —— 它第二个参数要的是
+       「队列项对象」（内部 MotionQueueEnt），传数字会在第一行 `if (!aN._$AT) return;` 直接返回，
+       动作永远不生效，而且一声不响。我们之前就是这么写了很久：画面只有呼吸+眨眼在动，
+       模型自带的抬手、转头、以及 VISIBLE: 部件切换参数全都没进来（nico 的眼睛因此一直是「白眼球」）。
+       .mtn 的格式很简单：`参数名=v1,v2,...`（按 $fps 的采样序列），所以自己插值最省事。 */
+    function parseMtn(buf) {
+      var txt = bytesToText(buf);
+      if (!txt) return null;
+      var fps = 30, params = {}, frames = 0;
+      txt.split(/\r?\n/).forEach(function (line) {
+        line = line.replace(/^\s+|\s+$/g, "");
+        if (!line || line.charAt(0) === "#") return;
+        var mv = /^\$([A-Za-z0-9_]+)\s*=\s*([\d.\-]+)/.exec(line);
+        if (mv) {
+          if (mv[1] === "fps") fps = parseFloat(mv[2]) || 30;
+          return;
+        }
+        /* 有些导出器把部件可见性参数粘在别的行尾上（shizuku 的 flickHead 就是
+           `PARAM_TERE=0.60VISIBLE:PARTS_01_ARM_L_01=1VISIBLE:...`），先抠出来 */
+        var visRe = /VISIBLE:[A-Za-z0-9_]+\s*=\s*-?[\d.]+/g;
+        var vis = line.match(visRe);
+        if (vis) {
+          vis.forEach(function (seg) {
+            var p = seg.split("=");
+            var nm = p[0].replace(/\s+/g, "");
+            var val = parseFloat(p[1]);
+            if (nm && isFinite(val)) params[nm] = [val];
+          });
+          line = line.replace(visRe, "");
+        }
+        var eq = line.indexOf("=");
+        if (eq < 0) return;
+        var name = line.slice(0, eq).replace(/\s+/g, "");
+        if (!name) return;
+        var parts = line.slice(eq + 1).split(",");
+        var arr = [];
+        for (var i = 0; i < parts.length; i++) {
+          var v = parseFloat(parts[i]);
+          if (!isFinite(v)) return;      /* 这行不是数值序列（比如残留的其它标记），整行丢掉 */
+          arr.push(v);
+        }
+        if (!arr.length) return;
+        params[name] = arr;
+        if (arr.length > frames) frames = arr.length;
+      });
+      if (!frames) return null;
+      return { fps: fps, params: params, frames: frames, duration: frames / fps * 1000 };
+    }
     function loadMotionList(urls) {
       return Promise.all((urls || []).map(function (u) {
-        return fetchArrayBuffer(u).then(function (buf) {
-          return window.Live2DMotion.loadMotion(buf);
-        }).catch(function () { return null; });
+        return fetchArrayBuffer(u).then(parseMtn).catch(function () { return null; });
       })).then(function (arr) { return arr.filter(Boolean); });
     }
     function parseMotionUrls(base, json) {
@@ -287,13 +334,24 @@
       raw.forEach(function (g) {
         var list = (g && g.group) ? g.group : g;
         if (!Array.isArray(list)) return;
-        var ids = [];
+        var items = [];
         list.forEach(function (it) {
           var id = typeof it === "string" ? it : (it && it.id);
-          if (id) ids.push(String(id));
+          if (!id) return;
+          /* link：主部件下面挂的联动部件，透明度必须跟着主部件走。
+             典型是 nico —— 它的眼睛拆成「主部件 + 4 个镜像/分层部件」，
+             不处理 link 就只显示主部件、把眼睛整片藏掉（脸是空的）。 */
+          var links = [];
+          if (it && Array.isArray(it.link)) {
+            it.link.forEach(function (l) {
+              var lid = typeof l === "string" ? l : (l && l.id);
+              if (lid) links.push(String(lid));
+            });
+          }
+          items.push({ id: String(id), links: links });
         });
         /* 只有一个部件的组没有互斥意义，跳过 */
-        if (ids.length > 1) gs.push(ids);
+        if (items.length > 1) gs.push(items);
       });
       if (!gs.length) return null;
       var primed = false;   /* 第一帧直接给终态：开场不做渐变 */
@@ -307,25 +365,30 @@
           var step = primed ? Math.min(1, Math.max(0.08, (dt || 0.016) / 0.25)) : 1;
           primed = true;
           for (var gi = 0; gi < gs.length; gi++) {
-            var ids = gs[gi], vis = 0;
-            for (var i = 0; i < ids.length; i++) {
+            var items = gs[gi], vis = 0;
+            for (var i = 0; i < items.length; i++) {
               var pi = -1, v = 0;
-              try { pi = model.getParamIndex("VISIBLE:" + ids[i]); } catch (e) { pi = -1; }
+              try { pi = model.getParamIndex("VISIBLE:" + items[i].id); } catch (e) { pi = -1; }
               if (pi >= 0) { try { v = model.getParamFloat(pi); } catch (e) { v = 0; } }
               if (v) { vis = i; break; }
             }
-            for (var j = 0; j < ids.length; j++) {
+            for (var j = 0; j < items.length; j++) {
               var target = (j === vis) ? 1 : 0;
               var o = target;
               try {
-                var now = model.getPartsOpacity(ids[j]);
+                var now = model.getPartsOpacity(items[j].id);
                 /* 部件名不存在时这个调用可能给出 undefined，直接参与运算会算出 NaN，
                    而 NaN 写进透明度会把整个部件的变换搞坏（表现为部件消失或乱飞）。 */
                 if (typeof now !== "number" || !isFinite(now)) now = target;
                 o = now + (target - now) * step;
                 if (Math.abs(o - target) < 0.02) o = target;
               } catch (e) { o = target; }
-              try { model.setPartsOpacity(ids[j], o); } catch (e) { /* 部件名不存在就跳过 */ }
+              try { model.setPartsOpacity(items[j].id, o); } catch (e) { /* 部件名不存在就跳过 */ }
+              /* 联动部件跟着主部件同一个透明度：眼睛、手臂这类模型会把一层拆成好几片 */
+              var lk = items[j].links;
+              for (var k = 0; k < lk.length; k++) {
+                try { model.setPartsOpacity(lk[k], o); } catch (e2) { /* ignore */ }
+              }
             }
           }
         }
@@ -584,9 +647,8 @@
           var now = Date.now();
           var dt = (now - t0) / 1000; t0 = now;
           try {
-            /* 先推动作（模型自带的 idle / tap），再压呼吸与眨眼 —— 后者显式覆盖，
-               保证就算动作没加载上，「活着的感觉」也一定在。 */
-            stepMotion(model, dt * 1000);
+            /* 先铺「活着」的基础层（呼吸 + 微转头 + 眨眼），再让动作覆盖。
+               动作是作者编的，优先级更高；动作没加载上时基础层也保证画面不是死的。 */
             /* 呼吸：PARAM_BREATH */
             var breath = (Math.sin(now / 1200) + 1) / 2 * 0.6;
             trySet(model, "PARAM_BREATH", breath);
@@ -603,6 +665,8 @@
             }
             trySet(model, "PARAM_EYE_L_OPEN", eye);
             trySet(model, "PARAM_EYE_R_OPEN", eye);
+            /* 动作层：模型自带的抬手 / 转头 / 部件可见性（VISIBLE:…）都在这里进来 */
+            stepMotion(model, dt * 1000);
             /* 物理放在最后：它读上面设好的角度参数（PARAM_ANGLE_*）、写头发参数，
                所以必须在这些参数设完之后、model.update() 之前跑。 */
             if (cur.physics) cur.physics.update(model, dt);
@@ -695,7 +759,7 @@
       if (!list || !list.length) return null;
       return list[Math.floor(Math.random() * list.length)];
     }
-    /* 推进当前动作。播完就置空，下一帧自动换一段 —— 不依赖 SDK 的 isFinished（本版没有）。 */
+    /* 推进当前动作：按帧号线性插值，把每个参数写进模型。播完置空，下一帧换一段。 */
     function stepMotion(model, dtMs) {
       var c = cur;
       if (!c || c.dead || !c.motions) return;
@@ -703,13 +767,27 @@
         c.mv = pickMotion(c.motions);
         c.mt = 0;
         if (!c.mv) return;
-        try { c.mv.setFadeIn(700); c.mv.setFadeOut(700); } catch (e) { /* ignore */ }
       }
       c.mt += dtMs;
-      var dur = 0;
-      try { dur = c.mv.getDurationMSec() || 0; } catch (e) { dur = 0; }
-      try { c.mv.updateParam(model, c.mt); } catch (e) { c.mv = null; return; }
-      if (dur > 0 && c.mt >= dur) c.mv = null;
+      var mo = c.mv;
+      var idx = c.mt / 1000 * (mo.fps || 30);
+      for (var name in mo.params) {
+        if (!mo.params.hasOwnProperty(name)) continue;
+        var arr = mo.params[name];
+        var v;
+        if (arr.length === 1) v = arr[0];
+        else {
+          var i0 = Math.floor(idx);
+          if (i0 < 0) i0 = 0;
+          if (i0 >= arr.length - 1) v = arr[arr.length - 1];
+          else {
+            var f = idx - i0;
+            v = arr[i0] + (arr[i0 + 1] - arr[i0]) * f;
+          }
+        }
+        try { model.setParamFloat(name, v); } catch (e) { /* 参数不存在就算了 */ }
+      }
+      if (mo.duration > 0 && c.mt >= mo.duration) c.mv = null;
     }
     /* 点一下画面：插播一段 tap_body 动作（没有就在返回 false，调用方不用管） */
     /* 渲染诊断（10-21）：真机上"色块"分不清是 stencil 没要到、viewport 没跟上、
@@ -747,7 +825,24 @@
           (ph.skipped ? "（跳过 " + ph.skipped + " 条归一化参数）" : ""))) : "未启用"));
       } catch (e) { /* ignore */ }
       try {
-        out.push("姿势 " + (cur.pose ? (cur.pose.groups.length + " 组互斥") : "未启用"));
+        var mo = cur.motions;
+        out.push("动作 " + (mo
+          ? ("idle " + ((mo.idle && mo.idle.length) || 0) + " / tap " + ((mo.tap && mo.tap.length) || 0) +
+             (cur.mv ? " · 播放中" : " · 停"))
+          : "未加载"));
+      } catch (e) { /* ignore */ }
+      try {
+        out.push("姿势 " + (cur.pose ? (cur.pose.groups.length + " 组互斥：" +
+          cur.pose.groups.map(function (g) {
+            var v = 0;
+            for (var i = 0; i < g.length; i++) {
+              var pi = -1, x = 0;
+              try { pi = cur.model.getParamIndex("VISIBLE:" + g[i].id); } catch (e) { pi = -1; }
+              if (pi >= 0) { try { x = cur.model.getParamFloat(pi); } catch (e) { x = 0; } }
+              if (x) { v = i; break; }
+            }
+            return String(g[v].id).replace(/^PARTS_0?\d_/, "");
+          }).join(" / ")) : "未启用"));
       } catch (e) { /* ignore */ }
       /* 渲染器字符串：这一项能一眼分开「软件渲染」和「硬件驱动」。
          看到 SwiftShader / llvmpipe = WebView 退回了软渲染，碎片是软栅格化的锅；
