@@ -314,6 +314,9 @@
               var o = target;
               try {
                 var now = model.getPartsOpacity(ids[j]);
+                /* 部件名不存在时这个调用可能给出 undefined，直接参与运算会算出 NaN，
+                   而 NaN 写进透明度会把整个部件的变换搞坏（表现为部件消失或乱飞）。 */
+                if (typeof now !== "number" || !isFinite(now)) now = target;
                 o = now + (target - now) * step;
                 if (Math.abs(o - target) < 0.02) o = target;
               } catch (e) { o = target; }
