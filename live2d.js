@@ -650,6 +650,21 @@
                  "," + (m[13] !== undefined ? Number(m[13]).toFixed(3) : "?"));
       } catch (e) { /* ignore */ }
       try { out.push("DPR " + (window.devicePixelRatio || 1)); } catch (e) { /* ignore */ }
+      /* 渲染器字符串：这一项能一眼分开「软件渲染」和「硬件驱动」。
+         看到 SwiftShader / llvmpipe = WebView 退回了软渲染，碎片是软栅格化的锅；
+         看到 Mali / Adreno / PowerVR = 走的是真 GPU，问题在驱动或渲染器内部。
+         注意：部分 WebView 会屏蔽这个扩展，读不到属于正常，不要当成故障。 */
+      try {
+        var dbg = g.getExtension("WEBGL_debug_renderer_info");
+        if (dbg) {
+          out.push("渲染器 " + String(g.getParameter(dbg.UNMASKED_RENDERER_WEBGL)).slice(0, 42));
+          out.push("厂商 " + String(g.getParameter(dbg.UNMASKED_VENDOR_WEBGL)).slice(0, 28));
+        } else {
+          out.push("渲染器 不可读（扩展被屏蔽）");
+        }
+      } catch (e) { out.push("渲染器 读取失败"); }
+      try { out.push("WebGL " + String(g.getParameter(g.VERSION)).slice(0, 30)); } catch (e) { /* ignore */ }
+      try { out.push("最大纹理 " + g.getParameter(g.MAX_TEXTURE_SIZE)); } catch (e) { /* ignore */ }
       try {
         var er = g.getError();
         out.push("GL 错误 " + (er === 0 ? "无" : er));
