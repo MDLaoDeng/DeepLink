@@ -25,3 +25,7 @@ backup/
 apache/
 __pycache__/
 *.pyc
+
+# 临时验证页（chrome83 回归生成，用完即删，别提交）
+_verify.html
+_*.html
