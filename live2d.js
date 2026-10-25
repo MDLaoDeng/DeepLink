@@ -820,6 +820,16 @@
       } catch (e) { /* ignore */ }
       try { out.push("DPR " + (window.devicePixelRatio || 1)); } catch (e) { /* ignore */ }
       try {
+        var sw = null;
+        for (var si2 = 0; si2 < (cur.samples || []).length; si2++) {
+          var x2 = cur.samples[si2];
+          if (!sw || x2.ratio < sw.ratio) sw = x2;
+        }
+        out.push("采样 " + (cur.broken ? "判定坏" : "正常") +
+          (sw ? ("（中心块非透明 " + (sw.ratio * 100).toFixed(0) + "% · 颜色 " + sw.colors +
+                 " · 边缘 " + sw.edge.toFixed(1) + "）") : "（还没采到）"));
+      } catch (e) { /* ignore */ }
+      try {
         var ph = cur.physics;
         out.push("物理 " + (ph ? (((ph.list ? ph.list.length : 0) + " 条" +
           (ph.skipped ? "（跳过 " + ph.skipped + " 条归一化参数）" : ""))) : "未启用"));
