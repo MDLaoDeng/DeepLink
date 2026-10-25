@@ -230,10 +230,19 @@
       });
       var wDiv = maxW > 1 ? 100 : 1;
       var hairs = [];
+      var skipped = 0;
       groups.forEach(function (g) {
         var su = g.setup || {};
+        var len = Number(su.length) || 0;
+        /* 【10-25 修复】setup.length 有两种写法：
+           · 模型单位（官方样本是几十的量级，如 30）—— PhysicsHair 认这个
+           · 归一化单位（shizuku 是 length 0.17 / mass 0.1）—— 说明还要乘画布尺寸
+           把 0.17 直接喂进去，等于弹簧长度不到一个单位、质量 0.1，物理积分直接发散：
+           头发被甩成一丝丝的、脸被撕开，看着就是「色块碎片」。本机用同一套参数复现过
+           （关掉物理立刻正常），所以这里宁可不动，也不发散。 */
+        if (len > 0 && len < 1) { skipped++; return; }
         var hair = new P();
-        try { hair.setup(Number(su.length) || 0, Number(su.regist) || 0, Number(su.mass) || 0); }
+        try { hair.setup(len, Number(su.regist) || 0, Number(su.mass) || 0); }
         catch (e) { return; }
         (g.src || []).forEach(function (s) {
           var t = P.Src.SRC_TO_X;
@@ -248,9 +257,10 @@
         });
         hairs.push(hair);
       });
-      if (!hairs.length) return null;
+      if (!hairs.length) return { list: [], skipped: skipped, update: function () {} };
       return {
         list: hairs,
+        skipped: skipped,
         update: function (model) {
           for (var i = 0; i < hairs.length; i++) { try { hairs[i].update(model); } catch (e) { /* 单条挂了不影响别的 */ } }
         }
@@ -650,6 +660,11 @@
                  "," + (m[13] !== undefined ? Number(m[13]).toFixed(3) : "?"));
       } catch (e) { /* ignore */ }
       try { out.push("DPR " + (window.devicePixelRatio || 1)); } catch (e) { /* ignore */ }
+      try {
+        var ph = cur.physics;
+        out.push("物理 " + (ph ? (((ph.list ? ph.list.length : 0) + " 条" +
+          (ph.skipped ? "（跳过 " + ph.skipped + " 条归一化参数）" : ""))) : "未启用"));
+      } catch (e) { /* ignore */ }
       /* 渲染器字符串：这一项能一眼分开「软件渲染」和「硬件驱动」。
          看到 SwiftShader / llvmpipe = WebView 退回了软渲染，碎片是软栅格化的锅；
          看到 Mali / Adreno / PowerVR = 走的是真 GPU，问题在驱动或渲染器内部。
