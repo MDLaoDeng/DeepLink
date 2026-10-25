@@ -272,6 +272,64 @@
       return fetchJSON(base + f).then(function (j) { return createPhysics(j); }).catch(function () { return null; });
     }
 
+    /* ── 姿势 / 部件可见性（10-25 补）──────────────────────────────
+       pose.json 的 parts_visible 是把「同一条手臂的几种姿态」分组的互斥组：
+       每组同一时刻只该有一套可见。我们以前完全没读它，两套都按默认不透明度画出来，
+       所以模型会出现四只手（两条手臂各画了两份）。
+       切换信号来自动作文件里的 VISIBLE:<部件名> 参数（idle 里写的是 *_01=1 / *_02=0），
+       这里照 Cubism 2.1 的 Live2DPose 做归一化：每组找第一个参数非 0 的部件，
+       让它的透明度趋近 1、同组其余趋近 0；整组都没有这个参数时退回第 0 个。
+       不这么做的另一个后果是：动作里切姿态时手会「跳」，因为旧的那套没有淡出。 */
+    function createPose(json) {
+      var raw = (json && json.parts_visible) || [];
+      if (!Array.isArray(raw) || !raw.length) return null;
+      var gs = [];
+      raw.forEach(function (g) {
+        var list = (g && g.group) ? g.group : g;
+        if (!Array.isArray(list)) return;
+        var ids = [];
+        list.forEach(function (it) {
+          var id = typeof it === "string" ? it : (it && it.id);
+          if (id) ids.push(String(id));
+        });
+        /* 只有一个部件的组没有互斥意义，跳过 */
+        if (ids.length > 1) gs.push(ids);
+      });
+      if (!gs.length) return null;
+      return {
+        groups: gs,
+        update: function (model, dt) {
+          /* 250ms 过渡：姿态切换时淡出旧的、淡入新的，而不是硬切 */
+          var step = Math.min(1, Math.max(0.08, (dt || 0.016) / 0.25));
+          for (var gi = 0; gi < gs.length; gi++) {
+            var ids = gs[gi], vis = 0;
+            for (var i = 0; i < ids.length; i++) {
+              var pi = -1, v = 0;
+              try { pi = model.getParamIndex("VISIBLE:" + ids[i]); } catch (e) { pi = -1; }
+              if (pi >= 0) { try { v = model.getParamFloat(pi); } catch (e) { v = 0; } }
+              if (v) { vis = i; break; }
+            }
+            for (var j = 0; j < ids.length; j++) {
+              var target = (j === vis) ? 1 : 0;
+              var o = target;
+              try {
+                var now = model.getPartsOpacity(ids[j]);
+                o = now + (target - now) * step;
+                if (Math.abs(o - target) < 0.02) o = target;
+              } catch (e) { o = target; }
+              try { model.setPartsOpacity(ids[j], o); } catch (e) { /* 部件名不存在就跳过 */ }
+            }
+          }
+        }
+      };
+    }
+    function loadPose(base, json) {
+      var f = json && json.pose;
+      if (!f) return Promise.resolve(null);
+      return fetchJSON(base + f).then(function (j) { return createPose(j); })
+        .catch(function () { return null; });   /* 没有 pose.json 也能看，只是姿态不会互斥 */
+    }
+
     function createTexture(gl, img) {
       var t = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, t);
@@ -496,7 +554,7 @@
         if (!W || !H) { W = canvas.width; H = canvas.height; }
         var matrix = buildMatrix(canvas.width, canvas.height, W, H);
 
-        cur = { gl: gl, model: model, tex: r.tex, matrix: matrix, W: W, H: H, dead: false, broken: false, samples: [], motions: null, mv: null, mt: 0, physics: null };
+        cur = { gl: gl, model: model, tex: r.tex, matrix: matrix, W: W, H: H, dead: false, broken: false, samples: [], motions: null, mv: null, mt: 0, physics: null, pose: null };
         cur.onBroken = onBrokenHook;
         /* 动作 / 物理都放后台加载：先把画面点亮再说，加载好再让它动、让头发飘 */
         loadMotions(base, r.json).then(function (sets) {
@@ -505,6 +563,10 @@
         loadPhysics(base, r.json).then(function (ph) {
           if (cur && !cur.dead) cur.physics = ph;
         }).catch(function () { /* 没有物理也不影响 */ });
+        /* 姿势和物理一样放后台：先把画面点亮，加载好再让手臂互斥 */
+        loadPose(base, r.json).then(function (pz) {
+          if (cur && !cur.dead) cur.pose = pz;
+        }).catch(function () { /* 没有姿势文件也不影响 */ });
 
         /* 一点点「活着」的感觉：呼吸 + 眨眼。参数名是 Cubism 2.1 标准名。 */
         var t0 = Date.now();
@@ -536,6 +598,10 @@
             /* 物理放在最后：它读上面设好的角度参数（PARAM_ANGLE_*）、写头发参数，
                所以必须在这些参数设完之后、model.update() 之前跑。 */
             if (cur.physics) cur.physics.update(model, dt);
+            /* 部件可见性放在最后、update 之前：它读动作刚写好的 VISIBLE: 参数，
+               再折算成各部件的不透明度。少了这一步，同一条手臂的两套姿态会同时不透明，
+               看起来就是「四只手」（两条手臂各两份）。 */
+            if (cur.pose) cur.pose.update(model, dt);
             /* 矩阵必须按「当前画布尺寸」重算：视频通话会改 canvas 大小，
                而 viewport 是每帧设的、矩阵却只在加载时算过一次 —— 两者不一致，
                表现就是画面被拉伸（不是裁剪，是长宽比错了）。 */
@@ -671,6 +737,9 @@
         var ph = cur.physics;
         out.push("物理 " + (ph ? (((ph.list ? ph.list.length : 0) + " 条" +
           (ph.skipped ? "（跳过 " + ph.skipped + " 条归一化参数）" : ""))) : "未启用"));
+      } catch (e) { /* ignore */ }
+      try {
+        out.push("姿势 " + (cur.pose ? (cur.pose.groups.length + " 组互斥") : "未启用"));
       } catch (e) { /* ignore */ }
       /* 渲染器字符串：这一项能一眼分开「软件渲染」和「硬件驱动」。
          看到 SwiftShader / llvmpipe = WebView 退回了软渲染，碎片是软栅格化的锅；
