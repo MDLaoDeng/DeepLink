@@ -1104,12 +1104,15 @@
       box.appendChild(more);
     }
     var prevTs = 0;
+    var curSess = sessionById(ps.sid) || session();
     ph.msgs.forEach(function (m, i) {
       if (i < start) return;
       /* 和上一条隔了 3 分钟以上（或这是第一条）→ 插一条居中的时分。
-         **自己发的、对方发的都算**（用户口径）。 */
-      if (!prevTs || (m.ts && (m.ts - prevTs) > PH_TIME_GAP)) box.appendChild(phTimeEl(m.ts));
-      if (m.ts) prevTs = m.ts;
+         **自己发的、对方发的都算**（用户口径）。
+         间隔按故事时间判：冻结期间现实走了、故事没走，按现实算会插一堆同分钟的时间条。 */
+      var curTs = (Memory && Memory.stsOf && curSess) ? Memory.stsOf(curSess, m) : m.ts;
+      if (!prevTs || (curTs && (curTs - prevTs) > PH_TIME_GAP)) box.appendChild(phTimeEl(m));
+      if (curTs) prevTs = curTs;
       var el = msgEl(m);
       if (prevCount > 0 && i >= prevCount) el.className += " ph-enter";
       box.appendChild(el);
@@ -1119,12 +1122,20 @@
     if (window.DL && window.DL.bindEmojiPanel) window.DL.bindEmojiPanel();
   }
 
-  /* 居中的时间分隔（走故事时间） */
-  function phTimeEl(ts) {
+  /* 居中的时间分隔（走故事时间）。
+     传整条消息而不是 ts：消息上可能已经有固化好的 sts（开时间系统时算的），
+     有就优先用它 —— 后开时间系统的线，历史消息的日期就是那时候定下来的。 */
+  function phTimeEl(msg) {
     var d = document.createElement("div");
     d.className = "ph-time";
-    var ms = storyMs(typeof ts === "number" ? ts : Date.now());
-    d.textContent = (Memory && Memory.fmtStoryShort) ? Memory.fmtStoryShort(ms) : hmOf(ts);
+    var s = sessionById(ps.sid) || session();
+    var ms = 0;
+    if (Memory && Memory.stsOf && s) {
+      try { ms = Memory.stsOf(s, msg); } catch (e) { ms = (msg && msg.ts) || Date.now(); }
+    } else {
+      ms = storyMs((msg && msg.ts) || Date.now());
+    }
+    d.textContent = (Memory && Memory.fmtStoryShort) ? Memory.fmtStoryShort(ms) : hmOf(msg && msg.ts);
     return d;
   }
 

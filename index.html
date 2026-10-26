@@ -835,12 +835,16 @@
         <p class="hint">全局开关在「设置 → 高级功能」里的「自动发信息」。选「允许」后，AI 每次主动找你之前会先读「当前场景」——你俩此刻正在一起，它就不会发这条。</p>
 
         <div class="mem-title">时间</div>
-        <label class="field"><span>对话开始时间（故事里的时间，可精确到秒）</span><input id="setSessionTime" type="text" readonly data-wheel="datetime" placeholder="点这里选时间"></label>
-        <label class="check-field"><input type="checkbox" id="setSessionTimeSync"><span>与现实时间同步（勾上 = 故事时间就是此刻）</span></label>
-        <div class="char-actions">
-          <button id="sessionTimeApply" class="btn ghost" type="button">应用时间</button>
-          <button id="sessionTimeNow" class="btn ghost" type="button">设为此刻</button>
-          <button id="sessionTimeClear" class="btn ghost" type="button">关掉时间系统</button>
+        <div id="sessionTimeOpen">
+          <label class="field"><span>对话开始时间（故事里的时间，可精确到秒）</span><input id="setSessionTime" type="text" readonly data-wheel="datetime" placeholder="点这里选时间"></label>
+          <label class="check-field"><input type="checkbox" id="setSessionTimeSync"><span>与现实时间同步（勾上 = 故事时间就是此刻）</span></label>
+          <div class="char-actions">
+            <button id="sessionTimeApply" class="btn ghost" type="button">应用时间</button>
+            <button id="sessionTimeNow" class="btn ghost" type="button">设为此刻</button>
+          </div>
+          <p class="hint">注意：<b>时间系统只能开一次</b>，开了之后不能关、也不能重设起点（要换时间轴就新建一条对话）。
+            开启那一刻会把已经聊过的消息和记忆里的日期，按 1:1 往前排到起点之前 —— 比如 10 月 18 日开、设成 9 月 12 日，
+            10 月 15 日聊的内容就变成 9 月 9 日。真实时间也会留着，搜索时可以选按哪种时间。</p>
         </div>
         <div id="sessionTimeLine" class="hint"></div>
         <label class="check-field"><input type="checkbox" id="setSessionAutoFreeze"><span>混搭模式：离线自动冻结时间，上线后发第一条消息时解冻（仅本线）</span></label>
@@ -1936,6 +1940,13 @@
       </label>
       <div class="field" id="histTimeField">
         <span>时间范围</span>
+        <label class="field sub-field" id="histTimeBaseField">
+          <span>按哪种时间算</span>
+          <select id="histTimeBase">
+            <option value="story">系统内时间（故事里的日期）</option>
+            <option value="real">真实时间（现实里的日期）</option>
+          </select>
+        </label>
         <div class="date-row">
           <input id="histFrom" type="text" readonly data-wheel="date" placeholder="开始日期">
           <span class="date-sep">至</span>

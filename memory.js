@@ -534,9 +534,10 @@
   function rebaseTime(s, kind) {
     const t = s && s.time;
     if (!t) return false;
+    sealTimes(s);                 /* 先按旧 offset 固化，再改基准 */
     const story = nowOf(s);
     const real = Date.now();
-    s.time = { start: story, setAt: real, marker: kind || "", markerAt: real };
+    s.time = { start: story, setAt: real, marker: kind || "", markerAt: real, based: t.based || 1 };
     return true;
   }
   /* 跳过剧情生成时用（10-18 用户口径）：
@@ -547,9 +548,10 @@
   function holdTime(s, gapMs) {
     const t = s && s.time;
     if (!t) return false;
+    sealTimes(s);                 /* 先按旧 offset 固化，再改基准 */
     const story = nowOf(s) - Math.max(0, gapMs || 0);
     const real = Date.now();
-    s.time = { start: story, setAt: real, marker: "hold", markerAt: real };
+    s.time = { start: story, setAt: real, marker: "hold", markerAt: real, based: t.based || 1 };
     return true;
   }
   /* 故事里的「现在」。冻结中（s.time.frozenAt 有值）就一直停在那一刻 ——
@@ -565,11 +567,15 @@
   function isFrozen(s) { return !!(s && s.time && typeof s.time.frozenAt === "number"); }
   function freezeTime(s) {
     if (!s || !s.time || isFrozen(s)) return false;
+    sealTimes(s);                 /* 冻结前的消息按正常 offset 固化 */
     s.time.frozenAt = Date.now();
     return true;
   }
   function unfreezeTime(s) {
     if (!isFrozen(s)) return false;
+    /* 冻结期间的消息，stsOf 会把它们钳在 frozenAt；这里先固化下来再改基准，
+       否则解冻后 offset 变了，那些消息会被按新 offset 重算一次 —— 时间就跳了。 */
+    sealTimes(s);
     const story = nowOf(s);          /* 冻结那一刻的故事时间（必须在删 frozenAt 之前取） */
     const real = Date.now();
     /* 冻结期间的时间不算数：以「解冻这一刻」为新基准，故事仍 1:1 跟随现实 */
@@ -580,6 +586,72 @@
   }
   /* 把一条现实时间戳换算成故事时间（手机消息的 ts 就是现实时间戳） */
   function storyAt(s, realMs) { return (typeof realMs === "number" ? realMs : Date.now()) + timeOffset(s); }
+
+  /* ── 故事时间戳 sts（2026-10-26 用户口径）──────────────────────
+     先聊、后开时间系统时，历史要按 1:1 往前重排（10.18 开、设 9.12 → 10.15 的消息变成 9.9），
+     同时**真实时间必须留着**（搜索要能选按哪种时间），所以一条消息两个时间：
+       ts  = 真实时间，永远不动
+       sts = 故事时间，开时间系统那一刻算好并固化
+     已经写成数值的 sts 永不再算 —— 否则每次调整时间都会把历史再平移一次。 */
+  function stsOf(s, m) {
+    if (!m) return 0;
+    if (typeof m.sts === "number") return m.sts;
+    const ts = (typeof m.ts === "number") ? m.ts : 0;
+    if (!ts) return ts;
+    const t = s && s.time;
+    if (!t || typeof t.start !== "number" || typeof t.setAt !== "number") return ts;
+    /* 冻结期间发的消息：故事时间停住，不能按 ts 继续走 */
+    const base = (typeof t.frozenAt === "number" && ts > t.frozenAt) ? t.frozenAt : ts;
+    return base + (t.start - t.setAt);
+  }
+  /* 把当前所有消息的 sts 固化成数值（幂等）。
+     任何会改变 offset 的操作（开启 / 调整 / 冻结 / 解冻 / rebase / hold）之前都要先调它，
+     否则历史会按新 offset 再算一遍，等于二次平移。 */
+  function sealTimes(s) {
+    if (!s) return 0;
+    let n = 0;
+    const walk = (arr) => {
+      (arr || []).forEach((m) => {
+        if (!m || typeof m !== "object") return;
+        if (typeof m.sts !== "number") { m.sts = stsOf(s, m); n++; }
+      });
+    };
+    walk(s.messages);
+    if (s.phone && Array.isArray(s.phone.msgs)) walk(s.phone.msgs);
+    return n;
+  }
+  /* 日期字符串整体平移：「2026-10-15」→「2026-09-09」。
+     只认标准 YYYY-MM-DD，月份键「2026-10」不受影响（它本来也不显示给用户）。 */
+  function shiftDateStr(str, offsetMs) {
+    if (!offsetMs) return String(str == null ? "" : str);
+    return String(str == null ? "" : str).replace(/(\d{4})-(\d{2})-(\d{2})/g,
+      function (all, y, mo, d) {
+        const t = new Date(Number(y), Number(mo) - 1, Number(d));
+        if (isNaN(t.getTime())) return all;
+        const nd = new Date(t.getTime() + offsetMs);
+        return nd.getFullYear() + "-" + pad2(nd.getMonth() + 1) + "-" + pad2(nd.getDate());
+      });
+  }
+  /* 记忆 / 思考日记里的结构化日期整体平移。
+     **只在「没开 → 开」这一次调用**：开了之后不再重排，否则记忆会和对话对不上。
+     摘要正文里如果模型自己写了「10月15日」，那是自然语言，不动。 */
+  function shiftMemoDates(s, offsetMs) {
+    if (!s || !offsetMs) return 0;
+    let n = 0;
+    const mem = s.memory;
+    if (mem && typeof mem === "object") {
+      (mem.days || []).forEach((x) => { if (x && x.date) { x.date = shiftDateStr(x.date, offsetMs); n++; } });
+      (mem.weeks || []).forEach((x) => { if (x && x.key) x.key = shiftDateStr(x.key, offsetMs); });
+      (mem.months || []).forEach((x) => { if (x && x.key) x.key = shiftDateStr(x.key, offsetMs); });
+    }
+    if (s.think && Array.isArray(s.think.days)) {
+      s.think.days.forEach((d) => {
+        if (d && d.d) { d.d = shiftDateStr(d.d, offsetMs); n++; }
+      });
+      if (s.think.digestTo) s.think.digestTo = shiftDateStr(s.think.digestTo, offsetMs);
+    }
+    return n;
+  }
   function fmtStory(ms, withSec) {
     const d = new Date(ms);
     return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) + " " +
@@ -771,8 +843,11 @@
     const groups = {};
     allMsgs(rec).forEach((msg) => {
       const ts = msg.ts || 0;
+      /* 有没有被压过、是不是「今天」—— 这两条都按真实时间算（水位线就是 ts 轴）。 */
       if (!ts || ts <= m.coveredUntil || ts >= cutoff) return;
-      const d = dateStr(ts);
+      /* 归到哪一天，按故事时间算：开了时间系统后，记忆里的日期要和故事时间轴一致。
+         没开时间系统的线 stsOf 直接返回 ts，等于没变。 */
+      const d = dateStr(stsOf(rec, msg));
       (groups[d] = groups[d] || []).push(msg);
     });
     const dates = Object.keys(groups).sort();
@@ -798,8 +873,12 @@
           break;
         }
       }
-      /* 到这里才算这天处理完（有摘要，或内容太少没什么可压的）→ 推进水位线 */
-      m.coveredUntil = Math.max(m.coveredUntil, endOfDayTs(d));
+      /* 到这里才算这天处理完（有摘要，或内容太少没什么可压的）→ 推进水位线。
+         d 现在是「故事日期」，不能直接 endOfDayTs(d) 拿去和 ts 轴比；
+         取这组消息里最大的真实 ts 才准。 */
+      let lastTs = 0;
+      (groups[d] || []).forEach((mm) => { if ((mm.ts || 0) > lastTs) lastTs = mm.ts; });
+      if (lastTs) m.coveredUntil = Math.max(m.coveredUntil, lastTs);
       done += 1;
       if (save) save();
       if (report) report("已压缩 " + d);
@@ -1123,6 +1202,7 @@
     stickerNamesFor, recentLineTalk, lineDossier,
     /* 故事时间轴（10-15）：主对话 / 手机 / 世界生成 / 摘要都读它 */
     hasTimeline, timeOffset, nowOf, storyAt, fmtStory, fmtStoryShort, weekdayOf,
+    stsOf, sealTimes, shiftDateStr, shiftMemoDates,
     validRange, checkTime, canTimeline, yearsBetween, timeLine, parseYMD, addYears, ageOf, tryJumpTime, DAY_MS, fmtHM,
     markLeft, awayGap, rebaseTime, holdTime, isFrozen, freezeTime, unfreezeTime };
 })();

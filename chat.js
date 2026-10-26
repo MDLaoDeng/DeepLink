@@ -1972,7 +1972,8 @@
     const t = s.time;
     const offset = t.start - t.setAt;
     const base = (typeof msg.ts === "number" && msg.ts > 0) ? msg.ts : Date.now();  /* 回溯点的现实毫秒 */
-    const target = base + offset;                                                    /* 回溯点的故事毫秒 */
+    /* 回溯点的故事毫秒：优先用这条消息自己的 sts（开时间系统时固化过，冻结期的也不会错） */
+    const target = (M.stsOf ? M.stsOf(s, msg) : (base + offset));
     const after = s.messages.length - (i + 1);
     const ok = await UI.confirmDialog("回溯到这里（新建支线）",
       "会新建一条支线，只保留这条及之前的 " + (i + 1) + " 条消息，故事时间回到 " + M.fmtStory(target) +
@@ -2019,14 +2020,16 @@
       }
     }
     /* 记忆先清空占位，水位线压到回溯点（否则压缩会跳过新内容）。
+       水位线是【真实时间轴】（ts），所以这里用 base 而不是 target —— target 是故事时间，
+       两者差着 offset，混用会让压缩要么跳过全部、要么重压一遍。
        认知 / 关系 / 共同经历 / 场景也一起清空：这些是从原线深拷贝来的，里面全是
        **回溯点之后**的内容，重建失败时留着它们比空着更糟（10-20 修）。 */
-    clone.memory = { days: [], weeks: [], months: [], coveredUntil: target };
+    clone.memory = { days: [], weeks: [], months: [], coveredUntil: base };
     clone.cognition = "";
     clone.relation = "";
     clone.shared = "";
     clone.scene = "";
-    clone.time = { start: target, setAt: Date.now(), leftAt: Date.now() };
+    clone.time = { start: target, setAt: Date.now(), leftAt: Date.now(), based: 1 };
     list.push(clone);
     const okSaved = Store.saveSessions(list);
     if (okSaved === false) {
@@ -2652,6 +2655,9 @@
     const kw = $v("#histKeyword").trim();
     const from = parseDateStart($v("#histFrom"));
     const to = parseDateEnd($v("#histTo"));
+    /* 口径（10-26）：系统内时间 = 故事里的日期（sts），真实时间 = 现实里的日期（ts）。
+       没开时间系统的线 stsOf 直接返回 ts，两种口径等价。 */
+    const tbase = ($v("#histTimeBase") || "story");
     if ((mode === "content" || mode === "both") && !kw) { UI.toast("请输入关键词", true); return; }
     if ((mode === "time" || mode === "both") && from === null && to === null) { UI.toast("请选择时间范围", true); return; }
 
@@ -2685,12 +2691,16 @@
         const text = (module === "phone") ? phoneTextOf(m) : activeText(m);
         if (!text) continue;
         if (mode !== "content") {
-          if (typeof m.ts !== "number") continue;
-          if (from !== null && m.ts < from) continue;
-          if (to !== null && m.ts > to) continue;
+          /* 按选定的口径取时间戳再比；故事时间一定存在（stsOf 会回落到 ts） */
+          const baseTs = (tbase === "real" || !Memory || !Memory.stsOf) ? m.ts : Memory.stsOf(s, m);
+          if (typeof baseTs !== "number") continue;
+          if (from !== null && baseTs < from) continue;
+          if (to !== null && baseTs > to) continue;
         }
         if ((mode === "content" || mode === "both") && text.toLowerCase().indexOf(kwLow) < 0) continue;
-        pushTop({ sessionId: s.id, title: s.title || "新对话", index: i, role: m.role, ts: m.ts, content: text, module: module });
+        pushTop({ sessionId: s.id, title: s.title || "新对话", index: i, role: m.role, ts: m.ts,
+          sts: (Memory && Memory.stsOf) ? Memory.stsOf(s, m) : m.ts,
+          content: text, module: module });
       }
       if (mySeq !== histSearchSeq) return;      /* 又点了一次搜索：这次的结果作废，别和新的抢 */
       if (si % 4 === 3) await new Promise(function (r) { setTimeout(r, 0); });
@@ -2702,6 +2712,9 @@
   function renderHistResults(items, kw, mode) {
     const box = $("#histResults");
     box.innerHTML = "";
+    /* 显示的时间也跟着搜索口径走：按系统内搜，就给故事里的日期；
+       否则同一份结果会显示成现实日期，和筛选条件对不上。 */
+    const tbase = ($v("#histTimeBase") || "story");
     if (!items.length) {
       const e = document.createElement("div");
       e.className = "hist-empty";
@@ -2721,7 +2734,7 @@
       const role = document.createElement("span");
       role.textContent = it.role === "user" ? "我" : "AI";
       const time = document.createElement("span");
-      time.textContent = formatTime(it.ts);
+      time.textContent = formatTime(tbase === "real" ? it.ts : (typeof it.sts === "number" ? it.sts : it.ts));
       meta.appendChild(t);
       meta.appendChild(role);
       meta.appendChild(time);

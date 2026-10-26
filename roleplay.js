@@ -1327,6 +1327,8 @@
       setVal("#setSessionAutoMsg", s.autoMsgOn === true ? "on" : (s.autoMsgOn === false ? "off" : ""));
       /* 时间系统：把当前故事时间和「这家角色的合法时段」都摆出来，越界一眼能看见 */
       const tlOn = !!(Memory && Memory.hasTimeline && Memory.hasTimeline(s));
+      /* 只能开一次：开过之后把「选时间 + 应用」整块收起来，只留当前时间那行说明 */
+      setDisplay("#sessionTimeOpen", tlOn ? "none" : "");
       const nowMs = tlOn ? Memory.nowOf(s) : Date.now();
       setVal("#setSessionTime", tlOn ? toLocalInput(nowMs) : "");
       setChecked("#setSessionTimeSync", tlOn && Math.abs(Memory.timeOffset(s)) < 60000);

@@ -1621,6 +1621,9 @@ body.selecting .msg-actions { display: none; }
 .date-row > *:not(:last-child) { margin-right: 8px; }
 .date-row input { flex: 1; }
 .date-sep { color: var(--text-mute); font-size: 14px; }
+/* 搜索的时间口径（系统内 / 真实）：嵌在「时间范围」里，压掉外层 .field 的下边距 */
+#histTimeBaseField { margin: 0 0 10px; }
+#histTimeBaseField > span { font-size: 12px; color: var(--text-mute); }
 
 .hist-results { margin-top: 12px; display: flex; flex-direction: column; }
 .hist-results > *:not(:last-child) { margin-bottom: 8px; }
