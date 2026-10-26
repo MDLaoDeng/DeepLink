@@ -931,6 +931,8 @@
     { id: "summary", name: "助手总结" },
     /* 10-25 补：这两件事以前没传类型，被算进「对话」，看不出来花了多少 */
     { id: "split", name: "角色拆分" },
+    /* 10-26 补：AI 创建（一句话生成整张卡）也是独立调用，别混进「角色拆分」里看不出成本 */
+    { id: "create", name: "AI 创建" },
     { id: "filter", name: "过滤规则" },
     { id: "phone", name: "手机" },
     { id: "auto", name: "自动发信息" },
@@ -3281,6 +3283,62 @@
       setDisabled("#personaSplitRun", false);
     }
   }
+  /* AI 创建（人设，10-26）：一句话 → 上面那几栏。
+     和 AI 拆分分工一样：拆是把现成材料归类，创建是凭一句话造。
+     人设只有「我」这一边，所以不用选范围。 */
+  var lastPersonaBrief = "";
+  function switchPersonaAiTab(which) {
+    var tabs = document.getElementById("personaAiTabs");
+    if (tabs) {
+      var bs = tabs.querySelectorAll(".ai-tab");
+      for (var i = 0; i < bs.length; i++) bs[i].classList.toggle("on", bs[i].getAttribute("data-ai") === which);
+    }
+    var c = document.getElementById("personaAiCreate");
+    var s = document.getElementById("personaAiSplit");
+    if (c) c.hidden = (which !== "create");
+    if (s) s.hidden = (which !== "split");
+  }
+  async function personaCreate(again) {
+    var cur = curPersona();
+    if (!cur) return;
+    var typed = String($v("#personaCreateInput") || "").trim();
+    var brief = typed || lastPersonaBrief;
+    if (!brief) { UI.toast("先写一句话描述你自己", true); return; }
+    lastPersonaBrief = brief;
+    if (!state.settings.apiKey) { UI.toast("先去设置里填 API Key", true); return; }
+    setDisabled("#personaCreateRun", true);
+    setDisabled("#personaCreateAgain", true);
+    setText("#personaCreateState", again ? "AI 正在换一个版本…" : "AI 正在创建…");
+    try {
+      var r = await Memory.createFields(state.settings,
+        brief + (again ? "\n\n（上一版不满意，这次换一个明显不同的方向）" : ""), "me", []);
+      if (r.usage && recordUsage) recordUsage(null, r.usage, "", "create");
+      var keys = PERSONA_FIELDS.map(function (f) { return f[0]; });
+      var n = 0;
+      keys.forEach(function (k) {
+        var v = r.fields[k];
+        v = (typeof v === "number") ? String(v) : (typeof v === "string" ? v.trim() : "");
+        if (!v) return;
+        cur[k] = v;
+        var el = document.getElementById("pf_" + k);
+        if (el) el.value = v;
+        n++;
+      });
+      if (n) personaQueueSave();
+      var notes = Array.isArray(r.fields.notes)
+        ? r.fields.notes.map(function (x) { return String(x || "").trim(); }).filter(Boolean).slice(0, 8)
+        : [];
+      setText("#personaCreateState",
+        (n ? ("已填入 " + n + " 项，可以接着改") : "没生成出可用内容，描述得再具体一点")
+        + (notes.length ? "。替你定的：" + notes.join("、") : ""));
+    } catch (e) {
+      setText("#personaCreateState", "创建失败：" + (e.message || e));
+    } finally {
+      setDisabled("#personaCreateRun", false);
+      setDisabled("#personaCreateAgain", false);
+    }
+  }
+
   function bindPersona() {
     var sel = document.getElementById("personaPick");
     if (sel && !sel.dataset.bound) { sel.dataset.bound = "1"; sel.addEventListener("change", function () { personaPick(sel.value); }); }
@@ -3290,6 +3348,25 @@
     b = document.getElementById("personaApplyBtn");  if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", personaApply); }
     b = document.getElementById("personaSplitRun");  if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", function () { personaSplit(false); }); }
     b = document.getElementById("personaSplitAgain"); if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", function () { personaSplit(true); }); }
+    var at = document.getElementById("personaAiTabs");
+    if (at && !at.dataset.bound) {
+      at.dataset.bound = "1";
+      at.addEventListener("click", function (e) {
+        var b = (e.target && e.target.closest) ? e.target.closest(".ai-tab") : null;
+        if (!b) return;
+        switchPersonaAiTab(b.getAttribute("data-ai"));
+      });
+    }
+    [[document.getElementById("personaCreateRun"), false],
+     [document.getElementById("personaCreateAgain"), true]].forEach(function (pair) {
+      var b = pair[0];
+      if (!b || b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", function () {
+        var r = personaCreate(pair[1]);
+        if (r && r.catch) r.catch(function (e) { UI.toast("创建失败：" + ((e && e.message) || e), true); });
+      });
+    });
     bindWorlds();
     renderWorlds();
   }

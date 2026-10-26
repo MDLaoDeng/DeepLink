@@ -1152,6 +1152,30 @@
     return { fields: parseJsonObject(out.text), usage: out.usage };
   }
 
+  /* AI 创建（10-26）：用户一句话，AI 从零补全。scope = "role"（角色）| "me"（我）。
+     和 splitCharacterFields 的分工：那边是「把现成材料归类」，这边是「凭一句话造」。
+     返回的 fields 里另外带 worldName（匹配到的世界观名）与 notes（替你定的关键项）。 */
+  const CREATE_KEYS_ROLE = [
+    ["aiName", "角色名"], ["aiGender", "性别"], ["age", "年龄"],
+    ["aiPersona", "性格"], ["aiAppearance", "外貌"], ["aiBackground", "背景"],
+    ["aiLikes", "喜好"], ["aiStyle", "说话风格"], ["aiHealth", "身体状况"],
+    ["shared", "共同经历（对话开始前）"], ["relation", "当前关系（初始）"], ["aiDirective", "AI 指令"]
+  ];
+  const CREATE_KEYS_ME = [
+    ["myName", "我的名称"], ["myGender", "我的性别"], ["aiCallMe", "角色对我的称呼"],
+    ["myPersona", "我的性格"], ["myAppearance", "我的外貌"], ["myBackground", "我的背景"], ["myLikes", "我的喜好"]
+  ];
+  async function createFields(settings, brief, scope, worldNames) {
+    const keys = (scope === "me") ? CREATE_KEYS_ME : CREATE_KEYS_ROLE;
+    const dict = keys.map((k) => k[0] + "（" + k[1] + "）：（空）").join("\n");
+    const wl = (worldNames && worldNames.length) ? worldNames.join(" / ") : "（无）";
+    const user = "字段表（键（说明）：现有内容）：\n" + dict +
+      "\n\n可选世界观：" + wl +
+      "\n\n用户的一句话：\n" + String(brief || "");
+    const out = await summarize(settings, CONFIG.COMPRESS_PROMPTS.createFromBrief, user, 2200);
+    return { fields: parseJsonObject(out.text), usage: out.usage };
+  }
+
   /* 解析「〖精华〗/〖月·k〗/〖周·k〗/〖日期〗」行；无任何可识别行时返 null */
   function parseMemoryLines(text) {
     const out = { core: "", months: [], weeks: [], days: [] };
@@ -1216,7 +1240,7 @@
     return { ok: true, usage: out.usage };
   }
 
-  window.Memory = { buildSystemText, worldFor, personaText, memoryText, memoryForPrompt, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, correctMemory, activePersona,
+  window.Memory = { buildSystemText, worldFor, personaText, memoryText, memoryForPrompt, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, createFields, correctMemory, activePersona,
     /* 表情 → 可读说明（10-19）：手机那边有自己的 msgText，也要用同一套翻译，
        否则模型收到的是 [[s:xxx]] 这种原始标记 */
     emojiReadable, msgText,

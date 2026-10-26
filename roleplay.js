@@ -169,6 +169,30 @@
     bindCharPhoneAvatar();
     bindCharAvatar();
     bindPeriodField();
+    /* AI 面板：两个标签（创建 / 拆分）+ 创建按钮 */
+    const aiTabs = document.getElementById("charAiTabs");
+    if (aiTabs && !aiTabs.dataset.bound) {
+      aiTabs.dataset.bound = "1";
+      aiTabs.addEventListener("click", (e) => {
+        const b = (e.target && e.target.closest) ? e.target.closest(".ai-tab") : null;
+        if (!b) return;
+        switchCharAiTab(b.getAttribute("data-ai"));
+      });
+    }
+    [["#charCreateRun", false], ["#charCreateAgain", true]].forEach(([sel, again]) => {
+      const btn = $(sel);
+      if (!btn || btn.dataset.bound) return;
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", () => {
+        const r = runCharCreate(again);
+        if (r && r.catch) r.catch((e) => UI.toast("创建失败：" + ((e && e.message) || e), true));
+      });
+    });
+    const ccBtn = $("#charCreateCancel");
+    if (ccBtn && !ccBtn.dataset.bound) {
+      ccBtn.dataset.bound = "1";
+      ccBtn.addEventListener("click", () => { const p = $("#charSplitPanel"); if (p) p.hidden = true; });
+    }
     /* 角色页的「我的设定」下拉：列全局「我的人设」，选一套点套用 */
     const pab = $("#cfPersonaApply");
     if (pab && !pab.dataset.bound) {
@@ -851,6 +875,91 @@
     } finally {
       setDisabled("#charSplitRun", false);
       setDisabled("#charSplitAgain", false);
+    }
+  }
+
+  /* ── AI 创建（10-26）──────────────────────────────────────
+     用户只给一句话，AI 从零补全。和「AI 拆分」的分工：
+       拆分 = 把现成材料归类，不创作；创建 = 凭一句话造，必须大胆编。
+     两个选项（生成角色 / 生成「我」）是单选（radio），一次只填一边。
+     结果**不自动保存** —— 只写进表单，用户检查后自己点「保存设定」。 */
+  let lastCreateBrief = "";
+
+  function switchCharAiTab(which) {
+    const tabs = document.getElementById("charAiTabs");
+    if (tabs) {
+      const bs = tabs.querySelectorAll(".ai-tab");
+      for (let i = 0; i < bs.length; i++) {
+        bs[i].classList.toggle("on", bs[i].getAttribute("data-ai") === which);
+      }
+    }
+    const c = document.getElementById("charAiCreate");
+    const s = document.getElementById("charAiSplit");
+    if (c) c.hidden = (which !== "create");
+    if (s) s.hidden = (which !== "split");
+  }
+
+  async function runCharCreate(again) {
+    const ch = curChar();
+    if (!ch) { UI.toast("请先选择或新建一个角色", true); return; }
+    const typed = String($v("#charCreateInput") || "").trim();
+    /* 「换一个版本」允许不重新输入：沿用上一次那句描述 */
+    const brief = typed || lastCreateBrief;
+    if (!brief) { UI.toast("先写一句话描述这个角色", true); return; }
+    lastCreateBrief = brief;
+    const meEl = document.getElementById("charCreateMe");
+    const me = !!(meEl && meEl.checked);
+    if (!state.settings.apiKey) { UI.toast("先去设置里填 API Key", true); return; }
+    setDisabled("#charCreateRun", true);
+    setDisabled("#charCreateAgain", true);
+    setText("#charCreateState", again ? "AI 正在换一个版本…" : "AI 正在创建…");
+    try {
+      const worlds = (window.DL && DL.worldOptions) ? DL.worldOptions() : [];
+      const r = await Memory.createFields(
+        state.settings,
+        brief + (again ? "\n\n（上一版不满意，这次换一个明显不同的方向）" : ""),
+        me ? "me" : "role",
+        worlds.map((w) => w.name)
+      );
+      if (r.usage) recordUsage(null, r.usage, ch.id, "create");
+      const asText = (v) => (typeof v === "number") ? String(v) : (typeof v === "string" ? v.trim() : "");
+      let n = 0;
+      if (me) {
+        ["myName", "myGender", "aiCallMe", "myPersona", "myAppearance", "myBackground", "myLikes"].forEach((k) => {
+          const v = asText(r.fields[k]);
+          if (!v) return;
+          setFieldToForm(k, v);
+          n++;
+        });
+      } else {
+        ["aiName", "aiGender", "age", "aiPersona", "aiAppearance", "aiBackground",
+          "aiLikes", "aiStyle", "aiHealth", "shared", "relation", "aiDirective"].forEach((k) => {
+          const v = asText(r.fields[k]);
+          if (!v) return;
+          if (k === "aiName") { setVal("#charName", v); n++; return; }
+          setFieldToForm(k, v);
+          n++;
+        });
+        /* 世界观：模型只给名字，按名字找回库里那套的正文填进去（存引用太隐蔽，用户看不见） */
+        const wn = asText(r.fields.worldName);
+        if (wn) {
+          const hit = worlds.filter((w) => w.name === wn)[0];
+          const txt = (hit && window.DL && DL.worldTextOf) ? DL.worldTextOf(hit.id) : "";
+          if (txt) { setVal("#cf_world", txt); n++; }
+        }
+      }
+      /* 「替你定的项」必须说出来 —— 用户要知道哪些是 AI 编的，才好判断要不要改 */
+      const notes = Array.isArray(r.fields.notes)
+        ? r.fields.notes.map((x) => String(x || "").trim()).filter(Boolean).slice(0, 8)
+        : [];
+      setText("#charCreateState",
+        (n ? ("已填入 " + n + " 项（不自动保存，检查后点「保存设定」）") : "没生成出可用内容，描述得再具体一点")
+        + (notes.length ? "。替你定的：" + notes.join("、") : ""));
+    } catch (e) {
+      setText("#charCreateState", "创建失败：" + (e.message || e));
+    } finally {
+      setDisabled("#charCreateRun", false);
+      setDisabled("#charCreateAgain", false);
     }
   }
 

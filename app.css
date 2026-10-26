@@ -1110,6 +1110,18 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 .cf-persona-row select { flex: 1; min-width: 0; }
 .cf-persona-row .btn { flex: none; margin-left: 10px; }
 
+/* AI 面板的两个标签（AI 创建 / AI 拆分）：分段按钮，选中填主题色底 */
+.ai-tabs {
+  display: flex; margin-bottom: 12px; padding: 3px;
+  background-color: var(--panel-2); border-radius: 12px;
+}
+.ai-tab {
+  flex: 1; padding: 8px 6px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--text-dim); font: inherit; font-size: 13px; cursor: pointer;
+}
+.ai-tab.on { background-color: var(--accent); color: #fff; }
+.ai-scope { display: flex; flex-direction: column; margin-bottom: 4px; }
+
 /* 世界观库（10-26）：面板默认折叠；展开后一次正好完整露出 5 套，多的在里面滚。
    每项 44px（9 上下内边距 + 20 行高 + 6 间距）→ 5 项 220px，留 8px 余量。 */
 .world-panel { margin-top: 10px; }

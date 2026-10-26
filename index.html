@@ -730,12 +730,27 @@
           <button id="personaDelBtn" class="btn ghost mini" type="button">删除这套</button>
           <button id="personaApplyBtn" class="btn ghost mini" type="button">套用到当前角色卡</button>
         </div>
+        <div class="ai-tabs" id="personaAiTabs">
+          <button type="button" class="ai-tab on" data-ai="create">AI 创建</button>
+          <button type="button" class="ai-tab" data-ai="split">AI 拆分</button>
+        </div>
+        <div id="personaAiCreate">
+          <label class="field"><span>一句话描述你自己（AI 会大胆补全上面几栏）</span><textarea id="personaCreateInput" rows="3" placeholder="例：高三学生，性子慢，喜欢看小说，不太会主动找人说话"></textarea></label>
+          <div class="char-actions">
+            <button id="personaCreateRun" class="btn primary" type="button">AI 创建</button>
+            <button id="personaCreateAgain" class="btn ghost" type="button">换一个版本</button>
+          </div>
+          <p class="hint">会消耗一次调用。结果直接填进上面几栏，还能接着改；不满意就换一版。</p>
+          <div id="personaCreateState" class="hint"></div>
+        </div>
+        <div id="personaAiSplit" hidden>
         <label class="field"><span>写一段关于你自己的话，交给 AI 拆进上面几栏</span><textarea id="personaSplitInput" rows="3" placeholder="例：我 17 岁，高一，性格有点闷、熟了话多，喜欢看小说和打球，不太会主动找人聊天…"></textarea></label>
         <div class="char-actions">
           <button id="personaSplitRun" class="btn primary" type="button">AI 拆分</button>
           <button id="personaSplitAgain" class="btn ghost" type="button">再次拆分</button>
         </div>
         <div id="personaSplitState" class="hint"></div>
+        </div>
 
         <div class="mem-title">世界观（最多 50 套；角色卡里没单独填，就用这里选中的那一套）</div>
         <label class="field"><span>当前使用（<b id="worldCount">0</b> / 50 套）</span><select id="worldPick"></select></label>
@@ -1004,11 +1019,31 @@
         <label class="field"><span>角色名（用于列表显示）</span><input id="charName" type="text" placeholder="如：小满"></label>
         <div class="char-split">
           <div class="char-split-head">
-            <button id="charSplitBtn" class="btn ghost" type="button">AI 自动拆分</button>
+            <button id="charSplitBtn" class="btn ghost" type="button">AI 创建 / 拆分</button>
             <button id="charSplitHelp" class="icon-btn tiny" type="button" aria-label="说明"><span class="qmark">?</span></button>
           </div>
           <p id="charSplitHint" class="hint char-split-hint" hidden>懒得拆分？AI 一键细分！</p>
           <div id="charSplitPanel" class="char-split-panel" hidden>
+            <div class="ai-tabs" id="charAiTabs">
+              <button type="button" class="ai-tab on" data-ai="create">AI 创建</button>
+              <button type="button" class="ai-tab" data-ai="split">AI 拆分</button>
+            </div>
+            <div id="charAiCreate">
+              <label class="field"><span>一句话描述你想聊的角色（AI 会大胆补全）</span><textarea id="charCreateInput" rows="3" placeholder="例：民国时期一个话少的老裁缝，脾气古怪但手很稳"></textarea></label>
+              <div class="ai-scope">
+                <label class="check-field"><input type="radio" name="charCreateScope" id="charCreateRole" checked><span>生成角色设定</span></label>
+                <label class="check-field"><input type="radio" name="charCreateScope" id="charCreateMe"><span>生成「我」的设定</span></label>
+              </div>
+              <div class="char-actions">
+                <button id="charCreateCancel" class="btn ghost" type="button">收起</button>
+                <button id="charCreateRun" class="btn primary" type="button">AI 创建</button>
+                <button id="charCreateAgain" class="btn ghost" type="button">换一个版本</button>
+              </div>
+              <p class="hint">会消耗一次调用（约 1500~2500 token）。结果<b>不自动保存</b>，检查后再点「保存设定」；
+                它会列出「替你定的项」，不满意就换一版。世界观会自动从库里挑最贴合的一套。</p>
+              <div id="charCreateState" class="hint"></div>
+            </div>
+            <div id="charAiSplit" hidden>
             <label class="field"><span>把你想到的都写进来（想到什么写什么，不用管格式）</span><textarea id="charSplitInput" rows="5" placeholder="例：我是阿哲，25 岁，在上海做设计，性格闷骚、嘴硬心软；她叫小满，是我大学同学，说话软软的带点方言，喜欢喝凉茶……"></textarea></label>
             <label class="check-field"><input type="checkbox" id="charSplitRoleOnly"><span>只拆角色相关的字段（「我」的那几栏原样保留，不填、也不覆盖）</span></label>
             <div class="char-actions">
@@ -1018,6 +1053,7 @@
             </div>
             <p class="hint">「<b>再次拆分</b>」不用再写输入框 —— 直接拿上面各字段里<b>现在的内容</b>重新整理、重新归位一遍。这次的内容和原有冲突时，以这次的为准。</p>
             <div id="charSplitState" class="hint"></div>
+            </div>
           </div>
         </div>
         <div class="field" id="cfPersonaRow">
