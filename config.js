@@ -1357,6 +1357,7 @@
       roleplayEnabled: false,
       activeCharacterId: "",
       myName: "",
+      myGender: "",
       myPersona: "",
       myAppearance: "",
       myBackground: "",

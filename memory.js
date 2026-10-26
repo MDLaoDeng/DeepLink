@@ -204,17 +204,21 @@
 
   /* 我的设定的取值优先级（用户口径：「以角色卡的为准」）：
      角色卡里的「你的*」→ 当前选中的「我的人设」→ 旧的 settings.my*（历史遗留字段）。 */
-  function resolveMy(settings, f) {
-    const s = settings || {};
+  function resolveMy(settings, f, s) {
+    const st = settings || {};
     const p = activePersona(settings);
+    const se = s || {};
+    /* 优先级：会话级 → 角色卡 → 当前人设 → 旧的 settings.my*（用户口径「以角色卡的为准」，
+       但会话级是这条线自己的覆盖，最高）。 */
     return {
-      name: f.myName || p.myName || s.myName || "",
-      persona: f.myPersona || p.myPersona || s.myPersona || "",
-      appearance: f.myAppearance || p.myAppearance || s.myAppearance || "",
-      background: f.myBackground || p.myBackground || s.myBackground || "",
-      likes: f.myLikes || p.myLikes || s.myLikes || "",
+      name: se.myName || f.myName || p.myName || st.myName || "",
+      gender: se.myGender || f.myGender || p.myGender || st.myGender || "",
+      persona: se.myPersona || f.myPersona || p.myPersona || st.myPersona || "",
+      appearance: se.myAppearance || f.myAppearance || p.myAppearance || st.myAppearance || "",
+      background: se.myBackground || f.myBackground || p.myBackground || st.myBackground || "",
+      likes: se.myLikes || f.myLikes || p.myLikes || st.myLikes || "",
       /* 身体状况：以前只存在角色卡里、从没进过提示词 */
-      health: f.myHealth || p.myHealth || s.myHealth || "",
+      health: se.myHealth || f.myHealth || p.myHealth || st.myHealth || "",
       callMe: f.aiCallMe || p.aiCallMe || ""
     };
   }
@@ -315,7 +319,7 @@
     if (!ch) return "";
     const o = opts || {};
     const f = ch.fields || {};
-    const my = resolveMy(settings, f);
+    const my = resolveMy(settings, f, s);
     const L = [CONFIG.ROLEPLAY_PROMPT, ""];
     /* 表情包（10-19）：只把「能用」的列给模型 —— scope=me 的是用户自己用的，不列。
        写法是 [表情:名字]，渲染层会把它画成图；不写就不发，绝不强求。 */
@@ -339,6 +343,7 @@
        很出戏，而且角色本来也不该负责调这些。注入点只剩 chat.js 的助手分支。 */
     L.push("【我（用户）的设定】");
     L.push("名称：" + (my.name || "未设定") + "；你对我的称呼：" + (my.callMe || my.name || "未设定"));
+    if (my.gender) L.push("性别：" + my.gender);
     if (my.persona) L.push("性格：" + my.persona);
     if (my.appearance) L.push("外貌：" + my.appearance);
     if (my.background) L.push("背景：" + my.background);

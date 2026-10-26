@@ -3097,6 +3097,7 @@
      注入优先级（用户口径「以角色卡的为准」）：角色卡「你的*」→ 当前人设 → 旧的 settings.my*（见 memory.js 的 resolveMy）。 */
   var PERSONA_FIELDS = [
     ["myName", "我的名称", 0],
+    ["myGender", "我的性别（男 / 女 / 其他，其他可自填）", 0],
     ["aiCallMe", "你对我的称呼", 0],
     ["myPersona", "我的性格", 1],
     ["myAppearance", "我的外貌", 1],
@@ -3211,23 +3212,36 @@
   function personaApply() {
     var cur = curPersona();
     if (!cur) return;
+    personaApplyById(cur.id);
+  }
+  /* 按 id 套用（角色页那个下拉用这个；不依赖「当前选中的是哪套」） */
+  function personaApplyById(id) {
+    var list = personaList();
+    var p = null;
+    for (var i = 0; i < list.length; i++) { if (list[i].id === id) p = list[i]; }
+    if (!p) { UI.toast("找不到这套人设", true); return 0; }
     var ch = activeCharacter();
-    if (!ch) { UI.toast("先去角色页选一个角色", true); return; }
+    if (!ch) { UI.toast("先去角色页选一个角色", true); return 0; }
     var f = ch.fields || (ch.fields = {});
     var n = 0;
     PERSONA_FIELDS.forEach(function (x) {
-      var v = String(cur[x[0]] || "").trim();
+      var v = String(p[x[0]] || "").trim();
       if (!v) return;
-      if (String(f[x[0]] || "").trim()) return;
+      if (String(f[x[0]] || "").trim()) return;      /* 已填的不覆盖 */
       f[x[0]] = v; n++;
     });
-    if (!n) { UI.toast("角色卡里这几栏都填过了，没动", true); return; }
-    var list = Store.getCharacters();
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].id === ch.id) list[i] = Object.assign({}, list[i], { fields: f, updatedAt: Date.now() });
+    if (!n) { UI.toast("角色卡里这几栏都填过了，没动", true); return 0; }
+    var cl = Store.getCharacters();
+    for (var k = 0; k < cl.length; k++) {
+      if (cl[k].id === ch.id) cl[k] = Object.assign({}, cl[k], { fields: f, updatedAt: Date.now() });
     }
-    Store.saveCharacters(list);
-    UI.toast("已把「" + (cur.name || "人设") + "」套进角色卡（填了 " + n + " 个空栏）");
+    Store.saveCharacters(cl);
+    UI.toast("已把「" + (p.name || "人设") + "」套进角色卡（填了 " + n + " 个空栏）");
+    return n;
+  }
+  /* 给角色页那个下拉用：只要 id 和名字，别把整份人设递出去 */
+  function personaOptions() {
+    return personaList().map(function (p) { return { id: p.id, name: p.name || "未命名" }; });
   }
   async function personaSplit(again) {
     var cur = curPersona();
@@ -3347,6 +3361,8 @@
     doExportDownload: doExportDownload, doExportShare: doExportShare, doExportCopy: doExportCopy,
     importFromText: importFromText, importFromFile: importFromFile, syncExportScope: syncExportScope,
     openData: openData, saveImage: saveImage,
+    /* 我的人设（10-26）：角色页要用「选一套套进去」，所以把列表和按 id 套用挂出来 */
+    personaOptions: personaOptions, personaApplyById: personaApplyById,
     snapshotSession: snapshotSession, sessionsForExport: sessionsForExport, saveSnapshot: saveSnapshot,
     buildExportData: buildExportData, applyImport: applyImport,
     maybeAutoBackup: maybeAutoBackup, backupNow: backupNow, restoreBackupNow: restoreBackupNow,

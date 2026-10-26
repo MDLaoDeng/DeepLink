@@ -1097,6 +1097,18 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 .field > *:not(:last-child) { margin-bottom: 6px; }
 .field > span { font-size: 14px; color: var(--text-dim); }
 .field small { font-size: 11px; color: var(--text-mute); }
+/* 年月日三格手填（出生日期）。两条竖线分隔，不弹滚轮面板 ——
+   用户口径：滚轮太慢，直接填三个数字更快。 */
+.ymd-row { display: flex; align-items: center; }
+.ymd-row input { flex: 1; min-width: 0; text-align: center; }
+.ymd-row .ymd-sep {
+  flex: none; width: 1px; height: 18px; margin: 0 8px;
+  background-color: var(--border);
+}
+/* 角色页「我的设定」：下拉 + 套用按钮一行（不用 gap，Chrome 83 的 flex 不支持） */
+.cf-persona-row { display: flex; align-items: center; }
+.cf-persona-row select { flex: 1; min-width: 0; }
+.cf-persona-row .btn { flex: none; margin-left: 10px; }
 .field input, .field textarea, .field select {
   width: 100%; padding: 10px 12px; border-radius: 12px; font: inherit;
   background-color: var(--panel-2); color: var(--text);

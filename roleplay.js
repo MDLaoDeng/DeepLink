@@ -82,10 +82,13 @@
   /* ── 角色扮演 ──────────────────────────────────── */
   const CHAR_FIELDS = [
     ["myName", "我的名称", "text"],
+    ["myGender", "我的性别（男 / 女 / 其他，其他可自填；留空就按整套设定推断）", "text"],
     ["aiCallMe", "你对我的称呼", "text"],
     ["aiName", "你的名称", "text"],
     ["age", "你的当前年龄（填数字，时间系统要用）", "text"],
-    ["birth", "你的出生日期（时间系统用它算合法时段）", "date"],
+    /* 出生日期改成三格手填（10-26 用户口径：滚轮面板太慢，直接填年月日）
+       —— type 是 ymd 的那栏由 buildCharForm 单独生成，不走 data-wheel。 */
+    ["birth", "你的出生日期（时间系统用它算合法时段）", "ymd"],
     ["aiGender", "你的性别（男 / 女 / 其他，其他可自填；没写就按整套设定推断）", "text"],
     ["myPersona", "我的性格", "textarea"],
     ["myAppearance", "我的外貌", "textarea"],
@@ -108,7 +111,7 @@
   /* 「关于我（你）」的字段：勾了「只拆角色相关」时这几栏**不交给 AI、也不写回**。
      ⚠️ 命名容易看反：**my\* 是「你」（用户）的，ai\* 才是「角色」的**
      （角色的名字单独在 #charName，所以「我的名称」指的是用户的名字）。 */
-  const MY_FIELDS = ["myName", "aiCallMe", "myPersona", "myAppearance", "myBackground", "myLikes", "myHealth"];
+  const MY_FIELDS = ["myName", "myGender", "aiCallMe", "myPersona", "myAppearance", "myBackground", "myLikes", "myHealth"];
   /* 发消息前的必填项（角色相关 + 共享）——缺任何一栏都不让发（见 chat.js 的 ensureCharReady）。
      不参与校验的：格式化 / 我的相关字段 / AI 筛选规则 / 对话名称（用户明确点过这几类）。
      age 例外：只在「时间系统」开着时必填。 */
@@ -125,43 +128,95 @@
       l.className = "field";
       const sp = document.createElement("span");
       sp.textContent = label;
-      const input = type === "textarea" ? document.createElement("textarea") : document.createElement("input");
-      if (type === "textarea") input.rows = 2;
-      else if (type === "date") {
-        /* 出生日期也走自研滚轮（10-18：系统原生的太丑） */
-        input.type = "text";
-        input.readOnly = true;
-        input.setAttribute("data-wheel", "date");
-        input.placeholder = "点这里选日期";
-      } else input.type = "text";
-      input.id = "cf_" + key;
       l.appendChild(sp);
-      l.appendChild(input);
-      /* 出生日期：滚轮只到 1900 年（picker.js 的年列表），公元元年那一档只能手输年份。
-         填 0 = 无限年龄（年龄栏禁用，但时间系统照常能开）。10-20 用户要求。 */
-      if (key === "birth") {
-        const yr = document.createElement("input");
-        yr.type = "text";
-        yr.id = "cf_birth_year";
-        yr.placeholder = "公元年份（1–9999；填 0 = 无限年龄）";
-        yr.setAttribute("inputmode", "numeric");
-        yr.style.marginTop = "6px";
-        yr.addEventListener("input", function () {
-          const inf = String(yr.value || "").trim().replace(/[^\d]/g, "") === "0";
-          const age = $("#cf_age");
-          if (age) {
-            age.disabled = inf;
-            if (inf) age.value = "";
-            age.placeholder = inf ? "无限年龄（不限制时段）" : "";
-          }
+      if (type === "ymd") {
+        /* 年 / 月 / 日 三格手填，中间两条竖线分隔（10-26 用户口径：滚轮太慢，比手填慢不少）。
+           不挂 data-wheel，所以点了也不会弹滚轮面板。年填 0 = 无限年龄（月日忽略）。 */
+        const row = document.createElement("div");
+        row.className = "ymd-row";
+        [["cf_birth_y", "年", 4], ["cf_birth_m", "月", 2], ["cf_birth_d", "日", 2]].forEach((cfg, i) => {
+          if (i) { const sep = document.createElement("i"); sep.className = "ymd-sep"; row.appendChild(sep); }
+          const inp = document.createElement("input");
+          inp.type = "text";
+          inp.id = cfg[0];
+          inp.placeholder = cfg[1];
+          inp.maxLength = cfg[2];
+          inp.setAttribute("inputmode", "numeric");
+          /* 只留数字：手机上弹数字键盘，顺手把粘进来的「2012年」清成 2012 */
+          inp.addEventListener("input", function () {
+            const v = String(inp.value || "").replace(/[^\d]/g, "");
+            if (v !== inp.value) inp.value = v;
+            if (cfg[0] === "cf_birth_y") syncAgeByBirthYear(v);
+          });
+          row.appendChild(inp);
         });
-        l.appendChild(yr);
+        l.appendChild(row);
+      } else {
+        const input = type === "textarea" ? document.createElement("textarea") : document.createElement("input");
+        if (type === "textarea") input.rows = 2;
+        else if (type === "date") {
+          /* 生理期这类还用自研滚轮（只有年月日一位，手填没必要） */
+          input.type = "text";
+          input.readOnly = true;
+          input.setAttribute("data-wheel", "date");
+          input.placeholder = "点这里选日期";
+        } else input.type = "text";
+        input.id = "cf_" + key;
+        l.appendChild(input);
       }
       box.appendChild(l);
     });
     bindCharPhoneAvatar();
     bindCharAvatar();
     bindPeriodField();
+    /* 角色页的「我的设定」下拉：列全局「我的人设」，选一套点套用 */
+    const pab = $("#cfPersonaApply");
+    if (pab && !pab.dataset.bound) {
+      pab.dataset.bound = "1";
+      pab.addEventListener("click", applyPersonaToChar);
+    }
+  }
+
+  /* 填充/刷新「我的设定」下拉（全局人设可能刚改过，每次打开角色页都刷一次） */
+  function fillPersonaPick() {
+    const sel = $("#cfPersonaPick");
+    if (!sel) return;
+    let list = [];
+    try { list = (window.DL && DL.personaOptions) ? DL.personaOptions() : []; } catch (e) { list = []; }
+    sel.innerHTML = "";
+    if (!list.length) {
+      const o = document.createElement("option");
+      o.value = ""; o.textContent = "（还没有全局人设，去设置里建一套）";
+      sel.appendChild(o);
+      return;
+    }
+    list.forEach((p) => {
+      const o = document.createElement("option");
+      o.value = p.id; o.textContent = p.name;
+      sel.appendChild(o);
+    });
+    /* 默认选中全局当前在用的那套 */
+    const cur = (state.settings && state.settings.activePersonaId) || "";
+    if (cur && list.some((p) => p.id === cur)) sel.value = cur;
+  }
+
+  /* 套用：只填空栏（以角色卡为准），和设置页那个按钮同一套逻辑 */
+  function applyPersonaToChar() {
+    const sel = $("#cfPersonaPick");
+    const id = sel ? sel.value : "";
+    if (!id) { UI.toast("先在设置里建一套「我的人设」", true); return; }
+    const n = (window.DL && DL.personaApplyById) ? DL.personaApplyById(id) : 0;
+    if (n > 0) fillCharacterForm(activeCharacter());   /* 套完刷新表单，能看到填进来的值 */
+  }
+
+  /* 年份填 0 → 无限年龄：年龄栏禁用并清空（沿用 10-20 的口径） */
+  function syncAgeByBirthYear(yv) {
+    const inf = String(yv || "") === "0";
+    const age = $("#cf_age");
+    if (!age) return;
+    age.disabled = inf;
+    if (inf) age.value = "";
+    age.placeholder = inf ? "无限年龄（不限制时段）" : "";
   }
 
   /* 角色卡的「默认手机头像」（10-19 用户要求）：手机页里这个人用哪张脸。
@@ -720,13 +775,22 @@
       /* 「手机角色类型」只对手机角色有意义：现实扮演角色根本没有「通过手机联系」
          这一说，露出来只会让人误填成「相熟型」然后一聊就被「填齐设定」拦住。 */
       setDisplay("#phoneKindField", (has && ch.phoneOnly) ? "" : "none");
+      /* 「我的设定」下拉：全局人设可能刚改过，每次进来刷一遍 */
+      fillPersonaPick();
       if (ch) {
         setVal("#charName", ch.name || "");
-        CHAR_FIELDS.forEach(([key]) => setVal("#cf_" + key, (ch.fields && ch.fields[key]) || ""));
-        /* 出生年份单独一格（滚轮到不了公元元年）；0000 显示成 0，方便识别「无限年龄」 */
+        CHAR_FIELDS.forEach(([key]) => {
+          if (key === "birth") return;         /* 出生日期是三格，单独回填 */
+          setVal("#cf_" + key, (ch.fields && ch.fields[key]) || "");
+        });
+        /* 出生日期拆进三格；0000-00-00 只在「年」那格显示 0（月日留空），一眼看出是无限年龄 */
         const bv = String((ch.fields && ch.fields.birth) || "");
-        const ym = /^(\d{4})-/.exec(bv);
-        setVal("#cf_birth_year", ym ? String(Number(ym[1])) : "");
+        const bm = /^(\d{1,4})-(\d{1,2})-(\d{1,2})$/.exec(bv);
+        const bInf = !!(bm && bm[1] === "0000");
+        setVal("#cf_birth_y", bm ? String(Number(bm[1])) : "");
+        setVal("#cf_birth_m", (bm && !bInf) ? String(Number(bm[2])) : "");
+        setVal("#cf_birth_d", (bm && !bInf) ? String(Number(bm[3])) : "");
+        syncAgeByBirthYear(bm ? String(Number(bm[1])) : "");
         syncAgeField(ch);
         avatarDraft.char = ch.avatar || "";
         renderAvatarPreview("#cfAvPreview", avatarDraft.char, "assistant");
@@ -747,20 +811,27 @@
 
   function readCharacterForm() {
     const fields = {};
-    CHAR_FIELDS.forEach(([key]) => { fields[key] = $v("#cf_" + key); });
-    /* 年份框优先覆盖滚轮选出来的年（10-20）：
-       填 0 → 0000-00-00（无限年龄）；填 1~9999 → 只换年份、月日沿用滚轮。 */
-    const raw = String($v("#cf_birth_year") || "").trim().replace(/[^\d]/g, "");
-    if (raw !== "") {
-      const y = Number(raw);
-      if (y === 0) {
-        fields.birth = "0000-00-00";
-        fields.age = "";                 /* 无限年龄，年龄栏作废 */
-      } else if (y >= 1 && y <= 9999) {
-        const m = /^\d{4}-(\d{1,2})-(\d{1,2})$/.exec(String(fields.birth || ""));
-        const mo = m ? m[1] : "01", dd = m ? m[2] : "01";
-        fields.birth = String(y).padStart(4, "0") + "-" + ("0" + mo).slice(-2) + "-" + ("0" + dd).slice(-2);
-      }
+    CHAR_FIELDS.forEach(([key]) => {
+      if (key === "birth") return;           /* 下面从三格拼 */
+      fields[key] = $v("#cf_" + key);
+    });
+    /* 出生日期：三格拼回 YYYY-MM-DD。
+       年填 0 → 0000-00-00（无限年龄，年龄栏作废）；
+       月 / 日留空就补 01（parseYMD 只认完整三段，缺一段会当成「没填」）；
+       三格全空 = 真的没填，不硬塞一个默认日期。 */
+    const by = String($v("#cf_birth_y") || "").replace(/[^\d]/g, "");
+    const bmo = String($v("#cf_birth_m") || "").replace(/[^\d]/g, "");
+    const bd = String($v("#cf_birth_d") || "").replace(/[^\d]/g, "");
+    if (!by && !bmo && !bd) {
+      fields.birth = "";
+    } else if (by === "0") {
+      fields.birth = "0000-00-00";
+      fields.age = "";
+    } else {
+      const y = Math.min(9999, Math.max(1, Number(by) || 1));
+      const mo = Math.min(12, Math.max(1, Number(bmo) || 1));
+      const dd = Math.min(31, Math.max(1, Number(bd) || 1));
+      fields.birth = String(y).padStart(4, "0") + "-" + ("0" + mo).slice(-2) + "-" + ("0" + dd).slice(-2);
     }
     return { name: $v("#charName").trim() || "未命名角色", fields };
   }
@@ -1321,6 +1392,7 @@
       } catch (e) { /* 记不上就退回「全部回写」的老行为，不影响功能 */ }
       /* 本线年龄 + 混搭模式（10-20） */
       setVal("#setSessionAge", s.age == null ? "" : String(s.age));
+      setVal("#setSessionMyGender", s.myGender || "");
       setChecked("#setSessionAutoFreeze", !!s.autoFreeze);
       setChecked("#setSessionAutoBackup", !!s.autoBackup);
       /* 主动发消息：跟随全局 / 允许 / 不允许 */

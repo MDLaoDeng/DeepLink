@@ -783,6 +783,7 @@
       <div id="sessionRoleWrap" class="settings-section">
         <h3>角色扮演 · 本对话 <span id="sessionLineBadge" class="pill">主线</span></h3>
         <label class="field"><span>本线年龄（留空 = 用角色卡的；年龄随时间系统变化）</span><input id="setSessionAge" type="text" inputmode="numeric" placeholder="例：17（留空则按出生日期推算）"></label>
+        <label class="field"><span>本线「我的性别」（留空跟随角色卡 / 全局人设）</span><input id="setSessionMyGender" type="text" placeholder="男 / 女 / 其他（其他可自填）"></label>
         <label class="field"><span>当前关系（本对话专属，随记忆自动更新）</span><textarea id="setSessionRelation" rows="2" placeholder="此刻两人的关系状态…"></textarea></label>
         <label class="field"><span>共同经历（只写这段对话开始之前的事）</span><textarea id="setSessionShared" rows="4" placeholder="开局之前两人共同经历过什么…（聊天之后发生的事不用写这里，那些属于记忆）"></textarea></label>
         <label class="field"><span>当前场景（本对话专属，随对话自动更新）</span><textarea id="setSessionScene" rows="3" placeholder="此刻在哪、发生什么、什么氛围…"></textarea></label>
@@ -997,6 +998,14 @@
             <p class="hint">「<b>再次拆分</b>」不用再写输入框 —— 直接拿上面各字段里<b>现在的内容</b>重新整理、重新归位一遍。这次的内容和原有冲突时，以这次的为准。</p>
             <div id="charSplitState" class="hint"></div>
           </div>
+        </div>
+        <div class="field" id="cfPersonaRow">
+          <span>我的设定（从全局「我的人设」套用）</span>
+          <div class="cf-persona-row">
+            <select id="cfPersonaPick"></select>
+            <button class="btn ghost" id="cfPersonaApply" type="button">套用</button>
+          </div>
+          <p class="hint">只填还空着的栏，已经填过的不动（以角色卡为准）。也可以直接手填下面的字段，或者用「AI 拆分」把一段话拆进去。</p>
         </div>
         <div id="charForm"></div>
         <div class="field" id="phoneKindField" hidden>
