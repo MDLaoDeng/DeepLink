@@ -600,7 +600,11 @@
         <label class="check-field"><input type="checkbox" id="setDailyUpdate"><span>日更：场景 / 关系 每天各更新一次（默认开；共同经历不随聊天变）</span></label>
         <label class="check-field"><input type="checkbox" id="setToolUse"><span>让角色按需读取这条线自己的资料（工具调用：记忆摘要 / 思绪 / 图库 / 旧对话检索。默认开；模型不支持时会自动退回普通回答，每次多读一次就要多一轮请求）</span></label>
         <label class="check-field"><input type="checkbox" id="setWorldGen"><span>世界生成：久未上线后生成三段剧情解释角色这段时间做了什么（可关）</span></label>
-        <label class="check-field"><input type="checkbox" id="setStatusQuant"><span>状态量化：气泡下方显示害羞 / 愤怒 / 开心等数值（可关）</span></label>
+        <label class="check-field"><input type="checkbox" id="setStatusQuant"><span>附带卡片：气泡下方显示一组自定义数值（可关）</span></label>
+        <label class="field"><span>附带卡片的项目（每行一个名字，最多 20 项）</span><textarea id="setStatusCards" rows="3" placeholder="例：&#10;冷静值&#10;开心值&#10;信任值"></textarea>
+          <p class="hint">只填<b>项目名字</b>，别写数值、阈值或说明 —— 数值是 AI 每条回复自己给的（0~100 的整数）。
+            留空 = 不显示卡片。某个角色或某次对话可以单独覆盖这一组（留空就跟随这里）。</p>
+        </label>
         <label class="check-field"><input type="checkbox" id="setAutoMessage"><span>自动发信息：应用在后台时角色按性格主动联系你（默认关；且该对话要开着「时间系统」才会发）</span></label>
         <label class="field"><span>自动发信息间隔（分钟，默认 30）</span><input id="setAutoMessageMin" type="number" min="5" step="5" inputmode="numeric"></label>
         <label class="check-field"><input type="checkbox" id="setAutoMessagePhone"><span>自动发信息投到手机（手机模式）：主动发的是手机消息，而不是主对话</span></label>
@@ -862,8 +866,9 @@
         </div>
         <p class="hint">点「按此退出应用」会先把离线原因和毫秒级的离开时间写进本机、<b>回读核对无误</b>才真的退出。</p>
 
-        <div class="mem-title">状态量化</div>
-        <label class="check-field"><input type="checkbox" id="setSessionStatusQuant"><span>在本对话显示角色状态（开心 / 低落 / 生气 / 害羞 等，折叠在气泡下方）</span></label>
+        <div class="mem-title">附带卡片</div>
+        <label class="check-field"><input type="checkbox" id="setSessionStatusQuant"><span>在本对话显示附带卡片（气泡下方折叠着）</span></label>
+        <label class="field"><span>本线的卡片项目（每行一个名字；留空跟随角色 / 全局）</span><textarea id="setSessionStatusCards" rows="3" placeholder="留空：按「角色 → 全局」的顺序取第一个填了的"></textarea></label>
 
         <div class="mem-title">情绪日记</div>
         <label class="field"><span>写给自己看的一两句（写下后角色会朝这个方向靠；不写就不生效）</span><textarea id="setSessionDiary" rows="3" placeholder="例：最近有点累，希望他别太闹。"></textarea></label>
@@ -1043,6 +1048,11 @@
           <input type="file" id="cfPhAvInput" accept="image/*" hidden>
         </div>
         <p class="hint">「当前场景 / 对我的认知 / 记忆压缩 / 自动备份」都在每条对话的「对话设置」里（同一个角色可有主线 + 支线，各自分开）。</p>
+        <div class="field">
+          <span>附带卡片的项目（本角色，选填）</span>
+          <textarea id="cfStatusCards" rows="3" placeholder="每行一个名字，例：冷静值 / 开心值 / 信任值。留空就用「设置」里全局那一组"></textarea>
+          <p class="hint">只填<b>名字</b>，数值由 AI 每条回复给 0~100。这个角色的所有线都按这一组显示；某条线想不一样，去「对话设置」里单独填。</p>
+        </div>
         <div class="field">
           <span>采用格式（本角色，选填）</span>
           <textarea id="cfCharFormat" rows="3" placeholder="留空就用「设置」里的全局格式；填了之后这个角色的所有线都按它输出，对话设置里还能再单独覆盖"></textarea>

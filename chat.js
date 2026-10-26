@@ -1130,13 +1130,18 @@
       if (dj) systemText += "\n\n【我的情绪日记（只供你体会氛围，请自然地朝这个方向靠，别直接提起日记本身）】\n" + dj;
     }
 
-    /* 状态量化：让模型在末尾附一行状态，本地解析出来后收进折叠框（不显示在正文里）。
-       开关关掉时一个字都不加 —— 不花多余 token。 */
+    /* 附带卡片（10-26 取代原来的「情绪量化」）：项目由用户自己填，数值由模型每轮给。
+       没配任何项目就等于关掉 —— 一个字都不加，不花多余 token。 */
     if (ch && statusOn(s)) {
-      systemText += "\n\n【状态】**每一条回复都必须**在最后单独一行输出你的状态，一条都不能少（哪怕情绪没变，也要照写一遍，数值可以一样）。格式：" +
-        "〖状态 开心:72 低落:12 生气:5 害羞:40 兴奋:60〗（每项是 0~100 的整数，可增删项）。" +
-        "这一行会被单独解析出来、以状态条展示：不要写进正文、不要放进代码块或引用、不要加解释。" +
-        "括号就用这对方头括号〖〗；键和值之间用英文冒号；各项之间用空格。";
+      const cards = statusCardsFor(s);
+      if (cards) {
+        const demo = cards.map((n, i) => n + ":" + [72, 40, 85, 20, 60, 55, 30][i % 7]).join(" ");
+        systemText += "\n\n【附带卡片】**每一条回复都必须**在最后单独一行输出这张卡片，一条都不能少" +
+          "（哪怕数值没变，也要照写一遍）。项目固定为：" + cards.join(" / ") +
+          "，不要增删、不要改名、不要加别项。格式：〖状态 " + demo + "〗（每项是 0~100 的整数）。" +
+          "这一行会被单独解析出来、渲染成卡片的数值条：不要写进正文、不要放进代码块或引用、不要加解释。" +
+          "括号就用这对方头括号〖〗；项目名和值之间用英文冒号；各项之间用空格。";
+      }
     }
 
     /* 「采用格式」：本会话单独设了就用它，否则用「设置」里的全局。追加到最后，
@@ -1224,10 +1229,45 @@
   /* 「只出了思考、没出正文」时补问一次的纠正语。只加在**请求里**，不写进会话记录。 */
   const EMPTY_NUDGE = "（上一轮你只输出了思考过程，没有输出回答正文。请直接给出回答正文。）";
 
-  /* 状态量化：本会话单独设了就用它，否则跟全局（默认开）。关掉时一个 token 都不多花。 */
+  /* 附带卡片：本会话单独设了就用它，否则跟全局（默认开）。关掉时一个 token 都不多花。 */
   function statusOn(s) {
     if (typeof (s && s.statusQuant) === "boolean") return s.statusQuant;
     return state.settings.statusQuant !== false;
+  }
+  /* 附带卡片的项目清单（10-26 用户口径）：三级取第一个非空 —— 会话 > 角色 > 全局。
+     每项只有一个名字，数值固定 0~100（只填名字，值由 AI 每条回复自己给）。
+     一道都没配就等于关掉：不给提示词，也不渲染。 */
+  function statusCardsFor(s) {
+    const norm = (arr) => {
+      if (!Array.isArray(arr)) return null;
+      const out = [];
+      arr.forEach((x) => {
+        const n = String((x && x.name) || x || "").trim();
+        if (!n || n.length > 12 || out.indexOf(n) >= 0) return;
+        out.push(n);
+      });
+      return out.length ? out.slice(0, 20) : null;
+    };
+    let r = norm(s && s.statusCards);
+    if (r) return r;
+    let ch = null;
+    try { ch = characterFor(s); } catch (e) { ch = null; }
+    r = norm(ch && ch.statusCards);
+    if (r) return r;
+    return norm(state.settings && state.settings.statusCards);
+  }
+  /* 把 textarea 里的多行名字拆成数组（三层编辑器共用） */
+  function parseCardNames(text) {
+    const out = [];
+    String(text || "").split(/\r?\n/).forEach((line) => {
+      const n = line.trim();
+      if (!n || n.length > 12 || out.indexOf(n) >= 0) return;
+      out.push(n);
+    });
+    return out.slice(0, 20);
+  }
+  function cardNamesText(arr) {
+    return (Array.isArray(arr) ? arr : []).map((x) => String((x && x.name) || x || "")).filter(Boolean).join("\n");
   }
   /* 从正文里抽出状态行。没写 / 解析不出来 → 原样返回。
      容错（10-18 真机反馈「大部分时候失灵」）：模型不一定老老实实用〖〗，
@@ -3631,6 +3671,8 @@
     openDeleteDialog: openDeleteDialog, confirmDelete: confirmDelete,
     bindMessageGestures: bindMessageGestures,
     runHistorySearch: runHistorySearch, openSearchModal: openSearchModal, fillHistScope: fillHistScope,
+    /* 附带卡片（10-26）：三层编辑器共用这两个拆/拼函数，注入用 statusCardsFor */
+    parseCardNames: parseCardNames, cardNamesText: cardNamesText, statusCardsFor: statusCardsFor,
     rollbackTo: rollbackTo,
     activeText: activeText, buildGroupSystemText: buildGroupSystemText,
     /* 本轮新增：快捷回复面板 + 继续说（continueFrom = 群聊里指定谁接着说） */

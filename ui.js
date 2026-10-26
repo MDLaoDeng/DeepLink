@@ -915,15 +915,16 @@
     return el;
   }
 
-  /* 状态量化：气泡下方的一条可折叠状态（开心 72 · 害羞 40 …） */
+  /* 附带卡片：气泡下方的一条可折叠数值卡（冷静值 72 · 开心值 40 …）
+     项目名由用户自己配（见 chat.js 的 statusCardsFor），值固定 0~100。 */
   function statusEl(st, carry) {
     const names = Object.keys(st || {});
     const det = document.createElement("details");
     det.className = "msg-status";
     const head = names.slice(0, 3).map((k) => escapeHtml(k) + " " + st[k]).join(" · ");
-    /* carry：这条回复没写状态行，数值是从上一条沿用来的 —— 必须标出来，别让人当成新数据 */
+    /* carry：这条回复没写卡片行，数值是从上一条沿用来的 —— 必须标出来，别让人当成新数据 */
     det.innerHTML = '<summary><span class="st-ic">' + iconSvg("chart-box-outline") +
-      '</span><span class="st-label">状态' + (carry ? '<span class="st-carry">延续上一条</span>' : "") +
+      '</span><span class="st-label">卡片' + (carry ? '<span class="st-carry">延续上一条</span>' : "") +
       (head ? " · " + head : "") +
       '</span><span class="caret">' + iconSvg("chevron-right") + "</span></summary>";
     const body = document.createElement("div");

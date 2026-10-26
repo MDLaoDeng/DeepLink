@@ -1478,6 +1478,9 @@
       dailyUpdate: true,
       worldGen: true,
       statusQuant: true,
+      /* 附带卡片的项目名（每项只有名字，值由 AI 每条回复给 0~100）。
+         三层：会话 statusCards > 角色 statusCards > 这里。空数组 = 没配 = 不显示卡片。 */
+      statusCards: [],
       autoMessage: false,
       autoMessageMin: 30,
       /* 自动发信息走手机（手机模式）：角色主动发的是「手机消息」，进手机的会话，

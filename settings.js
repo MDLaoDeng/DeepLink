@@ -1346,6 +1346,7 @@
     setChecked("#setToolUse", s.toolUse !== false);
     setChecked("#setWorldGen", s.worldGen !== false);
     setChecked("#setStatusQuant", s.statusQuant !== false);
+    setVal("#setStatusCards", cardNamesText(s.statusCards));
     setChecked("#setAutoMessage", !!s.autoMessage);
     setVal("#setAutoMessageMin", Number(s.autoMessageMin) || 30);
     setChecked("#setAutoMessagePhone", !!s.autoMessagePhone);
@@ -1819,6 +1820,8 @@
       toolUse: checkedOf("#setToolUse"),
       worldGen: checkedOf("#setWorldGen"),
       statusQuant: checkedOf("#setStatusQuant"),
+      /* 附带卡片的项目名（全局这一层）。空数组 = 没配 = 不显示卡片 */
+      statusCards: parseCardLines($v("#setStatusCards")),
       autoMessage: checkedOf("#setAutoMessage"),
       autoMessageMin: Number($v("#setAutoMessageMin")) || 30,
       autoMessagePhone: checkedOf("#setAutoMessagePhone"),
@@ -3353,6 +3356,21 @@
       inp.dataset.bound = "1";
       inp.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); addReason(); } });
     }
+  }
+
+  /* 附带卡片的三层编辑器共用：多行名字 <-> 数组（设置页自己留一份，别依赖 chat.js 的加载顺序） */
+  function parseCardLines(text) {
+    var out = [];
+    String(text || "").split(/\r?\n/).forEach(function (line) {
+      var n = line.trim();
+      if (!n || n.length > 12 || out.indexOf(n) >= 0) return;
+      out.push(n);
+    });
+    return out.slice(0, 20);
+  }
+  function cardNamesText(arr) {
+    return (Array.isArray(arr) ? arr : []).map(function (x) { return String((x && x.name) || x || ""); })
+      .filter(Boolean).join("\n");
   }
 
   var api = {

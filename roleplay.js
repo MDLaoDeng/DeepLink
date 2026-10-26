@@ -457,7 +457,8 @@
       });
       return b;
     };
-    box.appendChild(item("", "助手（无角色卡）", state.settings.avatarAi || "", false));
+    /* 听澜不算角色（10-26 用户口径）：它是内置助手，会话挂在自己的分组里，
+       不该出现在「角色管理」列表里当一页可管理的角色卡。 */
     Store.getCharacters().slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).forEach((c) => box.appendChild(item(c.id, c.name || "角色", c.avatar || "", c.pinned)));
   }
 
@@ -618,7 +619,7 @@
       blocks.push('<div class="mem-block"><div class="mem-title">' + UI.escapeHtml(c.name || "角色") + "</div>" + (mine.length ? mine.map((s) => memSessionHtml(s)).join("") : '<p class="hint">（还没有对话）</p>') + "</div>");
     });
     const asst = sessions.filter((s) => !(s.characterId || ""));
-    if (asst.length) blocks.push('<div class="mem-block"><div class="mem-title">助手（无角色卡）</div>' + asst.map((s) => memSessionHtml(s)).join("") + "</div>");
+    if (asst.length) blocks.push('<div class="mem-block"><div class="mem-title">听澜线（不属于角色）</div>' + asst.map((s) => memSessionHtml(s)).join("") + "</div>");
     box.innerHTML = blocks.length ? blocks.join("") : '<p class="hint">还没有角色或对话。</p>';
   }
 
@@ -837,6 +838,7 @@
         renderAvatarPreview("#cfPhAvPreview", avatarDraft.charPhone, "assistant", ch.avatar || "");
         syncPeriodField();
         setVal("#cfPhoneKind", ch.phoneKind === "close" ? "close" : "casual");        setVal("#cfCharFormat", ch.format || "");
+        setVal("#cfStatusCards", (window.DL && DL.cardNamesText) ? DL.cardNamesText(ch.statusCards) : "");
         const cf = Memory.ensureFilter(ch);
         setVal("#charFilterRule", cf.rule || "");
         setVal("#charFilterEvery", cf.every || 10);
@@ -932,6 +934,8 @@
         ch.phoneKind = ch.phoneOnly ? ($v("#cfPhoneKind") === "close" ? "close" : "casual") : "casual";
     /* 角色级「采用格式」：留空 = 跟随全局；填了 = 这个角色的所有线都用它（会话还能再覆盖） */
     ch.format = $v("#cfCharFormat").trim();
+    /* 角色级附带卡片项目：留空 = 跟随全局（空数组就是「没配」，注入时会往上落） */
+    ch.statusCards = (window.DL && DL.parseCardNames) ? DL.parseCardNames($v("#cfStatusCards")) : [];
     const cf = Memory.ensureFilter(ch);
     cf.rule = $v("#charFilterRule").trim();
     cf.every = readFilterEvery();
@@ -1454,6 +1458,7 @@
       else tlLine.push("还没法算合法时段：出生日期和年龄都要填；出生日期填 0 年 0 月 0 日 = 无限年龄（不限制）");
       setText("#sessionTimeLine", tlLine.join("；"));
       setChecked("#setSessionStatusQuant", (typeof s.statusQuant === "boolean") ? s.statusQuant : (state.settings.statusQuant !== false));
+      setVal("#setSessionStatusCards", (window.DL && DL.cardNamesText) ? DL.cardNamesText(s.statusCards) : "");
       renderDiaryList(s);
       setText("#sessionLineBadge", s.mainLine ? "主线" : "支线");
       renderBackupLine(s);
