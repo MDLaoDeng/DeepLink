@@ -219,6 +219,34 @@
     age.placeholder = inf ? "无限年龄（不限制时段）" : "";
   }
 
+  /* 取某栏当前值：出生日期是三格，要拼回 YYYY-MM-DD 才能当「现有内容」喂给 AI */
+  function curFieldOf(key) {
+    if (key !== "birth") return $v("#cf_" + key);
+    const y = String($v("#cf_birth_y") || "").replace(/[^\d]/g, "");
+    if (!y) return "";
+    if (y === "0") return "0000-00-00";
+    const mo = String($v("#cf_birth_m") || "").replace(/[^\d]/g, "") || "01";
+    const dd = String($v("#cf_birth_d") || "").replace(/[^\d]/g, "") || "01";
+    return ("0000" + y).slice(-4) + "-" + ("0" + mo).slice(-2) + "-" + ("0" + dd).slice(-2);
+  }
+
+  /* 把拆分结果写回某一栏：出生日期拆进三格（#cf_birth 已经不存在了） */
+  function setFieldToForm(key, val) {
+    if (key !== "birth") { setVal("#cf_" + key, val); return; }
+    const m = /^(\d{1,4})-(\d{1,2})-(\d{1,2})$/.exec(String(val || "").trim());
+    if (!m) {
+      /* 模型可能只给年（"2011"）或写成「2011年2月」：能捞多少捞多少，别整条丢掉 */
+      const y = /(\d{1,4})/.exec(String(val || ""));
+      setVal("#cf_birth_y", y ? String(Number(y[1])) : "");
+      return;
+    }
+    const inf = m[1] === "0000";
+    setVal("#cf_birth_y", inf ? "0" : String(Number(m[1])));
+    setVal("#cf_birth_m", inf ? "" : String(Number(m[2])));
+    setVal("#cf_birth_d", inf ? "" : String(Number(m[3])));
+    syncAgeByBirthYear(inf ? "0" : String(Number(m[1])));
+  }
+
   /* 角色卡的「默认手机头像」（10-19 用户要求）：手机页里这个人用哪张脸。
      留空 → 回落到角色头像（见 phone.js 的 avatarOf）。选图 / AI 生成都走同一份草稿。 */
   function bindCharPhoneAvatar() {
@@ -708,9 +736,12 @@
       /* 勾了「只拆角色相关」时，源里**不能带**关于「我」的内容 ——
          否则 AI 会照着源把它们又抄一遍填回去，勾选框就白勾了。 */
       if (onlyRole && MY_FIELDS.indexOf(key) >= 0) return;
-      const v = $v("#cf_" + key).trim();
+      const v = String(curFieldOf(key) || "").trim();   /* 出生日期是三格，得拼 */
       if (v) lines.push(String(label).split("（")[0] + "：" + v);
     });
+    /* 采用格式也算「现有设定」的一部分：再次拆分时带着它，模型才不会把已有的模板丢掉 */
+    const fmt = $v("#cfCharFormat").trim();
+    if (fmt) lines.push("输出格式：" + fmt);
     return lines.join("\n");
   }
 
@@ -737,7 +768,9 @@
     setText("#charSplitState", again ? "AI 正在按现有设定重新拆分…" : "AI 正在拆分…");
     try {
       const fields = [{ key: "charName", label: "角色名（用于列表显示）", current: $v("#charName") }]
-        .concat(keys.map(([key, label]) => ({ key: key, label: label, current: $v("#cf_" + key) })));
+        .concat(keys.map(([key, label]) => ({ key: key, label: label, current: curFieldOf(key) })))
+        /* 「采用格式」也可由拆分填：原文里给了回复模板（「姓名：/性别：/当前动作：」这种）就放这儿 */
+        .concat([{ key: "charFormat", label: "输出格式 / 回复模板（原文里给出的结构，原样保留换行）", current: $v("#cfCharFormat") }]);
       const r = await Memory.splitCharacterFields(state.settings, raw, fields);
       if (r.usage) recordUsage(null, r.usage, ch.id, "split");
       /* 模型经常把年龄、身高这类返回成**数字**（"age": 17），
@@ -750,8 +783,14 @@
       /* 只写 keys 里的：勾了「只拆角色相关」时，AI 就算把关于「我」的内容也返回了，也不落进表单 */
       keys.forEach(([key]) => {
         const sv = asText(r.fields[key]);
-        if (sv) { setVal("#cf_" + key, sv); n++; }
+        if (!sv) return;
+        setFieldToForm(key, sv);          /* 出生日期要拆进三格，不能直接写 #cf_birth */
+        n++;
       });
+      /* 「采用格式」也可由拆分填：原文里给了回复模板就落到这一栏（它不是设定字段，
+         走的是输出排版那条路，优先级仍是 对话 > 角色 > 全局） */
+      const fmtS = asText(r.fields.charFormat);
+      if (fmtS) { setVal("#cfCharFormat", fmtS); n++; }
       setText("#charSplitState", n
         ? ("已填入 " + n + " 项" + (onlyRole ? "（只拆了角色相关，关于「我」的几栏没动）" : "") + "，检查/修改后点「保存设定」")
         : "没拆出可用内容，写具体一点再试");
