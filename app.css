@@ -1113,7 +1113,16 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 /* 世界观库（10-26）：面板默认折叠；展开后一次正好完整露出 5 套，多的在里面滚。
    每项 44px（9 上下内边距 + 20 行高 + 6 间距）→ 5 项 220px，留 8px 余量。 */
 .world-panel { margin-top: 10px; }
-.world-panel > input { width: 100%; margin-bottom: 8px; }
+/* 搜索框**不用浏览器原生外观**（10-26 用户口径）：原文是裸 input，暗色主题下是块白板。
+   这里照抄 .field input 那一套，跟项目里其它输入框一致。 */
+.world-panel > input {
+  width: 100%; margin-bottom: 8px;
+  padding: 10px 12px; border-radius: 12px; font: inherit;
+  background-color: var(--panel-2); color: var(--text);
+  border: 1px solid transparent; outline: none;
+  transition: border-color .25s, box-shadow .25s;
+}
+.world-panel > input:focus { border-color: var(--accent); }
 .world-list { max-height: 228px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .world-item {
   display: flex; align-items: center; width: 100%; text-align: left;
