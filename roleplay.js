@@ -175,6 +175,15 @@
       pab.dataset.bound = "1";
       pab.addEventListener("click", applyPersonaToChar);
     }
+    /* 世界观下拉：列库里每一套，选一套点套用（会覆盖「世界观」栏） */
+    const wab = $("#cfWorldApply");
+    if (wab && !wab.dataset.bound) {
+      wab.dataset.bound = "1";
+      wab.addEventListener("click", () => {
+        const r = applyWorldToChar();
+        if (r && r.catch) r.catch((e) => UI.toast("套用失败：" + ((e && e.message) || e), true));
+      });
+    }
   }
 
   /* 填充/刷新「我的设定」下拉（全局人设可能刚改过，每次打开角色页都刷一次） */
@@ -207,6 +216,48 @@
     if (!id) { UI.toast("先在设置里建一套「我的人设」", true); return; }
     const n = (window.DL && DL.personaApplyById) ? DL.personaApplyById(id) : 0;
     if (n > 0) fillCharacterForm(activeCharacter());   /* 套完刷新表单，能看到填进来的值 */
+  }
+
+  /* ── 世界观：从库里挑一套填进角色卡（10-26）──────────────────────
+     世界观始终只有一个出口：角色卡这一栏非空就用它，空着才用「设置 → 我的人设 → 世界观」
+     里选中的那套（见 memory.js 的 worldFor）。所以这里套用 = 复制正文进 #cf_world，
+     不是存引用 —— 库里改一个字，不该把十个角色一起改掉。 */
+  function fillWorldPick() {
+    const sel = $("#cfWorldPick");
+    if (!sel) return;
+    let list = [];
+    try { list = (window.DL && DL.worldOptions) ? DL.worldOptions() : []; } catch (e) { list = []; }
+    sel.innerHTML = "";
+    if (!list.length) {
+      const o = document.createElement("option");
+      o.value = ""; o.textContent = "（还没有世界观，去设置里建一套）";
+      sel.appendChild(o);
+      return;
+    }
+    list.forEach((w) => {
+      const o = document.createElement("option");
+      o.value = w.id; o.textContent = w.name + (w.builtin ? "（内置）" : "");
+      sel.appendChild(o);
+    });
+    const cur = (state.settings && state.settings.worldId) || "";
+    if (cur && list.some((w) => w.id === cur)) sel.value = cur;
+  }
+
+  async function applyWorldToChar() {
+    const sel = $("#cfWorldPick");
+    const id = sel ? sel.value : "";
+    if (!id) { UI.toast("先去设置里建一套世界观", true); return; }
+    const txt = (window.DL && DL.worldTextOf) ? DL.worldTextOf(id) : "";
+    if (!txt) { UI.toast("这套世界观还是空的", true); return; }
+    const target = $("#cf_world");
+    if (!target) return;
+    const cur = String(target.value || "").trim();
+    if (cur && cur !== txt) {
+      const ok = await UI.confirmDialog("套用世界观", "会覆盖角色卡里现有的「世界观」栏，确定？");
+      if (!ok) return;
+    }
+    target.value = txt;
+    UI.toast("已填进「世界观」栏（记得点「保存设定」）");
   }
 
   /* 年份填 0 → 无限年龄：年龄栏禁用并清空（沿用 10-20 的口径） */
@@ -817,6 +868,7 @@
       setDisplay("#phoneKindField", (has && ch.phoneOnly) ? "" : "none");
       /* 「我的设定」下拉：全局人设可能刚改过，每次进来刷一遍 */
       fillPersonaPick();
+      fillWorldPick();
       if (ch) {
         setVal("#charName", ch.name || "");
         CHAR_FIELDS.forEach(([key]) => {

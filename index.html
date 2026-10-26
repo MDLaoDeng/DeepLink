@@ -736,6 +736,22 @@
           <button id="personaSplitAgain" class="btn ghost" type="button">再次拆分</button>
         </div>
         <div id="personaSplitState" class="hint"></div>
+
+        <div class="mem-title">世界观（最多 50 套；角色卡里没单独填，就用这里选中的那一套）</div>
+        <label class="field"><span>当前使用（<b id="worldCount">0</b> / 50 套）</span><select id="worldPick"></select></label>
+        <label class="field"><span>名称</span><input id="worldName" type="text" placeholder="这套世界观叫什么"></label>
+        <label class="field"><span>内容</span><textarea id="worldText" rows="5" placeholder="世界的基本规则：时代、地点、有没有超自然力量、社会结构、禁忌……"></textarea></label>
+        <div class="char-actions">
+          <button id="worldNewBtn" class="btn ghost mini" type="button">新建一套</button>
+          <button id="worldCopyBtn" class="btn ghost mini" type="button">复制当前</button>
+          <button id="worldDelBtn" class="btn ghost mini" type="button">删除这套</button>
+        </div>
+        <p class="hint">内置的 10 套是只读的 —— 想改就点「复制当前」生成一套自己的。角色页里也能直接从库里挑一套填进去。</p>
+        <button id="worldPanelBtn" class="btn ghost block" type="button">展开世界观库（搜索 / 切换）</button>
+        <div id="worldPanel" class="world-panel" hidden>
+          <input id="worldSearch" type="text" placeholder="搜索名称或内容">
+          <div id="worldList" class="world-list"></div>
+        </div>
       </div>
 
       <div class="settings-section">
@@ -1011,6 +1027,14 @@
             <button class="btn ghost" id="cfPersonaApply" type="button">套用</button>
           </div>
           <p class="hint">只填还空着的栏，已经填过的不动（以角色卡为准）。也可以直接手填下面的字段，或者用「AI 拆分」把一段话拆进去。</p>
+        </div>
+        <div class="field" id="cfWorldRow">
+          <span>从世界观库选一套（填进下面的「世界观」栏）</span>
+          <div class="cf-persona-row">
+            <select id="cfWorldPick"></select>
+            <button class="btn ghost" id="cfWorldApply" type="button">套用</button>
+          </div>
+          <p class="hint">会覆盖下面「世界观」栏里的内容。那栏是这个角色自己的一份，改了不影响库里那一套；留空则用「设置 → 我的人设 → 世界观」里选中的。</p>
         </div>
         <div id="charForm"></div>
         <div class="field" id="phoneKindField" hidden>

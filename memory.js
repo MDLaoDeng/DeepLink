@@ -315,6 +315,20 @@
     return parts.join("\n").slice(0, budget);
   }
 
+  /* 世界观取用（10-26）：角色卡自己填了就用它；没填就用「我的人设」里选中的那一套。
+     只给一份 —— 两份一起注入，模型会自己编一个折中版本，比不填更糟。 */
+  function worldFor(ch, settings) {
+    const own = String((ch && ch.fields && ch.fields.world) || "").trim();
+    if (own) return own;
+    const st = settings || {};
+    const id = st.worldId || "";
+    const list = Array.isArray(st.worlds) ? st.worlds : [];
+    for (let i = 0; i < list.length; i++) {
+      if (list[i] && list[i].id === id) return String(list[i].text || "").trim();
+    }
+    return "";
+  }
+
   function buildSystemText(ch, s, settings, opts) {
     if (!ch) return "";
     const o = opts || {};
@@ -366,7 +380,10 @@
     if (f.aiStyle) L.push("说话风格：" + f.aiStyle);
     if (f.aiHealth) L.push("身体状况：" + f.aiHealth);
     if (f.aiPeriod) L.push("生理期（上次第一天）：" + f.aiPeriod);
-    if (f.world) { L.push(""); L.push("【世界观】"); L.push(f.world); }
+    /* 世界观只注入一份：角色卡自己填了就用它，没填才用「我的人设」里选中的那套。
+       两份一起给，模型会自己揉一个折中版本 —— 那比不填更糟。 */
+    const _world = worldFor(ch, settings);
+    if (_world) { L.push(""); L.push("【世界观】"); L.push(_world); }
     const sh = (s && s.shared) || f.shared;
     const rel = (s && s.relation) || f.relation;
     if (sh) { L.push(""); L.push("【共同经历】"); L.push(sh); }
@@ -1199,7 +1216,7 @@
     return { ok: true, usage: out.usage };
   }
 
-  window.Memory = { buildSystemText, personaText, memoryText, memoryForPrompt, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, correctMemory, activePersona,
+  window.Memory = { buildSystemText, worldFor, personaText, memoryText, memoryForPrompt, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, correctMemory, activePersona,
     /* 表情 → 可读说明（10-19）：手机那边有自己的 msgText，也要用同一套翻译，
        否则模型收到的是 [[s:xxx]] 这种原始标记 */
     emojiReadable, msgText,

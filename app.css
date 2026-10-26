@@ -1109,6 +1109,25 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 .cf-persona-row { display: flex; align-items: center; }
 .cf-persona-row select { flex: 1; min-width: 0; }
 .cf-persona-row .btn { flex: none; margin-left: 10px; }
+
+/* 世界观库（10-26）：面板默认折叠；展开后一次正好完整露出 5 套，多的在里面滚。
+   每项 44px（9 上下内边距 + 20 行高 + 6 间距）→ 5 项 220px，留 8px 余量。 */
+.world-panel { margin-top: 10px; }
+.world-panel > input { width: 100%; margin-bottom: 8px; }
+.world-list { max-height: 228px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.world-item {
+  display: flex; align-items: center; width: 100%; text-align: left;
+  padding: 9px 10px; margin-bottom: 6px; border: 1px solid var(--border);
+  border-radius: 12px; background-color: var(--panel-2); color: var(--text);
+  font: inherit; cursor: pointer;
+}
+.world-item.on { border-color: var(--accent); background-color: rgba(127, 127, 127, .18); }
+.world-item b {
+  flex: 1; min-width: 0; font-size: 14px; font-weight: 600;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.world-item i { flex: none; font-style: normal; font-size: 11px; color: var(--text-mute); margin-left: 8px; }
+.world-empty { padding: 10px 2px; font-size: 12px; color: var(--text-mute); }
 .field input, .field textarea, .field select {
   width: 100%; padding: 10px 12px; border-radius: 12px; font: inherit;
   background-color: var(--panel-2); color: var(--text);

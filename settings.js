@@ -3290,6 +3290,201 @@
     b = document.getElementById("personaApplyBtn");  if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", personaApply); }
     b = document.getElementById("personaSplitRun");  if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", function () { personaSplit(false); }); }
     b = document.getElementById("personaSplitAgain"); if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", function () { personaSplit(true); }); }
+    bindWorlds();
+    renderWorlds();
+  }
+
+  /* ── 世界观库（10-26）──────────────────────────────────────
+     最多 50 套。内置 10 套在首次使用时注入，worldsSeeded 保证只注一次。
+     内置的只读 —— 要改就「复制当前」生成一套自己的。
+     取用优先级在 memory.js 的 worldFor：角色卡 fields.world（非空）> 这里选中的那一套。
+     **只注入一份** —— 两份都给模型，它会自己揉一个折中版本，比不填更糟。 */
+  var WORLD_MAX = 50;
+  var worldSaveTimer = null;
+  function worldList() {
+    var s = state.settings || {};
+    return Array.isArray(s.worlds) ? s.worlds : [];
+  }
+  function ensureWorlds() {
+    var s = state.settings || {};
+    if (s.worldsSeeded) return;
+    var presets = (window.CONFIG && CONFIG.WORLD_PRESETS) || [];
+    var list = presets.map(function (p, i) {
+      return { id: "w_p" + i, name: p.name, text: p.text, builtin: true };
+    });
+    state.settings = Store.saveSettings({
+      worlds: list,
+      worldId: list.length ? list[0].id : "",
+      worldsSeeded: true
+    });
+  }
+  function curWorld() {
+    var list = worldList();
+    if (!list.length) return null;
+    var id = (state.settings && state.settings.worldId) || "";
+    for (var i = 0; i < list.length; i++) { if (list[i].id === id) return list[i]; }
+    return list[0];
+  }
+  function worldFlush() {
+    if (worldSaveTimer) { clearTimeout(worldSaveTimer); worldSaveTimer = null; }
+    state.settings = Store.saveSettings({
+      worlds: worldList(),
+      worldId: (state.settings && state.settings.worldId) || ""
+    });
+  }
+  function worldQueueSave() {
+    if (worldSaveTimer) clearTimeout(worldSaveTimer);
+    worldSaveTimer = setTimeout(worldFlush, 400);
+  }
+  function worldSetField(key, val) {
+    var cur = curWorld();
+    if (!cur || cur.builtin) return;      /* 内置只读 */
+    cur[key] = val;
+    var list = worldList();
+    for (var i = 0; i < list.length; i++) { if (list[i].id === cur.id) list[i] = cur; }
+    worldQueueSave();
+  }
+  function worldOptions() {
+    return worldList().map(function (w) {
+      return { id: w.id, name: w.name || "未命名", builtin: !!w.builtin };
+    });
+  }
+  function worldTextOf(id) {
+    var list = worldList();
+    for (var i = 0; i < list.length; i++) { if (list[i].id === id) return String(list[i].text || ""); }
+    return "";
+  }
+  function renderWorlds() {
+    ensureWorlds();
+    var list = worldList();
+    var cur = curWorld();
+    setText("#worldCount", String(list.length));
+    var sel = document.getElementById("worldPick");
+    if (sel) {
+      sel.innerHTML = "";
+      list.forEach(function (w) {
+        var o = document.createElement("option");
+        o.value = w.id;
+        o.textContent = (w.name || "未命名") + (w.builtin ? "（内置）" : "");
+        sel.appendChild(o);
+      });
+      sel.value = cur ? cur.id : "";
+      if (UI.pickRefreshAll) UI.pickRefreshAll();
+    }
+    setVal("#worldName", cur ? (cur.name || "") : "");
+    setVal("#worldText", cur ? (cur.text || "") : "");
+    var ro = !!(cur && cur.builtin);
+    var nm = document.getElementById("worldName");
+    var tx = document.getElementById("worldText");
+    if (nm) nm.readOnly = ro;
+    if (tx) tx.readOnly = ro;
+    var del = document.getElementById("worldDelBtn");
+    if (del) del.disabled = ro || list.length <= 1;
+    renderWorldList();
+  }
+  /* 列表：搜名称或内容；一次正好露出 5 套（高度在 CSS 里定死，多的内部滚） */
+  function renderWorldList() {
+    var box = document.getElementById("worldList");
+    if (!box) return;
+    var kw = String($v("#worldSearch") || "").trim().toLowerCase();
+    var list = worldList();
+    var cur = curWorld();
+    box.innerHTML = "";
+    var hit = 0;
+    list.forEach(function (w) {
+      var nm = String(w.name || "");
+      var tx = String(w.text || "");
+      if (kw && nm.toLowerCase().indexOf(kw) < 0 && tx.toLowerCase().indexOf(kw) < 0) return;
+      hit++;
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "world-item" + (cur && cur.id === w.id ? " on" : "");
+      var nb = document.createElement("b");
+      nb.textContent = nm || "未命名";
+      b.appendChild(nb);
+      if (w.builtin) {
+        var tag = document.createElement("i");
+        tag.textContent = "内置";
+        b.appendChild(tag);
+      }
+      b.addEventListener("click", function () { worldPick(w.id); });
+      box.appendChild(b);
+    });
+    if (!hit) {
+      var e = document.createElement("div");
+      e.className = "world-empty";
+      e.textContent = kw ? "没有匹配的世界观" : "还没有世界观，点上面「新建一套」";
+      box.appendChild(e);
+    }
+  }
+  function worldPick(id) {
+    worldFlush();
+    state.settings = Store.saveSettings({ worldId: id });
+    renderWorlds();
+  }
+  function worldNewId() { return "w_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+  function worldNew() {
+    var list = worldList();
+    if (list.length >= WORLD_MAX) { UI.toast("最多 " + WORLD_MAX + " 套，先删一套再建", true); return; }
+    worldFlush();
+    var w = { id: worldNewId(), name: "世界观 " + (list.length + 1), text: "" };
+    list.push(w);
+    state.settings = Store.saveSettings({ worlds: list, worldId: w.id });
+    renderWorlds();
+    UI.toast("已新建「" + w.name + "」");
+  }
+  function worldCopy() {
+    var cur = curWorld();
+    if (!cur) return;
+    var list = worldList();
+    if (list.length >= WORLD_MAX) { UI.toast("最多 " + WORLD_MAX + " 套，先删一套再建", true); return; }
+    worldFlush();
+    var w = { id: worldNewId(), name: (cur.name || "世界观") + "（副本）", text: cur.text || "" };
+    list.push(w);
+    state.settings = Store.saveSettings({ worlds: list, worldId: w.id });
+    renderWorlds();
+    UI.toast("已复制成一套自己的，可以改了");
+  }
+  function worldDel() {
+    var cur = curWorld();
+    if (!cur) return;
+    if (cur.builtin) { UI.toast("内置的不能删，可以「复制当前」再改", true); return; }
+    var list = worldList();
+    if (list.length <= 1) { UI.toast("至少要留一套", true); return; }
+    var i = -1;
+    for (var k = 0; k < list.length; k++) { if (list[k].id === cur.id) i = k; }
+    if (i < 0) return;
+    list.splice(i, 1);
+    state.settings = Store.saveSettings({ worlds: list, worldId: list[Math.max(0, i - 1)].id });
+    renderWorlds();
+    UI.toast("已删除");
+  }
+  function bindWorlds() {
+    var sel = document.getElementById("worldPick");
+    if (sel && !sel.dataset.bound) { sel.dataset.bound = "1"; sel.addEventListener("change", function () { worldPick(sel.value); }); }
+    var b = document.getElementById("worldName");
+    if (b && !b.dataset.bound) {
+      b.dataset.bound = "1";
+      b.addEventListener("input", function () { worldSetField("name", b.value); renderWorldList(); });
+    }
+    b = document.getElementById("worldText");
+    if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("input", function () { worldSetField("text", b.value); }); }
+    b = document.getElementById("worldNewBtn");  if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", worldNew); }
+    b = document.getElementById("worldCopyBtn"); if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", worldCopy); }
+    b = document.getElementById("worldDelBtn");  if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", worldDel); }
+    b = document.getElementById("worldPanelBtn");
+    if (b && !b.dataset.bound) {
+      b.dataset.bound = "1";
+      b.addEventListener("click", function () {
+        var p = document.getElementById("worldPanel");
+        if (!p) return;
+        p.hidden = !p.hidden;
+        b.textContent = p.hidden ? "展开世界观库（搜索 / 切换）" : "收起世界观库";
+        if (!p.hidden) renderWorldList();
+      });
+    }
+    b = document.getElementById("worldSearch");
+    if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("input", renderWorldList); }
   }
 
   /* ── 离线原因（10-17）──────────────────────────────
@@ -3381,6 +3576,8 @@
     openData: openData, saveImage: saveImage,
     /* 我的人设（10-26）：角色页要用「选一套套进去」，所以把列表和按 id 套用挂出来 */
     personaOptions: personaOptions, personaApplyById: personaApplyById,
+    /* 世界观库（10-26）：启动时注入内置 10 套；角色页下拉要列表和按 id 取正文 */
+    ensureWorlds: ensureWorlds, worldOptions: worldOptions, worldTextOf: worldTextOf,
     snapshotSession: snapshotSession, sessionsForExport: sessionsForExport, saveSnapshot: saveSnapshot,
     buildExportData: buildExportData, applyImport: applyImport,
     maybeAutoBackup: maybeAutoBackup, backupNow: backupNow, restoreBackupNow: restoreBackupNow,
