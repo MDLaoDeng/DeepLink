@@ -329,6 +329,112 @@
     return "";
   }
 
+  /* ── 关系网（10-27）──────────────────────────────
+     这条线里，角色对其他每个角色的四维数值 + 关系标签 + 一句备注。
+     **线级**，不跨线共用 —— 主线支线可以有完全不同的态度（用户口径：共用会出事）。
+     结构：s.rel = { "c_other": { trust, favor, familiar, depend, kind, note, at } }
+     数值 0~100。没有记录的 = 还不认识。 */
+  function relOf(s) {
+    if (!s) return {};
+    if (!s.rel || typeof s.rel !== "object" || Array.isArray(s.rel)) s.rel = {};
+    return s.rel;
+  }
+  function charListFor() {
+    try {
+      const d = window.DL || {};
+      if (d.Store) return d.Store.getCharacters() || [];
+      if (window.Store) return window.Store.getCharacters() || [];
+    } catch (e) { /* ignore */ }
+    return [];
+  }
+  function relNameOf(id, chars) {
+    for (let i = 0; i < chars.length; i++) {
+      if (chars[i] && chars[i].id === id) return chars[i].name || "某人";
+    }
+    return "某人";
+  }
+  /* 注入用：只列「有记录的」，一行一个人 */
+  function relLine(s, ch) {
+    const rel = relOf(s);
+    const ids = Object.keys(rel);
+    if (!ids.length) return "";
+    const chars = charListFor();
+    const lines = [];
+    ids.forEach((id) => {
+      if (ch && id === ch.id) return;          /* 不列对自己的 */
+      const r = rel[id];
+      if (!r || typeof r !== "object") return;
+      const parts = [];
+      if (typeof r.trust === "number") parts.push("信任 " + r.trust);
+      if (typeof r.favor === "number") parts.push("好感 " + r.favor);
+      if (typeof r.familiar === "number") parts.push("熟悉 " + r.familiar);
+      if (typeof r.depend === "number") parts.push("依赖 " + r.depend);
+      lines.push("· " + relNameOf(id, chars) + "：" + (parts.join("，") || "还没定") +
+        (r.kind ? "；关系是「" + r.kind + "」" : "") + (r.note ? "；" + r.note : ""));
+    });
+    return lines.join("\n");
+  }
+  /* 关系初值（10-27 用户口径）：初始 0 兜底；
+     有共同经历 → 按角色性格 + 共同经历定；不认识 → 按第一印象 + 角色性格定。
+     懒生成：第一次日更 / 第一次打开关系网时跑，不在建卡时跑（省一次请求）。 */
+  async function initRel(s, ch, settings) {
+    if (!s || !ch) return null;
+    if (s.relInited) return null;
+    const others = charListFor().filter((c) => c && c.id !== ch.id);
+    s.relInited = true;
+    if (!others.length) return null;          /* 只有一个角色，没有「别人」可记 */
+    if (!settings || !settings.apiKey) return null;
+    const rel = relOf(s);
+    const brief = others.map((c) => {
+      const f = c.fields || {};
+      return {
+        id: c.id,
+        name: c.name || "某人",
+        look: String(f.aiAppearance || "").slice(0, 120),
+        character: String(f.aiPersona || "").slice(0, 120)
+      };
+    });
+    const meBrief = {
+      name: ch.name || "角色",
+      character: String((ch.fields && ch.fields.aiPersona) || "").slice(0, 160),
+      shared: String(s.shared || "").slice(0, 300),
+      relation: String(s.relation || "").slice(0, 160)
+    };
+    const sys = CONFIG.COMPRESS_PROMPTS.relInit;
+    const user = "「我」（这条线的主视角角色）：" + meBrief.name +
+      "\n性格：" + (meBrief.character || "（未填）") +
+      "\n与用户的当前关系：" + (meBrief.relation || "（未填）") +
+      "\n共同经历：" + (meBrief.shared || "（未填）") +
+      "\n\n要评估的对象：\n" +
+      brief.map((b) => "- id=" + b.id + "，名字=" + b.name +
+        "；性格=" + (b.character || "（未填）") + "；外貌=" + (b.look || "（未填）")).join("\n");
+    try {
+      const out = await summarize(settings, sys, user, 900);
+      const got = parseJsonObject(out.text);
+      const arr = Array.isArray(got.list) ? got.list : [];
+      arr.forEach((x) => {
+        if (!x || !x.id) return;
+        const idx = brief.filter((b) => b.id === x.id)[0];
+        if (!idx) return;
+        const num = (v) => {
+          const n = Number(v);
+          return isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0;
+        };
+        rel[x.id] = {
+          trust: num(x.trust), favor: num(x.favor),
+          familiar: num(x.familiar), depend: num(x.depend),
+          kind: String(x.kind || "").slice(0, 12),
+          note: String(x.note || "").slice(0, 60),
+          at: Date.now()
+        };
+      });
+      return { usage: out.usage, count: Object.keys(rel).length };
+    } catch (e) {
+      s.relInited = false;                    /* 失败了下次再试 */
+      return null;
+    }
+  }
+
   function buildSystemText(ch, s, settings, opts) {
     if (!ch) return "";
     const o = opts || {};
@@ -390,6 +496,16 @@
     if (rel) { L.push(""); L.push("【当前关系】"); L.push(rel); }
     if (s && s.scene) { L.push(""); L.push("【当前场景】"); L.push(s.scene); }
     if (f.aiDirective) { L.push(""); L.push("【AI 指令】"); L.push(f.aiDirective); }
+    /* 关系网（10-27）：这条线里他对其他每个角色的态度。
+       除了「他怎么对别人」，还决定「别人告诉他的事，他愿不愿意转述给你」。 */
+    const _rl = relLine(s, ch);
+    if (_rl) {
+      L.push("");
+      L.push("【你对其他人的关系】");
+      L.push(_rl);
+      L.push("（信任高的人，你更愿意把别人告诉你的心事转述给他；信任低就含糊过去、不说细节。" +
+        "反过来，别人告诉你的私事，你也只对自己愿意说的人提，不会到处讲。）");
+    }
     if (s && s.cognition) { L.push(""); L.push("【对用户的认知】"); L.push(s.cognition); }
     const mem = memoryForPrompt(s && s.memory);
     if (mem) { L.push(""); L.push("【记忆摘要】"); L.push(mem); }
@@ -861,6 +977,17 @@
   async function dailyCompress(rec, save, settings, report) {
     const m = ensureMemory(rec);
     if (!settings.apiKey) return { days: 0, usage: null, newText: "" };
+    /* 关系网初值（10-27）：第一次日更时懒生成 —— 建卡时不跑，省一次请求。
+       没有时间系统的线不跑（它连「过了多久」都算不准）。 */
+    try {
+      if (rec && !rec.relInited && hasTimeline(rec)) {
+        const ch0 = charListFor().filter(function (c) { return c && c.id === rec.characterId; })[0] || null;
+        if (ch0) {
+          const r0 = await initRel(rec, ch0, settings);
+          if (r0 && r0.usage) Api.sumUsage(null, r0.usage);
+        }
+      }
+    } catch (e) { /* 关系初值失败不影响压缩 */ }
     const cutoff = startOfToday();
     const groups = {};
     allMsgs(rec).forEach((msg) => {
@@ -1240,7 +1367,7 @@
     return { ok: true, usage: out.usage };
   }
 
-  window.Memory = { buildSystemText, worldFor, personaText, memoryText, memoryForPrompt, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, createFields, correctMemory, activePersona,
+  window.Memory = { buildSystemText, worldFor, relOf, relLine, initRel, personaText, memoryText, memoryForPrompt, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, createFields, correctMemory, activePersona,
     /* 表情 → 可读说明（10-19）：手机那边有自己的 msgText，也要用同一套翻译，
        否则模型收到的是 [[s:xxx]] 这种原始标记 */
     emojiReadable, msgText,

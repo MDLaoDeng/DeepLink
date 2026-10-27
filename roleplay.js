@@ -2014,6 +2014,11 @@
     if (!s) throw new Error("没有可用的对话");
     const ch = characterFor(s);
     if (!ch) throw new Error("这条线还没有角色卡");
+    /* 没有时间轴就没有「离开了多久 / 现在是故事里的几点」—— 补写只能瞎编时段。
+       自动触发那边已经拦了，这里是手动「补写」的兜底（2026-10-27）。 */
+    if (!s.time || typeof s.time.start !== "number") {
+      throw new Error("这条线还没开时间系统，没有时间轴可用，补不了剧情");
+    }
     /* 「所隔时间」优先取这条会话自己的离线锚点（退出那一刻记的），没有才退回全局 */
     const raw = (Memory && Memory.awayGap) ? Memory.awayGap(s) : null;
     const gapMs = Math.max(0, (typeof raw === "number") ? raw : (Date.now() - (state.settings.lastSeenAt || Date.now())));
@@ -2048,6 +2053,17 @@
       const rs = (state.settings && state.settings.offlineReasons) || [];
       for (let i = 0; i < rs.length; i++) { if (rs[i].id === rId) rTxt = String(rs[i].text || ""); }
     }
+    /* 跨线回读：别的线最近 7 天提到过他的事 —— 作为已知事实，防止两边对同一件事写出两个版本 */
+    let xmLines = "";
+    try {
+      const xm = crossMentions(s, ch, 7, 20);
+      if (xm.length) {
+        xmLines = "【其他线里提到过你的事（当作已知事实；和它们冲突的写法不要出现）】\n" +
+          xm.map((x) => "· " + Memory.fmtStory(x.t).slice(0, 10) + "（" + (x.name || "别处") + "那条线" +
+            (x.source === "heard" ? "，据说是听来的" : "，是亲历") + "）：" + x.text).join("\n") + "\n\n";
+      }
+    } catch (e) { xmLines = ""; }
+
     const body = [
       "角色：" + (ch.name || "角色"),
       "角色设定：" + (Memory.personaText ? Memory.personaText(ch) : ""),
@@ -2055,6 +2071,10 @@
       "当前场景：" + (s.scene || "（未记录）"),
       "共同经历：" + (s.shared || "（未记录）"),
       "记忆摘要：" + (Memory.memoryText ? Memory.memoryText(s.memory) : "（空）"),
+      /* 跨线回读（10-27）：别的线最近 7 天提到过这个角色的事，作为「已知事实」。
+         范围：故事时间最近 7 天 + mentions 含他 + 最多 20 条。
+         作用只有一个 —— 别让两边对同一件事写出两个版本（他那天在加班 vs 在喝酒）。 */
+      (xmLines ? xmLines : "") +
       (tline ? tline + "\n" : "") +
       (rTxt ? ("用户这次离开的原因（就照着写他不在的这段时间）：" + rTxt + "\n") : "") +
         "空档期：" + fromTxt + " 到 " + toTxt + "，共 " + days + " 天。" +
@@ -2078,6 +2098,106 @@
     return (res && res.text) || "";
   }
   /* 采纳：作为一条「补写」消息放进这条线的末尾（用户看得见，也能删） */
+  /* ── 剧情按天归档（10-27 用户口径）──────────────────────────
+     世界生成出来的剧情是跨天的（「1. 3月12日」「2. 3月13日」）。
+     以前整段 push 成一条消息，ts 是「现在」，日摘要压缩时全归到同一天 —— 时间线就错了。
+     这里把每段按它自己写的日期存进 session.worldLog，日更压缩时按当天并入素材。
+     mentions：本地按角色名匹配（零成本）。source 固定 live —— 这段本来就是角色亲历。 */
+  function fmtDayNum(y, mo, d) {
+    const p2 = (n) => (n < 10 ? "0" + n : "" + n);
+    return y + "-" + p2(mo) + "-" + p2(d);
+  }
+  function parseDayFromHead(head, base) {
+    const s = String(head || "");
+    let m = /(\d{4})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})/.exec(s);
+    if (m) return fmtDayNum(+m[1], +m[2], +m[3]);
+    m = /(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]/.exec(s);
+    if (m) {
+      const bd = new Date(base);
+      let y = bd.getFullYear();
+      const mo = +m[1];
+      /* 跨年：起点在 10-12 月、剧情写 1-3 月 → 算下一年 */
+      if (bd.getMonth() + 1 >= 10 && mo <= 3) y += 1;
+      return fmtDayNum(y, mo, +m[2]);
+    }
+    const bd0 = new Date(base);
+    if (/第二天|次日|隔天|翌日/.test(s)) {
+      const nx = new Date(base + 86400000);
+      return fmtDayNum(nx.getFullYear(), nx.getMonth() + 1, nx.getDate());
+    }
+    /* 认不出来就挂到离线区间的起点那天 —— 总比全算成「今天」强 */
+    return fmtDayNum(bd0.getFullYear(), bd0.getMonth() + 1, bd0.getDate());
+  }
+  function ingestWorldDays(s, txt) {
+    if (!s || !txt) return 0;
+    const parts = worldParts(txt);
+    if (!parts.length) return 0;
+    const M = window.Memory;
+    const nowStory = (M && M.nowOf) ? M.nowOf(s) : Date.now();
+    const gap = (M && M.awayGap) ? (M.awayGap(s) || 0) : 0;
+    const base = nowStory - gap;
+    if (!Array.isArray(s.worldLog)) s.worldLog = [];
+    /* 可提名的角色：除了自己以外，名字在正文里出现过的 */
+    let others = [];
+    try {
+      others = (window.DL && DL.Store) ? DL.Store.getCharacters() : Store.getCharacters();
+    } catch (e) { others = []; }
+    let n = 0;
+    parts.forEach((p) => {
+      const body = String(p).trim();
+      if (!body) return;
+      const head = body.split("\n")[0] || "";
+      const day = parseDayFromHead(head, base);
+      const mentions = [];
+      (others || []).forEach((c) => {
+        if (!c || !c.name || c.id === s.characterId) return;
+        if (body.indexOf(String(c.name)) >= 0) mentions.push(c.id);
+      });
+      s.worldLog.push({ date: day, text: body, mentions: mentions, source: "live", at: Date.now() });
+      n++;
+      /* 事件簿：每段一条「剧情」，时间点落在当天中午，免得和消息时间打架 */
+      try {
+        const t = new Date(day + "T12:00:00").getTime();
+        if (window.DL && DL.pushEvent) {
+          DL.pushEvent(s.id, {
+            t: t, kind: "world", source: "live", mentions: mentions,
+            text: body.replace(/\s+/g, " ").slice(0, 200)
+          });
+        }
+      } catch (e) { /* 事件写失败不影响剧情采纳 */ }
+    });
+    if (s.worldLog.length > 200) s.worldLog = s.worldLog.slice(-200);
+    return n;
+  }
+
+  /* 回读：其他线最近 7 天里「提到过我」的剧情，作为已知事实注入 —— 防止两边说法打架。
+     范围 = 故事时间最近 N 天 + mentions 含我 + 最多 20 条（用户口径）。 */
+  function crossMentions(s, ch, days, maxN) {
+    if (!s || !ch || !ch.id) return [];
+    const M = window.Memory;
+    const now = (M && M.nowOf) ? M.nowOf(s) : Date.now();
+    const from = now - (days || 7) * 86400000;
+    const out = [];
+    try {
+      const list = (window.DL && DL.Store) ? DL.Store.getSessions() : Store.getSessions();
+      list.forEach((o) => {
+        if (!o || o.id === s.id) return;
+        (o.events || []).forEach((e) => {
+          if (!e || typeof e.t !== "number" || e.t < from) return;
+          if (!Array.isArray(e.mentions) || e.mentions.indexOf(ch.id) < 0) return;
+          let nm = "";
+          try {
+            const c2 = characterFor(o);
+            nm = (c2 && c2.name) || "";
+          } catch (err) { nm = ""; }
+          out.push({ t: e.t, text: String(e.text || ""), source: e.source, name: nm });
+        });
+      });
+    } catch (e) { /* 读不到就当没有 */ }
+    out.sort((a, b) => b.t - a.t);
+    return out.slice(0, maxN || 20);
+  }
+
   function applyWorld(sid, text) {
     let txt = String(text || "").trim();
     if (!sid || !txt) return;
@@ -2089,6 +2209,9 @@
     const list = Store.getSessions();
     const i = list.findIndex((x) => x.id === sid);
     if (i < 0) return;
+    /* 按天归档必须在 rebaseTime 之前 —— awayGap 靠 s.time.leftAt，rebase 会把它冲掉，
+       冲掉之后就再也算不出「离线那段的起点是哪天」了。 */
+    try { ingestWorldDays(list[i], txt); } catch (e) { console.warn("[DeepLink] 剧情按天归档失败", e); }
     list[i].messages.push({ role: "assistant", ts: Date.now(), world: true, variants: [{ content: txt, q: 0 }], vi: 0 });
     list[i].updatedAt = Date.now();
     /* 离线这段时间已经用剧情交代过了 → 以此刻为新基准重新起算，旧锚点作废 */

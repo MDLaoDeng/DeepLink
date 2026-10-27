@@ -244,6 +244,7 @@
     <div id="sidePanePhone" class="side-pane" hidden>
       <div id="phoneCharList" class="char-list-side"></div>
     </div>
+    <button id="openEventBookBtn" class="btn ghost block" type="button"><span data-icon="file-document-outline"></span>事件簿</button>
     <div class="side-foot">
       <button id="phoneBtn" class="btn ghost" type="button" aria-label="切换手机" title="切换手机"><span data-icon="cellphone"></span></button>
       <button id="openThemesBtn" class="btn ghost" type="button" aria-label="主题" title="主题"><span data-icon="palette-outline"></span></button>
@@ -600,6 +601,7 @@
         <label class="check-field"><input type="checkbox" id="setDailyUpdate"><span>日更：场景 / 关系 每天各更新一次（默认开；共同经历不随聊天变）</span></label>
         <label class="check-field"><input type="checkbox" id="setToolUse"><span>让角色按需读取这条线自己的资料（工具调用：记忆摘要 / 思绪 / 图库 / 旧对话检索。默认开；模型不支持时会自动退回普通回答，每次多读一次就要多一轮请求）</span></label>
         <label class="check-field"><input type="checkbox" id="setWorldGen"><span>世界生成：久未上线后生成三段剧情解释角色这段时间做了什么（可关）</span></label>
+        <label class="check-field"><input type="checkbox" id="setEventBook"><span>事件簿：汇总各条世界线在故事时间里发生过什么（可关；关掉后不再记事件、也不显示入口，省 token）</span></label>
         <label class="check-field"><input type="checkbox" id="setStatusQuant"><span>附带卡片：气泡下方显示一组自定义数值（可关）</span></label>
         <label class="field"><span>附带卡片的项目（每行一个名字，最多 20 项）</span><textarea id="setStatusCards" rows="3" placeholder="例：&#10;冷静值&#10;开心值&#10;信任值"></textarea>
           <p class="hint">只填<b>项目名字</b>，别写数值、阈值或说明 —— 数值是 AI 每条回复自己给的（0~100 的整数）。
@@ -1994,6 +1996,20 @@
   </div>
 </div>
 
+<div id="eventBookModal" class="modal" aria-hidden="true">
+  <div class="modal-sheet">
+    <div class="modal-head">
+      <h2>事件簿</h2>
+      <button class="icon-btn" data-close="eventBookModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
+    </div>
+    <div class="modal-body">
+      <p class="hint">把所有世界线里发生过的事，按「<b>世界观 → 世界线 → 日期</b>」摊开看。
+        只读，不改任何对话。可以在「设置 → 高级功能」里关掉。</p>
+      <div id="eventBookBody" class="eb-body"></div>
+    </div>
+  </div>
+</div>
+
 <div id="searchModal" class="modal" aria-hidden="true">
   <div class="modal-sheet">
     <div class="modal-head">
@@ -2336,5 +2352,6 @@
 <script src="live2d.js"></script>
 <script src="camera.js"></script>
 <script src="activity.js"></script>
+<script src="eventbook.js"></script>
 </body>
 </html>
