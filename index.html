@@ -1996,17 +1996,15 @@
   </div>
 </div>
 
-<div id="eventBookModal" class="modal" aria-hidden="true">
-  <div class="modal-sheet">
-    <div class="modal-head">
-      <h2>事件簿</h2>
-      <button class="icon-btn" data-close="eventBookModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
-    </div>
-    <div class="modal-body">
-      <p class="hint">把所有世界线里发生过的事，按「<b>世界观 → 世界线 → 日期</b>」摊开看。
-        只读，不改任何对话。可以在「设置 → 高级功能」里关掉。</p>
-      <div id="eventBookBody" class="eb-body"></div>
-    </div>
+<div id="eventBookPage" class="eb-page" hidden>
+  <div class="eb-page-head">
+    <button id="eventBookBack" class="icon-btn" type="button" aria-label="返回"><span data-icon="arrow-left"></span></button>
+    <h2>事件簿</h2>
+  </div>
+  <div class="eb-page-body">
+    <p class="hint">把所有世界线里发生过的事，按「<b>世界观 → 世界线 → 日期</b>」摊开看。
+      只读，不改任何对话。可以在「设置 → 高级功能」里关掉。</p>
+    <div id="eventBookBody" class="eb-body"></div>
   </div>
 </div>
 

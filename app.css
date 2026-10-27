@@ -1110,7 +1110,18 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 .cf-persona-row select { flex: 1; min-width: 0; }
 .cf-persona-row .btn { flex: none; margin-left: 10px; }
 
-/* 事件簿（10-27）：世界观 → 世界线 → 日期，三层折叠；只读聚合 */
+/* 事件簿（10-27）：整页（不是弹窗），世界观 → 世界线 → 日期 三层折叠 */
+.eb-page {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 61;
+  display: flex; flex-direction: column;
+  background-color: var(--bg); color: var(--text);
+}
+.eb-page-head {
+  flex: none; display: flex; align-items: center;
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+}
+.eb-page-head h2 { flex: 1; margin: 0 0 0 8px; font-size: 16px; font-weight: 600; }
+.eb-page-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 14px; }
 .eb-body { display: flex; flex-direction: column; }
 .eb-world {
   margin-bottom: 10px; border: 1px solid var(--border);

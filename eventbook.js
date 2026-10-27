@@ -74,11 +74,20 @@
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
   }
 
+  /* 整页打开（10-27 用户口径：事件簿是一整个页面，不是弹窗） */
   function openEventBook() {
-    var U = UI();
-    if (!U) return;
-    U.openModal("eventBookModal");
+    var p = document.getElementById("eventBookPage");
+    if (!p) return;
+    p.hidden = false;
     renderEventBook();
+  }
+  function closeEventBook() {
+    var p = document.getElementById("eventBookPage");
+    if (p) p.hidden = true;
+  }
+  function eventBookOpen() {
+    var p = document.getElementById("eventBookPage");
+    return !!(p && !p.hidden);
   }
 
   /* 渲染：世界观 → 世界线 → 日期。倒序（最近的在上面），总量封顶 200 条 */
@@ -130,6 +139,8 @@
       lineKeys.forEach(function (lk) {
         var ld = document.createElement("details");
         ld.className = "eb-line";
+        /* 这条线的事件不多就直接展开 —— 打开事件簿还要再点两下才看得到内容，太绕 */
+        ld.open = (worlds[wk][lk].length <= 12);
         var ls = document.createElement("summary");
         var lb = document.createElement("b");
         lb.textContent = lk;
@@ -200,6 +211,11 @@
         openEventBook();
       });
     }
+    var back = document.getElementById("eventBookBack");
+    if (back && !back.dataset.bound) {
+      back.dataset.bound = "1";
+      back.addEventListener("click", closeEventBook);
+    }
     /* 入口跟着开关走：关掉事件簿就整块藏起来 */
     var s = stateOf().settings || {};
     if (b) b.hidden = (s.eventBook === false);
@@ -209,6 +225,8 @@
     eventsOf: eventsOf,
     pushEvent: pushEvent,
     openEventBook: openEventBook,
+    closeEventBook: closeEventBook,
+    eventBookOpen: eventBookOpen,
     renderEventBook: renderEventBook,
     refreshEventBookEntry: bind
   };
