@@ -3697,3 +3697,57 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   font-size: var(--fs-caption); line-height: 18px;
 }
 .ph-moment-img { position: relative; }
+
+
+/* ── 7.1.2 动态封面（可点编辑）──────────────────────────── */
+.pf-cover-edit { cursor: pointer; position: relative; }
+.pf-cover-edit:active { opacity: .92; }
+/* 没有封面时给一块虚线占位，别让人以为页面坏了 */
+.pf-cover-edit:not(.pf-cover-has) {
+  background-image: none !important;
+  border-bottom: 0.5px solid var(--border);
+}
+.pf-cover-edit:not(.pf-cover-has)::before {
+  content: "点这里加封面";
+  position: absolute; left: 18px; top: 50%; transform: translateY(-50%);
+  font-size: var(--fs-caption); color: var(--text-mute);
+}
+.pf-cover-cam {
+  position: absolute; right: 12px; top: 12px;
+  width: 32px; height: 32px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  background-color: rgba(0, 0, 0, .45); color: #fff;
+}
+.pf-cover-cam .ic { width: 17px; height: 17px; }
+
+/* 手机页嵌进来时不要再叠一层内边距（.phone-moments 本来有 10px 12px） */
+.phone-moments.pf-host { padding: 0; }
+.pf-moments-embed { display: block; }
+.pf-moments-embed .pf-moment:last-child { border-bottom: 0; }
+
+/* 选择层（封面用哪张之类） */
+.pf-choose { display: flex; flex-direction: column; margin: 4px 0 2px; }
+.pf-choose-row {
+  display: block; width: 100%; text-align: left;
+  padding: 13px 12px; border: 0; border-radius: var(--r-md);
+  background-color: transparent; color: inherit; font: inherit;
+  min-height: 44px;
+}
+.pf-choose-row + .pf-choose-row { margin-top: 2px; }
+.pf-choose-row:active { background-color: var(--panel-2); }
+.pf-choose-t { display: block; font-size: var(--fs-body); color: var(--text); }
+.pf-choose-h { display: block; margin-top: 3px; font-size: var(--fs-caption); color: var(--text-mute); }
+
+/* 动态配图跟微信一样缩略：单图铺满整宽会把一屏吃掉，一条动态都看不全 */
+.pf-moment-imgs.pf-n1 { max-width: 62%; }
+.pf-moment-imgs.pf-n1 .pf-moment-img img {
+  max-height: 220px; object-fit: cover;
+}
+.pf-moment-imgs.pf-n2 .pf-moment-img,
+.pf-moment-imgs.pf-n3 .pf-moment-img { height: 112px; }
+.pf-moment-imgs.pf-n2 .pf-moment-img img,
+.pf-moment-imgs.pf-n3 .pf-moment-img img {
+  width: 100%; height: 100%; object-fit: cover;
+}
+/* 无封面时不显示相机角标（已经写着「点这里加封面」，两个提示重复） */
+.pf-cover-edit:not(.pf-cover-has) .pf-cover-cam { display: none; }

@@ -362,7 +362,7 @@
     var ms = momentsOf(ch.id);
     var me = el("button", "pf-entry pf-entry-moments");
     me.type = "button";
-    me.appendChild(el("div", "pf-entry-tx")).appendChild(el("div", "pf-entry-t", "朋友圈"));
+    me.appendChild(el("div", "pf-entry-tx")).appendChild(el("div", "pf-entry-t", "动态"));
     var thumbs = el("div", "pf-thumbs");
     var withImg = ms.filter(function (m) { return m.imgs && m.imgs.length; }).slice(0, 3);
     if (withImg.length) {
@@ -447,58 +447,214 @@
     }));
 
     wrap.appendChild(secTitle("朋友权限"));
-    wrap.appendChild(row("权限", "聊天、朋友圈", null));
+    wrap.appendChild(row("权限", "聊天、动态", null));
 
     wrap.appendChild(secTitle("更多信息"));
     var gs = commonGroups(ch.id);
     var gn = gs.map(function (g) { return g.title || "群聊"; });
-    wrap.appendChild(row("我和他的共同群聊", gs.length ? gs.length + " 个" + (gn.length ? "（" + gn.slice(0, 2).join("、") + (gn.length > 2 ? "…" : "") + "）" : "") : "0 个", null));
+    wrap.appendChild(row("我和TA的共同群聊", gs.length ? gs.length + " 个" + (gn.length ? "（" + gn.slice(0, 2).join("、") + (gn.length > 2 ? "…" : "") + "）" : "") : "0 个", null));
     wrap.appendChild(infoRow("签名", so.sign));
     wrap.appendChild(infoRow("来源", so.addedVia));
     wrap.appendChild(infoRow("添加时间", fmtFull(so.addedAt)));
     return wrap;
   }
 
-  /* ③ 朋友圈 */
-  function momentsView(ch) {
-    var so = ensureSocial(ch);
-    var wrap = el("div", "pf-page pf-moments-page");
-    wrap.appendChild(head("朋友圈", function () { openMain(); }));
+  /* ③ 动态（原「朋友圈」，10-28 用户口径：这个名字有版权风险，全项目统一叫「动态」）
+     · 角色：封面可上传，也可让 AI 按他的背景与气质画一张
+     · 我（ch 传 null）：封面只能上传 —— 用户明确要求「背景只支持上传」
+     embed=true 时不带整页外壳与标题栏，供手机页嵌进去用。 */
+  function momentsView(ch, embed) {
+    var isMe = !ch;
+    var wrap = el("div", embed ? "pf-moments-embed" : "pf-page pf-moments-page");
+    if (!embed) {
+      wrap.appendChild(head(isMe ? "我的动态" : "动态", function () {
+        if (isMe) close(); else openMain();
+      }));
+    }
 
-    var cover = el("div", "pf-cover");
-    var cov = (so.photos && so.photos[0]) || "";
-    if (cov) { cover.style.backgroundImage = "url(" + cov + ")"; }
-    var cvName = el("div", "pf-cover-name", showName(ch));
-    cover.appendChild(cvName);
+    var cover = el("div", "pf-cover pf-cover-edit");
+    var cov = coverOf(ch, isMe);
+    if (cov) {
+      cover.style.backgroundImage = "url(" + cov + ")";
+      cover.classList.add("pf-cover-has");
+    }
+    cover.appendChild(el("div", "pf-cover-name", isMe
+      ? (((D().state || {}).settings || {}).myName || "我")
+      : showName(ch)));
+    var cam = el("span", "pf-cover-cam");
+    cam.innerHTML = icon("camera-outline") || icon("creation") || "";
+    cover.appendChild(cam);
+    cover.addEventListener("click", function () { editCover(ch, isMe); });
     wrap.appendChild(cover);
 
     var body = el("div", "pf-moments-body");
-    var ms = momentsOf(ch.id);
+    var ms = momentsOf(isMe ? "me" : ch.id);
     if (!ms.length) {
-      body.appendChild(el("div", "pf-empty-box", "还没有发过动态。"));
+      body.appendChild(el("div", "pf-empty-box", isMe
+        ? "还没发过动态。手机页「+」→「发布动态」。"
+        : "TA 还没发过动态。"));
     } else {
-      ms.forEach(function (m) {
-        var it = el("div", "pf-moment");
-        var left = el("div", "pf-moment-day", fmtDay(m.ts));
-        var right = el("div", "pf-moment-main");
-        if (m.imgs && m.imgs.length) {
-          var grid = el("div", "pf-moment-imgs pf-n" + Math.min(3, m.imgs.length));
-          m.imgs.slice(0, 6).forEach(function (src2) {
-            var u = picUrl(src2);
-            if (!u) return;
-            var cell = el("div", "pf-moment-img");
-            var i3 = el("img"); i3.src = u; i3.alt = "";
-            cell.appendChild(i3); grid.appendChild(cell);
-          });
-          right.appendChild(grid);
-        }
-        if (m.text) right.appendChild(el("div", "pf-moment-tx", m.text));
-        it.appendChild(left); it.appendChild(right);
-        body.appendChild(it);
-      });
+      ms.forEach(function (m) { body.appendChild(momentRow(m)); });
     }
     wrap.appendChild(body);
     return wrap;
+  }
+
+  /* 一条动态（角色版与「我」的版式完全一样，用户要求统一） */
+  function momentRow(m) {
+    var it = el("div", "pf-moment");
+    it.appendChild(el("div", "pf-moment-day", fmtDay(m.ts)));
+    var right = el("div", "pf-moment-main");
+    var pics = (m.imgs && m.imgs.length) ? m.imgs : (m.image ? [m.image] : []);
+    if (pics.length) {
+      var grid = el("div", "pf-moment-imgs pf-n" + Math.min(3, pics.length));
+      pics.slice(0, 6).forEach(function (src2) {
+        var u = picUrl(src2);
+        if (!u) return;
+        var cell = el("div", "pf-moment-img");
+        var i3 = el("img"); i3.src = u; i3.alt = "";
+        cell.appendChild(i3); grid.appendChild(cell);
+      });
+      if (grid.children.length) right.appendChild(grid);
+    }
+    if (m.text) right.appendChild(el("div", "pf-moment-tx", m.text));
+    it.appendChild(right);
+    return it;
+  }
+
+  /* ── 封面：读 / 写 ──────────────────────────────
+     角色存 ch.social.cover（跟角色卡一起加密、一起导出）；
+     我存 settings.momentCover（和全局背景图同一套存法）。
+     读的时候都过 picUrl —— 万一是附件对象也能解。 */
+  function coverOf(ch, isMe) {
+    if (isMe) {
+      var st = (D().state || {}).settings || {};
+      return st.momentCover || "";
+    }
+    var so = ch && ch.social;
+    if (so && so.cover) return picUrl(so.cover);
+    if (so && so.photos && so.photos[0]) return so.photos[0];   /* 老数据：图库第一张兜底 */
+    return "";
+  }
+
+  function setCover(ch, isMe, url) {
+    if (isMe) {
+      var st = (D().state || {}).settings || {};
+      var next = Object.assign({}, st, { momentCover: url || "" });
+      var saved = S().saveSettings(next);
+      D().state.settings = saved || next;
+      return;
+    }
+    ch.social = ch.social || {};
+    ch.social.cover = url || "";
+    saveChar(ch);
+  }
+
+  /* 压缩后再存：封面会一直躺在设置 / 角色卡里，原图几百 KB 会把配额吃掉不少。
+     720 宽足够铺满 180px 高的封面（DPR2 也够）。 */
+  function shrink(url) {
+    if (!url || String(url).slice(0, 5) !== "data:") return Promise.resolve(url || "");
+    var fn = D().shrinkDataUrl;
+    if (typeof fn !== "function") return Promise.resolve(url);
+    return fn(url, 720, 0.82).catch(function () { return url; });
+  }
+
+  function editCover(ch, isMe) {
+    var has = !!coverOf(ch, isMe);
+    var items = [{ value: "upload", label: "从相册选一张", hint: "建议横图，会裁成 16:7 铺满" }];
+    if (!isMe) items.push({ value: "ai", label: "让 AI 画一张", hint: "按 TA 的背景与气质生成" });
+    if (has) items.push({ value: "clear", label: "恢复默认", hint: "去掉当前封面" });
+    choose(isMe ? "我的动态封面" : "动态封面", items).then(function (v) {
+      if (!v) return;
+      if (v === "clear") { setCover(ch, isMe, ""); render(); return; }
+      if (v === "upload") {
+        var open = D().openAlbum;
+        if (typeof open !== "function") { toast("相册不可用", true); return; }
+        open({
+          title: "选一张做封面",
+          onPick: function (url) {
+            if (!url) return;
+            shrink(url).then(function (u) { setCover(ch, isMe, u); render(); });
+          }
+        });
+        return;
+      }
+      if (v === "ai") genCover(ch);
+    });
+  }
+
+  /* AI 画封面：只给角色用。按「外貌 + 气质 + 世界观」拼 prompt，
+     不要人物正脸特写（封面是横幅，脸会被裁掉一半）。 */
+  function genCover(ch) {
+    if (!(window.Media && Media.image)) { toast("文生图没配好", true); return; }
+    var st = (D().state || {}).settings || {};
+    if (Media.capable && !Media.capable("img", st)) { toast("请先在设置里启用并配置文生图", true); return; }
+    var f = (ch && ch.fields) || {};
+    var ref = [f.aiAppearance, f.aiPersona, f.world, f.aiBackground].filter(Boolean).join("；").slice(0, 300);
+    var prompt = "一张适合做手机动态封面的横版照片，写实摄影感，构图放松、留白多，不要文字、不要水印。" +
+      (ref ? "气质与场景参考：" + ref : "");
+    toast("正在画封面…");
+    Media.image(prompt, st).then(function (url) {
+      if (!url) { toast("没画出来，等下再试", true); return; }
+      var toData = (String(url).slice(0, 5) === "data:")
+        ? Promise.resolve(url)
+        : fetch(url).then(function (r) { return r.blob(); }).then(function (b) {
+          return new Promise(function (res) {
+            var fr = new FileReader();
+            fr.onload = function () { res(String(fr.result || "")); };
+            fr.onerror = function () { res(""); };
+            fr.readAsDataURL(b);
+          });
+        }).catch(function () { return ""; });
+      toData.then(function (d) {
+        var u = d || url;
+        return shrink(u).then(function (u2) {
+          setCover(ch, false, u2); render(); toast("封面换好了");
+        });
+      });
+    }).catch(function (e) {
+      toast("画失败：" + (e && e.message ? e.message : e), true);
+    });
+  }
+
+  /* ── 自绘选择层（不用原生 confirm；原生框在暗色主题下会白一块）── */
+  function choose(title, items) {
+    return new Promise(function (resolve) {
+      var mask = el("div", "pf-edit");
+      var card = el("div", "pf-edit-card");
+      card.appendChild(el("div", "pf-edit-t", title));
+      var list = el("div", "pf-choose");
+      var done = false;
+      function finish(v) {
+        if (done) return;
+        done = true;
+        mask.classList.add("pf-edit-out");
+        setTimeout(function () { if (mask.parentNode) mask.parentNode.removeChild(mask); }, 150);
+        resolve(v);
+      }
+      items.forEach(function (it) {
+        var b = el("button", "pf-choose-row");
+        b.type = "button";
+        b.appendChild(el("span", "pf-choose-t", it.label));
+        if (it.hint) b.appendChild(el("span", "pf-choose-h", it.hint));
+        b.addEventListener("click", function () { finish(it.value); });
+        list.appendChild(b);
+      });
+      card.appendChild(list);
+      var bar = el("div", "pf-edit-bar");
+      var cancel = el("button", "btn ghost", "取消");
+      cancel.type = "button";
+      cancel.addEventListener("click", function () { finish(null); });
+      bar.appendChild(cancel);
+      card.appendChild(bar);
+      mask.appendChild(card);
+      document.body.appendChild(mask);
+      mask.addEventListener("click", function (e) { if (e.target === mask) finish(null); });
+    });
+  }
+
+  function toast(t, isErr) {
+    if (U() && U().toast) U().toast(t, isErr);
   }
 
   /* ④ 新的朋友（好友申请列表）—— 手机页列表顶部那个入口进来 */
@@ -720,7 +876,15 @@
     momentsOf: momentsOf, addCharMoment: addCharMoment,
     requestFriend: requestFriend, pendingReqs: pendingReqs,
     acceptReq: acceptReq, rejectReq: rejectReq,
-    openRequests: openRequests, maybeGroupFriending: maybeGroupFriending
+    openRequests: openRequests, maybeGroupFriending: maybeGroupFriending,
+    /* 手机页「动态」页用：把「我的动态」渲染进给定容器（封面只能上传） */
+    renderMine: function (box) {
+      if (!box) return false;
+      box.innerHTML = "";
+      box.appendChild(momentsView(null, true));
+      return true;
+    },
+    coverOf: coverOf, setCover: setCover
   };
   (window.__dlScripts = window.__dlScripts || []).push("profile.js");
 })();

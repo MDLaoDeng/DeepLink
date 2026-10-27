@@ -1405,7 +1405,7 @@
       return writeRaw(K_USAGECAT, JSON.stringify(v || {}));
     },
 
-    /* 手机动态（朋友圈）。读失败返回 []，绝不覆盖已有数据（同「读失败拒写」的口径）。 */
+    /* 手机动态。读失败返回 []，绝不覆盖已有数据（同「读失败拒写」的口径）。 */
     getMoments() {
       const raw = readRaw(K_MOMENTS);
       const v = raw === undefined ? null : safeParse(raw, null);

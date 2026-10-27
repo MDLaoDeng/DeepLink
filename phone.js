@@ -3333,7 +3333,7 @@
          但开关独立、默认关 —— 用户点了「动态可以带图」才让 AI 考虑，这就是「需要用户同意」。 */
       var canImg = !!(state.settings.charMomentImg && window.Media && Media.capable &&
         Media.capable("img", state.settings));
-      var prompt = "你在扮演下面这个人。现在是晚上，他可能会在自己手机上发一条朋友圈。\n\n" +
+      var prompt = "你在扮演下面这个人。现在是晚上，他可能会在自己手机上发一条动态。\n\n" +
         ctx + "\n\n规则：\n" +
         "· 只写他自己想让人看见的，不要对话、不要旁白、不要解释。\n" +
         "· 一句话，不超过 40 字，口语，像随手发的。\n" +
@@ -3383,6 +3383,14 @@
     var box = $("#phoneMoments");
     if (!box) return;
     box.innerHTML = "";
+    /* 7.1.2 用户口径：我自己的动态页要和角色动态页长得一样（封面 + 日期左 / 内容右），
+       所以整块交给 profile.js 渲染，只保留「封面只能上传」这一条差异。
+       下面那段旧渲染留作兜底：profile.js 没加载成功时还能显示。 */
+    if (window.DL && DL.profile && DL.profile.renderMine) {
+      try {
+        if (DL.profile.renderMine(box)) { box.classList.add("pf-host"); return; }
+      } catch (e) { /* 回落旧渲染 */ }
+    }
     var list = Store.getMoments().slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
     if (!list.length) {
       var tip = document.createElement("div");
