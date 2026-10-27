@@ -1,7 +1,7 @@
-/* DeepLink —— 默认配置 */
+/* Sekulum —— 默认配置 */
 (function () {
   const DEFAULT_SYSTEM_PROMPT = [
-    "你是 DeepLink，一个能力全面、思考严谨的 AI 助手。",
+    "你是 Sekulum，一个能力全面、思考严谨的 AI 助手。",
     "",
     "工作方式：",
     "- 回答前先判断问题属于简单还是复杂：复杂问题先拆解、再逐步推理，最后给出清晰结论。",
@@ -1208,7 +1208,7 @@
     IMAGE_STYLES,
     IMAGE_STYLE_INDEX,
     COMPRESS_PROMPTS,
-    APP_VERSION: "7.0.1",
+    APP_VERSION: "7.1.0",
     /* 更新检查（10-18 用户要求）：
        放一个能被 https 直接读到的 JSON（对象存储 / 静态托管的直链都行），格式：
          { "version": "6.3.0",
@@ -1222,7 +1222,7 @@
     /* 下载页（可选）：没填 url 字段时用它兜底；两个都空就只提示版本号 */
     UPDATE_PAGE: "",
     FEATURE_TREE: [
-      "DeepLink",
+      "Sekulum",
       "├─ 对话",
       "│  ├─ 联网搜索 / 深度思考（思考语言跟随用户；只出思考时自动补问一次正文）",
       "│  ├─ 附件：文件·图片·拍照·语音（图片默认先转文字）",

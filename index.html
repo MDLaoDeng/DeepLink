@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#0e0b1a">
-<title>DeepLink</title>
+<title>Sekulum</title>
 <link rel="icon" href="favicon.png">
 <meta name="color-scheme" content="dark light">
 <link id="appCss" rel="stylesheet" href="app.css">
@@ -14,8 +14,8 @@
 <div id="splash" class="splash" aria-hidden="true" data-anim="1">
   <div class="splash-stage" id="splashStage"></div>
   <div class="splash-mark">
-    <span class="w1" id="splashW1">Deep</span>
-    <span class="w2" id="splashW2">Link</span>
+    <span class="w1" id="splashW1">Sek</span>
+    <span class="w2" id="splashW2">ulum</span>
     <span class="splash-line"></span>
   </div>
   <div class="splash-credit" id="splashCredit">菠萝味柠檬汁/DS共同制作</div>
@@ -154,7 +154,7 @@
       /* 10-27：默认换成 0 = 黑灰底打字机（用户口径）。老用户之前选过 1~5 的保持不变。 */
       if (!/^[0-5]$/.test(anim)) anim = "0";
       el.setAttribute("data-anim", anim);
-      /* 文字：自定义就整串放第一行、藏掉第二行；没自定义保持 Deep/Link */
+      /* 文字：自定义就整串放第一行、藏掉第二行；没自定义保持 Sek/ulum（1~5 号动画用） */
       var txt = String(s.splashText == null ? "" : s.splashText).replace(/^\s+|\s+$/g, "");
       var w1 = document.getElementById("splashW1");
       var w2 = document.getElementById("splashW2");
@@ -245,7 +245,7 @@
 <div id="app">
   <aside id="sidebar" aria-hidden="true">
     <div class="side-head">
-      <span class="brand">DeepLink</span>
+      <span class="brand">Sekulum</span>
       <div class="side-actions">
         <button id="newChatBtn" class="btn primary block" type="button"><span data-icon="plus"></span>新对话</button>
         <button id="openSearchBtn" class="btn ghost icon-only" type="button" aria-label="搜索历史" title="搜索历史"><span data-icon="magnify"></span></button>
@@ -332,7 +332,7 @@
         <input id="fileInput" type="file" multiple hidden>
         <input id="audioInput" type="file" accept="audio/*" hidden>
         <input id="avatarInput" type="file" accept="image/*" hidden>
-        <textarea id="input" rows="1" placeholder="给 DeepLink 发送消息…"></textarea>
+        <textarea id="input" rows="1" placeholder="给 Sekulum 发送消息…"></textarea>
         <button id="stopBtn" class="icon-btn danger" type="button" hidden aria-label="停止"><span data-icon="stop"></span></button>
         <button id="sendBtn" class="icon-btn send" type="button" aria-label="发送"><span data-icon="arrow-up"></span></button>
       </div>
@@ -724,7 +724,7 @@
           <option value="4">呼吸 · 缓慢起落的环</option>
           <option value="5">头像 · 先出图再出字</option>
         </select></label>
-        <label class="field"><span>主文字（留空＝你好，世界；选 1~5 时留空＝DeepLink）</span><input id="setSplashText" type="text" placeholder="你好，世界"></label>
+        <label class="field"><span>主文字（留空＝你好，世界；选 1~5 时留空＝Sekulum）</span><input id="setSplashText" type="text" placeholder="你好，世界"></label>
         <label class="field"><span>底部小字（留空＝默认署名）</span><input id="setSplashSub" type="text" placeholder="菠萝味柠檬汁/DS共同制作"></label>
         <label class="field"><span>启动图片（可留空；填 avatars/xxx.png 或图片地址）</span><input id="setSplashImage" type="text" placeholder="avatars/shenyan.png"></label>
         <label class="field"><span>或选一个角色头像</span><select id="setSplashAvatar"></select></label>
@@ -1279,8 +1279,8 @@
     </div>
     <div class="modal-body">
       <div class="about-hero">
-        <img class="about-hero-img" src="about.png" alt="DeepLink">
-        <div class="about-name">DeepLink</div>
+        <img class="about-hero-img" src="about.png" alt="Sekulum">
+        <div class="about-name">Sekulum</div>
       </div>
       <div class="about-menu">
         <!-- 开源版：已移除作者联系方式与捐赠入口，APK 发行版中保留 -->
@@ -1293,7 +1293,7 @@
             <p class="hint">最后更新：2026-10-18　　继续使用本软件即表示你已阅读并同意以下条款。</p>
 
             <p><b>一、软件性质</b><br>
-            DeepLink 是一个<b>纯粹的本地客户端</b>：它不提供任何人工智能服务，不运营模型，也不设服务器。
+            Sekulum 是一个<b>纯粹的本地客户端</b>：它不提供任何人工智能服务，不运营模型，也不设服务器。
             对话内容由你<b>自行配置的第三方模型接口</b>生成，全部数据（对话、角色卡、设置、记忆）只保存在你自己的设备上。
             作者既不接收、也不存储、也不审核你与本软件之间产生的任何内容。</p>
 
@@ -1763,8 +1763,8 @@
     <div class="modal-body">
       <div class="intro-pages">
         <div class="intro-page">
-          <img class="intro-img" src="about.png" alt="DeepLink">
-          <div class="intro-h">欢迎来到 DeepLink，亲爱的创世主</div>
+          <img class="intro-img" src="about.png" alt="Sekulum">
+          <div class="intro-h">欢迎来到 Sekulum，亲爱的创世主</div>
           <p class="intro-p">从这里开始，你是这个世界的造物者 ——<br>定角色、铺时间、看他们自己往下走。</p>
         </div>
         <div class="intro-page" hidden>

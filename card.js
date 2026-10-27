@@ -1,4 +1,4 @@
-/* DeepLink —— 卡牌渲染
+/* Sekulum —— 卡牌渲染
    把带块级 HTML 的内容放进「影子根」里渲染：卡里的 CSS 出不去，也不会被页面的
    主题样式串味；从 innerHTML 插进去的 <script> 按规范不会执行。
 

@@ -1376,7 +1376,7 @@
       renderCharReadyHint(ch);
       renderFilterState(ch);
       renderCharMemory();
-    } catch (e) { console.warn("[DeepLink] fillCharacterForm 出错", e); }
+    } catch (e) { console.warn("[Sekulum] fillCharacterForm 出错", e); }
   }
 
   function readCharacterForm() {
@@ -1900,7 +1900,7 @@
            缺省已经改成落「其它」了，所以必须显式写 memory，否则单聊压缩会被记成「其它」。 */
           if (res && res.usage) recordUsage(null, res.usage, sess.characterId || "", "memory");
           return res ? res.days : 0;
-        } catch (e) { console.warn("[DeepLink] 会话压缩失败", sess.id, e); return 0; }
+        } catch (e) { console.warn("[Sekulum] 会话压缩失败", sess.id, e); return 0; }
       });
     });
     if (!tasks.length) return;
@@ -1931,7 +1931,7 @@
   }
 
   function fillSessionForm(s) {
-    try { fillSessionFormInner(s); } catch (e) { console.warn("[DeepLink] fillSessionForm 出错", e); }
+    try { fillSessionFormInner(s); } catch (e) { console.warn("[Sekulum] fillSessionForm 出错", e); }
   }
 
   function fillSessionFormInner(s) {
@@ -2002,7 +2002,7 @@
       renderSessionMemory();
     }
     /* 群聊专属：对彼此的认知 + 同步到各自线（10-18） */
-    try { if (window.DL.renderGroupCog) window.DL.renderGroupCog(s); } catch (e) { console.warn("[DeepLink] 群聊认知区出错", e); }
+    try { if (window.DL.renderGroupCog) window.DL.renderGroupCog(s); } catch (e) { console.warn("[Sekulum] 群聊认知区出错", e); }
     /* 聊天背景（本对话）：跟随全局时置勾、并显示全局图；单独设置时显示自己的图 */
     try {
       setChecked("#setSessionBgFollow", !(s && s.bgFollow === false));
@@ -2510,7 +2510,7 @@
        直接写 worldParts(...) 会 ReferenceError，被外层 try/catch 吞掉，
        症状就是「归了 0 段、事件簿空的」，2026-10-27 实测踩过。 */
     const wp = (window.DL && typeof DL.worldParts === "function") ? DL.worldParts : null;
-    if (!wp) { console.warn("[DeepLink] worldParts 不可用，按天归档跳过"); return 0; }
+    if (!wp) { console.warn("[Sekulum] worldParts 不可用，按天归档跳过"); return 0; }
     const parts = wp(txt);
     if (!parts.length) return 0;
     const M = window.Memory;
@@ -2638,7 +2638,7 @@
     if (i < 0) return;
     /* 按天归档必须在 rebaseTime 之前 —— awayGap 靠 s.time.leftAt，rebase 会把它冲掉，
        冲掉之后就再也算不出「离线那段的起点是哪天」了。 */
-    try { ingestWorldDays(list[i], txt); } catch (e) { console.warn("[DeepLink] 剧情按天归档失败", e); }
+    try { ingestWorldDays(list[i], txt); } catch (e) { console.warn("[Sekulum] 剧情按天归档失败", e); }
     list[i].messages.push({ role: "assistant", ts: Date.now(), world: true, variants: [{ content: txt, q: 0 }], vi: 0 });
     list[i].updatedAt = Date.now();
     /* 离线这段时间已经用剧情交代过了 → 以此刻为新基准重新起算，旧锚点作废 */
@@ -2646,10 +2646,10 @@
     /* 先落库，再做传播 —— 传播走 pushEvent（它会自己 getSessions/saveSessions），
        顺序反了会被这里的 saveSessions(list) 覆盖掉。 */
     Store.saveSessions(list);
-    try { spreadHeard(list[i]); } catch (e) { console.warn("[DeepLink] 传播判断失败", e); }
+    try { spreadHeard(list[i]); } catch (e) { console.warn("[Sekulum] 传播判断失败", e); }
     /* 剧情里若写了「角色用手机给你发了消息」，手机页也要补上对应时间点的文本（用户口径）。
        异步做、不挡采纳动作本身；出问题只打日志，绝不影响已经采纳的剧情。 */
-    try { fillPhoneFromWorld(sid, txt); } catch (e) { console.warn("[DeepLink] 手机页同步失败", e); }
+    try { fillPhoneFromWorld(sid, txt); } catch (e) { console.warn("[Sekulum] 手机页同步失败", e); }
   }
 
   /* ── 世界生成 → 手机页同步（10-17 用户要求）────────────────

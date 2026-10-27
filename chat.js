@@ -460,7 +460,7 @@
     const ch = characterFor(s);
     if (ch) { input.placeholder = "对「" + (ch.name || "角色") + "」说…"; return; }
     const alias = s && s.alias ? String(s.alias).trim() : "";
-    input.placeholder = alias ? "给 " + alias + " 发消息" : "给 DeepLink 发送消息…";
+    input.placeholder = alias ? "给 " + alias + " 发消息" : "给 Sekulum 发送消息…";
   }
 
   /* ── 附件 ──────────────────────────────────────── */
@@ -3675,7 +3675,7 @@
 
   /* OPT-11：表情面板在启动时绑一次就够了 —— 面板是 index.html 里的静态 DOM，
      按钮不会变。绑定函数内部有 dataset.bound 守卫，重复调用也不会重复绑。 */
-  try { bindEmojiPanel(); } catch (e) { console.warn("[DeepLink] 表情面板绑定失败", e); }
+  try { bindEmojiPanel(); } catch (e) { console.warn("[Sekulum] 表情面板绑定失败", e); }
 
   /* ── 自注册：把 app.js（及 camera.js 等其它模块）仍要调用的入口挂回 window.DL ──
      app.js 里这些名字已改成转发函数（见 app.js「转发到 chat.js」段），

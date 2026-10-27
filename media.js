@@ -1,4 +1,4 @@
-/* DeepLink —— 扩展模型适配器：语音转文字 / 语音合成 / 文生图
+/* Sekulum —— 扩展模型适配器：语音转文字 / 语音合成 / 文生图
    三类都按 OpenAI 兼容格式实现；地址与密钥留空时沿用主模型配置。 */
 (function () {
   const SPEC = {
@@ -453,7 +453,7 @@
       rows.join("") + "</div></body></html>";
 
     var safe = title.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) || "对话";
-    var base = "DeepLink_" + safe + "_" + when.getFullYear() + pad(when.getMonth() + 1) + pad(when.getDate()) + "_" + pad(when.getHours()) + pad(when.getMinutes());
+    var base = "Sekulum_" + safe + "_" + when.getFullYear() + pad(when.getMonth() + 1) + pad(when.getDate()) + "_" + pad(when.getHours()) + pad(when.getMinutes());
     return { md: md.join("\n"), html: html, base: base };
   }
 
@@ -482,7 +482,7 @@
       "</div></body></html>";
 
     var safe = title.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) || "回忆";
-    var base = "DeepLink_" + safe + "_" + when.getFullYear() + pad(when.getMonth() + 1) + pad(when.getDate()) + "_" + pad(when.getHours()) + pad(when.getMinutes());
+    var base = "Sekulum_" + safe + "_" + when.getFullYear() + pad(when.getMonth() + 1) + pad(when.getDate()) + "_" + pad(when.getHours()) + pad(when.getMinutes());
     return { md: md, html: html, base: base };
   }
 

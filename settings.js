@@ -317,7 +317,7 @@
     if (!Store.canEncrypt()) {
       UI.toast("这台设备不支持真加密，导出文件用的是口令混淆（能挡住随手打开，挡不住专门破解）。有条件的话换一台设备再导出一次。", true);
     }
-    return { app: "DeepLink", kind: kind, appVersion: CONFIG.APP_VERSION, exportedAt: new Date().toISOString(), enc: enc };
+    return { app: "Sekulum", kind: kind, appVersion: CONFIG.APP_VERSION, exportedAt: new Date().toISOString(), enc: enc };
   }
 
   async function doExportDownload() {
@@ -533,7 +533,7 @@
   }
 
   async function applyImport(payload) {
-    if (!payload || typeof payload !== "object" || payload.app !== "DeepLink" && payload.app !== "deeplink") { UI.toast("不是 DeepLink 的导出数据", true); return false; }
+    if (!payload || typeof payload !== "object" || payload.app !== "Sekulum" && payload.app !== "deeplink") { UI.toast("不是 Sekulum 的导出数据", true); return false; }
     const kind = payload.kind;
     let data = payload.data;
     if (payload.enc) {
@@ -629,7 +629,7 @@
     let dirs = [];
     try { dirs = shareDirCandidates().safe; } catch (e) { dirs = []; }
     for (let i = 0; i < dirs.length; i++) {
-      const cand = dirs[i] + "/DeepLink/" + name;
+      const cand = dirs[i] + "/Sekulum/" + name;
       try {
         const w = Store.callBridge("保存指定文件", cand, dataUrl);
         if (w === false) continue;
@@ -643,7 +643,7 @@
   /* 保存图片（AI 文生图 / 自己发的图都走这里） */
   function saveImage(src, name) {
     if (!src) { UI.toast("没有可保存的图片", true); return; }
-    const base = String(name || ("DeepLink_" + Date.now())).replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) || "image";
+    const base = String(name || ("Sekulum_" + Date.now())).replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) || "image";
     const file = /\.(png|jpe?g|webp|gif)$/i.test(base) ? base : base + ".png";
     /* 有桥就正经落盘（文件管理器能直接看见），路径也告给用户 */
     if (String(src).slice(0, 5) === "data:" && Store.hasBridge("保存指定文件")) {
@@ -1080,7 +1080,7 @@
       /* 表外分类：写进 usageCats 也没人渲染（「按类型」只遍历 USAGE_CATS），
          钱花了、账上看不见。并进「其它」并点名，否则这种错永远发现不了。 */
       try {
-        console.warn("[DeepLink] recordUsage 未知分类「" + cat + "」，已并入「其它」", new Error().stack);
+        console.warn("[Sekulum] recordUsage 未知分类「" + cat + "」，已并入「其它」", new Error().stack);
       } catch (e) { /* ignore */ }
       cat = "other";
     }
@@ -1089,7 +1089,7 @@
          看统计根本发现不了（BUG-49 就是这么攒下十几处的）。
          现在统一落「其它」并在控制台点名：「其它」突然变大 = 有新调用漏传了。 */
       cat = "other";
-      try { console.warn("[DeepLink] recordUsage 未传类型，已记入「其它」", new Error().stack); } catch (e) { /* ignore */ }
+      try { console.warn("[Sekulum] recordUsage 未传类型，已记入「其它」", new Error().stack); } catch (e) { /* ignore */ }
     }
     if (sid) {
       const list = Store.getSessions();
@@ -1209,7 +1209,7 @@
       Store.saveCharacters(chars);
       Store.saveSessions(sessions);
       state.settings = Store.saveSettings({ dataVersion: 2 });
-    } catch (e) { console.warn("[DeepLink] 数据迁移出错", e); }
+    } catch (e) { console.warn("[Sekulum] 数据迁移出错", e); }
   }
 
   /* ── 重置 ──────────────────────────────────────── */
@@ -1323,7 +1323,7 @@
   }
 
   function fillSettings() {
-    try { fillSettingsInner(); renderLockState(); } catch (e) { console.warn("[DeepLink] fillSettings 出错", e); }
+    try { fillSettingsInner(); renderLockState(); } catch (e) { console.warn("[Sekulum] fillSettings 出错", e); }
   }
 
   function fillSettingsInner() {
@@ -2148,7 +2148,7 @@
        这里只调「判断 / 获取」这类【只读】接口，绝不在这里触发任何写操作。
        结果可以一键复制（界面不铺长文本，避免自检面板被撑爆）。 */
     const diag = [];
-    diag.push("DeepLink 诊断 " + new Date().toLocaleString());
+    diag.push("Sekulum 诊断 " + new Date().toLocaleString());
     diag.push("前端版本：" + CONFIG.APP_VERSION);
     diag.push("上次运行版本：" + (state.settings.lastRunVersion || "（无）"));
     /* 「更新后首次打开」专项：清缓存是本项目唯一「只在真机执行」的启动动作
@@ -3757,9 +3757,9 @@
   });
 
   /* 脚本一跑就先决定「要不要关门」。放在这儿是为了不依赖 app.js 的执行顺序。 */
-  try { lockInitialCover(); } catch (e) { console.warn("[DeepLink] 锁屏层初始化失败", e); }
+  try { lockInitialCover(); } catch (e) { console.warn("[Sekulum] 锁屏层初始化失败", e); }
   /* 设置页 7 大模块 + 我的人设：DOM 已就绪（脚本在 body 末尾），一次绑定即可 */
-  try { bindSettingsHome(); bindPersona(); bindReason(); } catch (e) { console.warn("[DeepLink] 设置分区绑定失败", e); }
+  try { bindSettingsHome(); bindPersona(); bindReason(); } catch (e) { console.warn("[Sekulum] 设置分区绑定失败", e); }
 
   (window.__dlScripts = window.__dlScripts || []).push("settings.js");
   return true;

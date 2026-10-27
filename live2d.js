@@ -207,7 +207,7 @@
       var txt = bytesToText(buf);
       if (!txt) {
         /* 以前这里静默 return null：动作没了但没人知道。宁可吵一点。 */
-        try { console.warn("[DeepLink] 动作文件解码为空，已跳过该段（检查编码 / TextDecoder）"); } catch (e0) { /* ignore */ }
+        try { console.warn("[Sekulum] 动作文件解码为空，已跳过该段（检查编码 / TextDecoder）"); } catch (e0) { /* ignore */ }
         return null;
       }
       var fps = 30, params = {}, frames = 0;

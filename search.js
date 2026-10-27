@@ -1,4 +1,4 @@
-/* DeepLink —— 可插拔联网搜索（免 Key 优先） */
+/* Sekulum —— 可插拔联网搜索（免 Key 优先） */
 (function () {
   function withTimeout(ms) {
     const ctrl = new AbortController();

@@ -1,4 +1,4 @@
-/* DeepLink —— 本地存储：设置、会话、主题 */
+/* Sekulum —— 本地存储：设置、会话、主题 */
 (function () {
   const K_SETTINGS = "aicode.settings.v1";
 
@@ -166,9 +166,9 @@
         /* 迁移放到后台跑：首次往原生写大量数据很慢，阻塞会拖死启动（而且读会先走 localStorage 兑底） */
         setTimeout(migrateToNative, 1500);
       }
-      else console.warn("[DeepLink] 原生存储自检未通过，用 localStorage");
+      else console.warn("[Sekulum] 原生存储自检未通过，用 localStorage");
     } catch (e) {
-      console.warn("[DeepLink] 原生存储不可用，用 localStorage", e);
+      console.warn("[Sekulum] 原生存储不可用，用 localStorage", e);
     }
     return backend;
   }
@@ -194,7 +194,7 @@
     if (failed) {
       migrateRetry++;
       if (migrateRetry <= 3) setTimeout(migrateToNative, 5000);
-      else console.warn("[DeepLink] 数据迁移多次失败，仍按 localStorage 读取（不会丢数据）");
+      else console.warn("[Sekulum] 数据迁移多次失败，仍按 localStorage 读取（不会丢数据）");
       return;
     }
     /* 确实搬完了一遍：此后原生返回空即为「这个键真的没有」，
@@ -208,7 +208,7 @@
     try { w = window.webapp; } catch (e) { w = null; }
     if (!w || typeof w[name] !== "function") return undefined;
     try { return w[name].apply(w, Array.prototype.slice.call(arguments, 1)); }
-    catch (e) { console.warn("[DeepLink] 原生接口调用失败：" + name, e); return undefined; }
+    catch (e) { console.warn("[Sekulum] 原生接口调用失败：" + name, e); return undefined; }
   }
   function hasBridge(name) {
     try { return !!(window.webapp && typeof window.webapp[name] === "function"); } catch (e) { return false; }
@@ -779,7 +779,7 @@
       let bak = null;
       try { bak = readRaw(K_BAK_CHARS); } catch (e) { bak = null; }
       if (bak && String(bak).length > 2) {
-        console.warn("[DeepLink] 角色卡主键读不到，已从备份恢复");
+        console.warn("[Sekulum] 角色卡主键读不到，已从备份恢复");
         raw = bak;
       }
     }
@@ -833,7 +833,7 @@
         /* 加密失败：整个不写。内存里的改动还在，下一次保存会重试；
            磁盘上保留上一版密文，不会出现「明文 + 密文混着」的中间态。 */
         charsWriteFail++;
-        console.warn("[DeepLink] 角色卡加密失败，本次未落盘（磁盘保留上一版）");
+        console.warn("[Sekulum] 角色卡加密失败，本次未落盘（磁盘保留上一版）");
         try { if (window.UI && window.UI.toast) window.UI.toast("角色卡没保存：加密失败，请重试", true); } catch (e) { /* ignore */ }
         return;
       }
@@ -954,7 +954,7 @@
         if (bk && String(bk).length > 2) {
           const bakList = safeParse(bk, null);
           if (Array.isArray(bakList) && bakList.length) {
-            console.warn("[DeepLink] 会话主键读不到，已从备份恢复 " + bakList.length + " 条");
+            console.warn("[Sekulum] 会话主键读不到，已从备份恢复 " + bakList.length + " 条");
             raw = bk;
           }
         }
@@ -987,7 +987,7 @@
       /* 防呆必须放在「更新缓存」之前：被拒的空写若已经把 sessionsCache 清空，
          下一步的 prevCount 就变 0，闸门失效，磁盘上的历史会被整个覆盖。 */
       if (!readError && !allowEmpty && !arr.length && prevCount > 0) {
-        console.warn("[DeepLink] 会话列表将写为空白，已拒绝写入（疑似误清）");
+        console.warn("[Sekulum] 会话列表将写为空白，已拒绝写入（疑似误清）");
         return false;
       }
       /* 读盘失败期间一律不写：这时 sessionsCache 可能是空的 / 半截的，

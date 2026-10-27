@@ -1,4 +1,4 @@
-/* DeepLink —— 文件与图片读取 */
+/* Sekulum —— 文件与图片读取 */
 (function () {
   const MAX_TEXT = 60000;
   const IMAGE_MAX_SIDE = 1600;

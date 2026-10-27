@@ -1,4 +1,4 @@
-/* DeepLink —— 入口与事件绑定 */
+/* Sekulum —— 入口与事件绑定 */
 (function () {
   const $ = UI.$;
   const state = {
@@ -153,7 +153,7 @@
     /* 带上文件名和行号：只报一句「Cannot read property xxx of undefined」，
        在手机上根本没法定位是哪个文件的哪一行 —— 用户截图发过来也只能猜。 */
     const where = e && e.filename ? (String(e.filename).split("/").pop() + ":" + (e.lineno || 0)) : "";
-    console.error("[DeepLink] 运行时错误：", msg, where);
+    console.error("[Sekulum] 运行时错误：", msg, where);
     if (errToasts >= 2 || /Failed to fetch|NetworkError|Load failed/i.test(msg)) return;
     errToasts++;
     try { UI.toast("运行时错误：" + msg + (where ? "（" + where + "）" : ""), true); } catch (e2) { /* UI 未就绪 */ }
@@ -1102,7 +1102,7 @@
     try { fillSessionForm(session()); } catch (e) { /* ignore */ }
     renderAll();
     UI.toast(tip || ("故事时间已设为 " + Memory.fmtStory(ms)));
-    if (sealed || shifted) console.warn("[DeepLink] 时间系统：重排 " + sealed + " 条消息、" + shifted + " 条记忆日期");
+    if (sealed || shifted) console.warn("[Sekulum] 时间系统：重排 " + sealed + " 条消息、" + shifted + " 条记忆日期");
     return true;
   }
   function sessionTimeApply() {
@@ -1129,7 +1129,7 @@
     });
     if (n) {
       Store.saveSessions(list);
-      console.warn("[DeepLink] 已为 " + n + " 条会话补算故事时间戳");
+      console.warn("[Sekulum] 已为 " + n + " 条会话补算故事时间戳");
     }
   }
 
@@ -1699,7 +1699,7 @@
     try { return btoa(unescape(encodeURIComponent(str))); } catch (e) { return ""; }
   }
   function jsonDataUrl(json) { return "data:application/json;base64," + toB64(json); }
-  function exportFileName(kind) { return "DeepLink-" + kind + ".json"; }
+  function exportFileName(kind) { return "Sekulum-" + kind + ".json"; }
 
   function applyNoImage(v) {
     /* 只靠 CSS 隐藏聊天里的图（原生的「无图显示」会把头像也一起隐藏，所以不用它） */
@@ -2697,7 +2697,7 @@
   /* 空值安全的绑定：bind() 与拆分出去的模块共用（提到模块作用域，便于暴露给模块） */
   const on = (sel, evt, fn, opts) => {
     const el = $(sel);
-    if (!el) { console.warn("[DeepLink] 缺少元素：" + sel); return null; }
+    if (!el) { console.warn("[Sekulum] 缺少元素：" + sel); return null; }
     el.addEventListener(evt, fn, opts);
     return el;
   };
@@ -2963,13 +2963,13 @@
       if (now - backAt < 2000) { requestExit(); return; }
       backAt = now;
       UI.toast("再按一次返回键退出");
-    } catch (e) { console.warn("[DeepLink] 返回键处理出错", e); }
+    } catch (e) { console.warn("[Sekulum] 返回键处理出错", e); }
   }
   function bindBackKey() {
     try {
       window.__dlOnBackKey = onBackKey;
       if (Store.hasBridge("自定义返回键")) Store.callBridge("自定义返回键", "window.__dlOnBackKey()");
-    } catch (e) { console.warn("[DeepLink] 返回键接管失败", e); }
+    } catch (e) { console.warn("[Sekulum] 返回键接管失败", e); }
   }
 
   /* ── 退出前问一句「要不要冻结时间」（10-16 用户要求）────────────
@@ -3073,15 +3073,15 @@
       if (!sid) return;
       if (!inited) { pendingOpenId = sid; return; }
       openSessionById(sid);
-    } catch (e) { console.warn("[DeepLink] 打开指定对话失败", e); }
+    } catch (e) { console.warn("[Sekulum] 打开指定对话失败", e); }
   };
 
   function shortcutNameOf(s) {
-    if (!s) return "DeepLink";
+    if (!s) return "Sekulum";
     const t = String(s.title || "").trim();
     if (t && t !== "新对话") return t;
     const ch = characterFor(s);
-    return ch && ch.name ? ch.name : "DeepLink";
+    return ch && ch.name ? ch.name : "Sekulum";
   }
   function makeShortcut(s) {
     if (!s) { UI.toast("先选一条对话", true); return; }
@@ -4302,7 +4302,7 @@
     }
     if (wsTries < WS_RETRY_DELAYS.length) {
       const d = WS_RETRY_DELAYS[wsTries++];
-      console.warn("[DeepLink] 本地存储读取失败，第 " + wsTries + " 次重试将在 " + d + "ms 后");
+      console.warn("[Sekulum] 本地存储读取失败，第 " + wsTries + " 次重试将在 " + d + "ms 后");
       showReadingHint();
       setTimeout(reloadWorkspace, d);
       return;
@@ -4327,9 +4327,9 @@
     if (!Store.hasBridge("设置清空缓存")) return false;
     let n = 0;
     try { n = +(sessionStorage.getItem("deeplink.cacheClearTries") || 0); } catch (e) { n = 0; }
-    if (!(n < 2)) { console.warn("[DeepLink] 清缓存已尝试 " + n + " 次仍未成功，放弃本次清理"); return false; }
+    if (!(n < 2)) { console.warn("[Sekulum] 清缓存已尝试 " + n + " 次仍未成功，放弃本次清理"); return false; }
     try { sessionStorage.setItem("deeplink.cacheClearTries", n + 1); } catch (e) { /* ignore */ }
-    console.warn("[DeepLink] 版本变化 → " + appVer + "：清理页面缓存并重载一次");
+    console.warn("[Sekulum] 版本变化 → " + appVer + "：清理页面缓存并重载一次");
     Store.callBridge("设置清空缓存");
     /* 启动页此刻还挂着 —— 用户只会觉得「动画多转了一会儿」，
        而不是停在半渲染的界面上。留 300ms 让原生那一下 IO 先落地。 */
@@ -4358,10 +4358,10 @@
       try { if (window.DL.lockGate) window.DL.lockGate(); } catch (e) { /* ignore */ }
       await Store.unlockMemory();   /* 先解开记忆密文，之后 getSessions 同步拿得到明文 */
       bootMark("解锁记忆");
-      try { migrateSts(); } catch (e) { console.warn("[DeepLink] 补算故事时间失败", e); }
+      try { migrateSts(); } catch (e) { console.warn("[Sekulum] 补算故事时间失败", e); }
       /* 世界观库：首次使用时注入内置 10 套（worldsSeeded 幂等）。
          必须赶在第一次拼提示词之前 —— 否则注入端会以为「一套都没有」。 */
-      try { if (window.DL && DL.ensureWorlds) DL.ensureWorlds(); } catch (e) { console.warn("[DeepLink] 世界观初始化失败", e); }
+      try { if (window.DL && DL.ensureWorlds) DL.ensureWorlds(); } catch (e) { console.warn("[Sekulum] 世界观初始化失败", e); }
       /* 给自动化（截图 / 端到端）一个「存储已就绪」的信号：
          在这之前 getCharacters() 会是空的（角色卡还在解密），
          此时往存储里灌种子数据会被随后的解锁覆盖掉。 */
@@ -4381,7 +4381,7 @@
         try {
           const r = Store.migrateImages();
           if (r && r.hoisted) {
-            console.warn("[DeepLink] 图片外置迁移：搬走 " + r.hoisted + " 张，仍留内联 " + r.left + " 张");
+            console.warn("[Sekulum] 图片外置迁移：搬走 " + r.hoisted + " 张，仍留内联 " + r.left + " 张");
           }
         } catch (e) { /* 迁移失败不影响使用 */ }
         /* 背景图同理（也是大图，以前跟着 settings 一起塞内联） */
@@ -4428,7 +4428,7 @@
 
       const miss = missingIds();
       if (miss.length) {
-        console.warn("[DeepLink] 缺少界面元素：", miss);
+        console.warn("[Sekulum] 缺少界面元素：", miss);
         setTimeout(() => UI.toast("v" + (CONFIG.APP_VERSION || "") + " 缺少界面元素：" + miss.slice(0, 6).join("、") + (miss.length > 6 ? " 等" + miss.length + " 个" : "") + "；多半是打包用了旧的 index.html（退出重进封装软件再打一次）", true), 2300);
       }
 
@@ -4462,21 +4462,21 @@
       /* ── 可选功能：各自独立 try ──
          它们走的是跨模块转发壳，某个模块没注册就会抛错。放在启动收尾之后 + 逐个兜住，
          任何一个失败都只丢它自己，不会再把 inited / __deeplinkReady / 撤启动页带崩。 */
-      try { maybeAutoCompress(); } catch (e) { console.warn("[DeepLink] 自动压缩未启动", e); }
+      try { maybeAutoCompress(); } catch (e) { console.warn("[Sekulum] 自动压缩未启动", e); }
       /* 世界生成（可关）：久没上线 → 问一句要不要补一段空档剧情；顺带更新「上次见面」时间 */
-      try { setTimeout(openWorldCheck, 1500); } catch (e) { console.warn("[DeepLink] 世界生成未启动", e); }
+      try { setTimeout(openWorldCheck, 1500); } catch (e) { console.warn("[Sekulum] 世界生成未启动", e); }
       /* 自动发信息（默认关）：后台时角色按性格主动找你 */
-      try { startAutoMessage(); } catch (e) { console.warn("[DeepLink] 自动发信息未启动", e); }
+      try { startAutoMessage(); } catch (e) { console.warn("[Sekulum] 自动发信息未启动", e); }
       /* 更新检查（一天一次；没配 UPDATE_URL 时什么都不做，不打扰） */
-      try { maybeCheckUpdate(); } catch (e) { console.warn("[DeepLink] 更新检查未启动", e); }
+      try { maybeCheckUpdate(); } catch (e) { console.warn("[Sekulum] 更新检查未启动", e); }
       /* 日更：这次打开时，把「当前这条角色线」今天的场景/关系/经历补一次 */
       try {
         const cur = session();
         if (cur) maybeDailyRefresh(cur, characterFor(cur));
-      } catch (e) { console.warn("[DeepLink] 日更未启动", e); }
-      try { Store.getSessions().forEach((s) => maybeAutoBackup(s, "load")); } catch (e) { console.warn("[DeepLink] 自动备份未启动", e); }
+      } catch (e) { console.warn("[Sekulum] 日更未启动", e); }
+      try { Store.getSessions().forEach((s) => maybeAutoBackup(s, "load")); } catch (e) { console.warn("[Sekulum] 自动备份未启动", e); }
     } catch (e) {
-      console.error("[DeepLink] 初始化出错", e);
+      console.error("[Sekulum] 初始化出错", e);
       try { UI.toast("初始化出错：" + (e && e.message ? e.message : e), true); } catch (e2) { /* ignore */ }
     }
   }

@@ -1,11 +1,11 @@
-# DeepLink
+# Sekulum
 
 > 一个 AI 角色扮演聊天应用 —— 无需构建、无需服务器，一个文件夹就能跑；
 > 依赖容器提供的原生桥（文件读写 / 相册 / 相机 / 音频 / 通知），不是「纯前端」。
 
 **无构建 · 无后端 · 依赖原生桥 · 数据只存本机 · 适配 Chrome 83 老内核**
 
-当前版本：**7.0.1**
+当前版本：**7.1.0**
 
 <p align="center">
   <img src="screenshot-chat.jpg" height="440" alt="聊天界面">
@@ -13,7 +13,7 @@
   <img src="screenshot-home.jpg" height="440" alt="角色与会话列表">
 </p>
 
-DeepLink 是一个面向 Android 的 AI 聊天 / 角色扮演应用，全部由纯 **HTML + CSS + JavaScript** 写成，
+Sekulum 是一个面向 Android 的 AI 聊天 / 角色扮演应用，全部由纯 **HTML + CSS + JavaScript** 写成，
 没有任何后端和构建工具链；数据存在本机，由你自备的大模型 API Key 驱动。
 
 项目由一位 **14 岁的初中生**利用课余时间、借助 **AI 辅助**（写代码、查资料、梳理文档、排错）完成。

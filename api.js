@@ -1,4 +1,4 @@
-/* DeepLink —— DeepSeek 对话（SSE 流式 + 思考解析 + 工具调用） */
+/* Sekulum —— DeepSeek 对话（SSE 流式 + 思考解析 + 工具调用） */
 (function () {
   const MAX_TOOL_ROUNDS = 4;
   /* 有些 OpenAI 兼容端点不认 stream_options（含用量统计），报 400 时自动去掉重试 */

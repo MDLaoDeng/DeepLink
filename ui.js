@@ -1,4 +1,4 @@
-/* DeepLink —— 界面渲染与交互 */
+/* Sekulum —— 界面渲染与交互 */
 (function () {
   const $ = (sel) => document.querySelector(sel);
 
