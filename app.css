@@ -84,9 +84,11 @@ body {
 }
 .splash[data-anim="0"] .splash-mark .w1 {
   display: inline-block;
-  font-family: "Courier New", Courier, "Lucida Console", monospace;
-  font-size: 21px; font-weight: 500;
-  line-height: 1.6; letter-spacing: .14em;
+  /* 中文没有等宽字体可用，Courier 只对字母数字生效 —— 中文改走黑体：
+     方正、无衬线，最接近老式点阵屏的字形。终端感靠字距 + 微光 + 方块光标撑。 */
+  font-family: "SimHei", "Heiti SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 20px; font-weight: 500;
+  line-height: 1.7; letter-spacing: .22em;
   color: #e8e8e8;
   text-shadow: 0 0 10px rgba(255, 255, 255, .18);
   border-right: 0; padding-right: 0; min-height: 1.6em;
@@ -96,7 +98,7 @@ body {
 .splash[data-anim="0"] .splash-mark .w1::after {
   content: "";
   display: inline-block;
-  width: .62em; height: 1em;
+  width: 1em; height: 1em;
   margin-left: .1em;
   vertical-align: -.16em;
   background-color: #e8e8e8;
@@ -104,11 +106,10 @@ body {
   -webkit-animation: splash-block-caret 1s step-end infinite;
   animation: splash-block-caret 1s step-end infinite;
 }
-@-webkit-keyframes splash-block-caret { 50% { opacity: 0; } }
-@keyframes splash-block-caret { 50% { opacity: 0; } }
+@-webkit-keyframes splash-block-caret { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0; } }
+@keyframes splash-block-caret { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0; } }
 .splash[data-anim="0"] .splash-credit {
   color: rgba(255, 255, 255, .24);
-  font-family: "Courier New", Courier, monospace;
   letter-spacing: .1em;
   /* 默认那套署名 1.6s 才淡入，而这一套 1.65s 就开始整页淡出 —— 等于永远看不见 */
   -webkit-animation-delay: .9s;

@@ -162,7 +162,7 @@
         /* 10-27 新默认：逐字打「你好，世界」→ 停半秒 → 整页淡出。
            中文宽度不定，CSS 的 steps() 算不准；直接按字符切最稳。
            JS 卡住时就是一块黑灰底（CSS 背景已经设好），不会露出半截界面。 */
-        var whole = txt || "hello, world";
+        var whole = txt || "你好，世界";
         if (w2) w2.style.display = "none";
         if (w1) {
           w1.textContent = "";
@@ -724,7 +724,7 @@
           <option value="4">呼吸 · 缓慢起落的环</option>
           <option value="5">头像 · 先出图再出字</option>
         </select></label>
-        <label class="field"><span>主文字（留空＝hello, world；选 1~5 时留空＝DeepLink）</span><input id="setSplashText" type="text" placeholder="hello, world"></label>
+        <label class="field"><span>主文字（留空＝你好，世界；选 1~5 时留空＝DeepLink）</span><input id="setSplashText" type="text" placeholder="你好，世界"></label>
         <label class="field"><span>底部小字（留空＝默认署名）</span><input id="setSplashSub" type="text" placeholder="菠萝味柠檬汁/DS共同制作"></label>
         <label class="field"><span>启动图片（可留空；填 avatars/xxx.png 或图片地址）</span><input id="setSplashImage" type="text" placeholder="avatars/shenyan.png"></label>
         <label class="field"><span>或选一个角色头像</span><select id="setSplashAvatar"></select></label>
