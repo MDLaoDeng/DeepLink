@@ -3614,6 +3614,14 @@
     on("#phoneAddBtn", "click", function () { showAddSheet(true); });
     on("#phoneAddCancel", "click", function () { showAddSheet(false); });
     on("#phAddMoment", "click", function () { showAddSheet(false); openMoments(); });
+    /* 7.1 即时备忘录：从加号进来，绑当前这条线的故事时间（原入口保留在「这条线」面板里） */
+    on("#phAddMemo", "click", function () {
+      showAddSheet(false);
+      var sid = ps.sid || (session() && session().id) || "";
+      var R = window.DL && DL.reminder;
+      if (R && R.open) R.open(sid);
+      else UI.toast("备忘录模块没加载", true);
+    });
     on("#phAddContact", "click", function () { showAddSheet(false); newPhoneContact(); });
     /* 手机群聊：走主群聊那个建群弹窗，但模式是 phone（不绑线、不导记忆） */
     on("#phAddGroup", "click", function () {
