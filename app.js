@@ -4393,6 +4393,10 @@
   window.DL = {
     /* 建群时把某条线的记忆导进群聊（口径见函数注释）；挂出来便于回归测试与后续复用 */
     importLineMemoryToGroup: importLineMemoryToGroup,
+    /* 剧情分段（10-27）：roleplay.js 的「按天归档」要用它，而它是本文件里的函数 ——
+       不挂出来的话那边拿到的是 undefined，抛错被 try/catch 吞掉，
+       表现为「世界生成完事件簿空空如也」，很难查。 */
+    worldParts: worldParts,
     /* 跨文件的全局一律用 window. 前缀取（浏览器里裸名也行，但 jsdom 等环境里裸名不保证能解析） */
     /* ⚠️ 这 8 个模块必须用 getter（惰性取值），不能写成 `Api: window.Api` 这种快照。
        原因：打包工具不一定按 index.html 的顺序执行脚本。若某个模块晚于 app.js 执行，

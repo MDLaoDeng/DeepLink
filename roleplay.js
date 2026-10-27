@@ -2502,7 +2502,12 @@
   }
   function ingestWorldDays(s, txt) {
     if (!s || !txt) return 0;
-    const parts = worldParts(txt);
+    /* ⚠️ worldParts 定义在 app.js（不是本文件）—— 必须走 DL 取。
+       直接写 worldParts(...) 会 ReferenceError，被外层 try/catch 吞掉，
+       症状就是「归了 0 段、事件簿空的」，2026-10-27 实测踩过。 */
+    const wp = (window.DL && typeof DL.worldParts === "function") ? DL.worldParts : null;
+    if (!wp) { console.warn("[DeepLink] worldParts 不可用，按天归档跳过"); return 0; }
+    const parts = wp(txt);
     if (!parts.length) return 0;
     const M = window.Memory;
     const nowStory = (M && M.nowOf) ? M.nowOf(s) : Date.now();
@@ -2826,6 +2831,8 @@
     sessionDiarySave: sessionDiarySave, sessionDiaryClear: sessionDiaryClear,
     runAssistantSummary: runAssistantSummary,
     generateWorld: generateWorld, applyWorld: applyWorld,
+    /* 调试 / 回归用（10-27）：跨线回读与传播判定是纯函数，单独测比整条链路好定位 */
+    crossMentions: crossMentions, spreadHeard: spreadHeard,
     generateAutoMessage: generateAutoMessage, applyAutoMessage: applyAutoMessage,
     generatePhoneShare: generatePhoneShare,
     renderSettingsMemory: renderSettingsMemory, runCharSplit: runCharSplit,
