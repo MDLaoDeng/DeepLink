@@ -668,6 +668,7 @@
     }
     list.forEach(function (r) {
       var from = charById(r.from);
+      var toCh = (r.to && r.to !== "me") ? charById(r.to) : null;
       var item = el("div", "pf-req");
       var av = el("div", "pf-req-av");
       var src = from ? avatarUrl(from.avatar) : "";
@@ -675,8 +676,14 @@
       else av.innerHTML = icon("account");
       item.appendChild(av);
       var tx = el("div", "pf-req-tx");
-      tx.appendChild(el("div", "pf-req-name", (from ? showName(from) : "未知角色") + " 想加你为好友"));
-      tx.appendChild(el("div", "pf-req-via", r.via ? ("来自群聊「" + r.via + "」") : "手动发起"));
+      /* 两种申请长得不一样：加我 →「想加你为好友」；角色之间互加 →「A 想加 B 为好友」。
+         以前一律写「想加你」，角色加角色的时候看的人会一头雾水。 */
+      var who = from ? showName(from) : "未知角色";
+      var line = toCh ? (who + " 想加 " + showName(toCh) + " 为好友") : (who + " 想加你为好友");
+      tx.appendChild(el("div", "pf-req-name", line));
+      var sub = r.via ? ("来自群聊「" + r.via + "」") : "手动发起";
+      if (toCh) sub += "，加的不是你";
+      tx.appendChild(el("div", "pf-req-via", sub));
       item.appendChild(tx);
       var acts = el("div", "pf-req-acts");
       var ok = el("button", "btn primary mini", "同意");
