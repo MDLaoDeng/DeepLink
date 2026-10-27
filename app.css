@@ -81,7 +81,13 @@ body {
 }
 @-webkit-keyframes splash-caret { 50% { border-color: transparent; } }
 @keyframes splash-caret { 50% { border-color: transparent; } }
-.splash[data-anim="0"] .splash-credit { color: rgba(255, 255, 255, .26); }
+.splash[data-anim="0"] .splash-credit {
+  color: rgba(255, 255, 255, .26);
+  /* 默认那套署名是 1.6s 才淡入，而这一套 1.65s 就开始整页淡出了 —— 等于永远看不见。
+     提前到 0.9s，跟打字节奏一起出来。 */
+  -webkit-animation-delay: .9s;
+  animation-delay: .9s;
+}
 .splash[data-anim="0"] .splash-pic { border-radius: 12px; width: 84px; height: 84px; }
 
 /* 启动动画舞台：放自定义图片 / 角色头像（没设就空着，不影响布局） */
