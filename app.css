@@ -62,29 +62,55 @@ body {
 }
 .splash.hide { opacity: 0; transform: scale(1.04); pointer-events: none; }
 
-/* ── 启动动画 0（10-27 新默认）：黑灰底 + 白字逐字打「你好，世界」+ 光标 + 淡出
-   为什么另起一套而不是改旧的 1~5：那五套是用户可选的花样，改了会伤到已经选过的人。
-   这一套的好处是「卡了也好看」—— JS 没跑起来时就是一块黑灰底，不会露出半截界面。 */
-.splash[data-anim="0"] { background-color: #141414; }
+/* ── 启动动画 0（10-27）：黑灰底终端，逐字打 hello, world
+   用户要的是「第一句 hello world」那种机械感 / 年代感。做法不是单纯换字体 ——
+   中文没有等宽概念，光改 font-family 出不来味道，所以四样一起上：
+   等宽字 + 拉开字距 + 微弱荧光 + 块状光标，再压一层 2% 的扫描线当底纹。
+   卡了也好看：背景是 CSS 给的，JS 不跑就是一块纯黑灰。 */
+.splash[data-anim="0"] {
+  background-color: #141414;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, .012) 0,
+    rgba(255, 255, 255, .012) 1px,
+    rgba(0, 0, 0, 0) 1px,
+    rgba(0, 0, 0, 0) 3px
+  );
+}
 .splash[data-anim="0"] .splash-line,
 .splash[data-anim="0"] .splash-mark .w2 { display: none; }
 .splash[data-anim="0"] .splash-mark {
   flex-direction: row; align-items: center; justify-content: center;
 }
 .splash[data-anim="0"] .splash-mark .w1 {
-  display: inline-block; font-size: 22px; font-weight: 400;
-  line-height: 1.6; letter-spacing: .06em; color: #ffffff;
-  border-right: 2px solid rgba(255, 255, 255, .82);
-  padding-right: 2px; min-height: 1.6em;
-  -webkit-animation: splash-caret .9s step-end infinite;
-  animation: splash-caret .9s step-end infinite;
+  display: inline-block;
+  font-family: "Courier New", Courier, "Lucida Console", monospace;
+  font-size: 21px; font-weight: 500;
+  line-height: 1.6; letter-spacing: .14em;
+  color: #e8e8e8;
+  text-shadow: 0 0 10px rgba(255, 255, 255, .18);
+  border-right: 0; padding-right: 0; min-height: 1.6em;
+  -webkit-animation: none; animation: none;
 }
-@-webkit-keyframes splash-caret { 50% { border-color: transparent; } }
-@keyframes splash-caret { 50% { border-color: transparent; } }
+/* 块状光标（终端那种实心方块，不是一根竖线），带一点自身辉光 */
+.splash[data-anim="0"] .splash-mark .w1::after {
+  content: "";
+  display: inline-block;
+  width: .62em; height: 1em;
+  margin-left: .1em;
+  vertical-align: -.16em;
+  background-color: #e8e8e8;
+  box-shadow: 0 0 8px rgba(255, 255, 255, .3);
+  -webkit-animation: splash-block-caret 1s step-end infinite;
+  animation: splash-block-caret 1s step-end infinite;
+}
+@-webkit-keyframes splash-block-caret { 50% { opacity: 0; } }
+@keyframes splash-block-caret { 50% { opacity: 0; } }
 .splash[data-anim="0"] .splash-credit {
-  color: rgba(255, 255, 255, .26);
-  /* 默认那套署名是 1.6s 才淡入，而这一套 1.65s 就开始整页淡出了 —— 等于永远看不见。
-     提前到 0.9s，跟打字节奏一起出来。 */
+  color: rgba(255, 255, 255, .24);
+  font-family: "Courier New", Courier, monospace;
+  letter-spacing: .1em;
+  /* 默认那套署名 1.6s 才淡入，而这一套 1.65s 就开始整页淡出 —— 等于永远看不见 */
   -webkit-animation-delay: .9s;
   animation-delay: .9s;
 }
