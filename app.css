@@ -1135,30 +1135,66 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
   padding: 10px 12px; border-bottom: 1px solid var(--border);
 }
 .eb-page-head h2 { flex: 1; margin: 0 0 0 8px; font-size: 16px; font-weight: 600; }
-.eb-page-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 14px; }
+.eb-page-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 14px 16px 40px 22px; }
 .eb-body { display: flex; flex-direction: column; }
+
+/* 无框排版（10-27 用户口径：卡片框看着廉价）。
+   改用「时间轴」的做法：世界观之间只用一条极淡的细线分；
+   世界线是一条竖线，日期是竖线上的一个点；条目本身完全无底色。 */
 .eb-world {
-  margin-bottom: 10px; border: 1px solid var(--border);
-  border-radius: 12px; overflow: hidden; background-color: var(--panel-2);
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
 }
+.eb-world:last-child { border-bottom: 0; }
 .eb-world > summary, .eb-line > summary {
-  display: flex; align-items: center; padding: 10px 12px; cursor: pointer;
-  font-size: 14px; list-style: none;
+  display: flex; align-items: center; cursor: pointer; list-style: none;
 }
-.eb-world > summary::-webkit-details-marker,
-.eb-line > summary::-webkit-details-marker { display: none; }
+.eb-world > summary { padding: 14px 2px 10px; }
 .eb-world > summary b, .eb-line > summary b { flex: 1; min-width: 0; font-weight: 600; }
+.eb-world > summary b { font-size: 15px; letter-spacing: .2px; }
+.eb-line > summary b { font-size: 13px; color: var(--text-dim); font-weight: 500; }
 .eb-world > summary i, .eb-line > summary i {
-  font-style: normal; font-size: 11px; color: var(--text-mute); margin-left: 8px;
+  flex: none; font-style: normal; font-size: 11px;
+  color: var(--text-mute); margin-left: 8px; font-variant-numeric: tabular-nums;
 }
-.eb-line { margin: 0 10px 10px; padding-left: 10px; border-left: 1px solid var(--border); }
-.eb-day { margin: 10px 0 6px; font-size: 12px; color: var(--text-mute); }
-.eb-item { display: flex; margin-bottom: 8px; font-size: 13px; line-height: 1.5; }
-.eb-tag { flex: none; width: 34px; font-size: 11px; color: var(--text-mute); }
+/* 自绘的折叠箭头（原生 marker 已去掉，留白里没东西会看不出能点） */
+.eb-world > summary::after, .eb-line > summary::after {
+  content: ""; flex: none; width: 5px; height: 5px; margin-left: 10px;
+  border-right: 1.5px solid var(--text-mute);
+  border-bottom: 1.5px solid var(--text-mute);
+  transform: rotate(45deg); transition: transform .2s;
+}
+.eb-world[open] > summary::after, .eb-line[open] > summary::after { transform: rotate(-135deg); }
+
+.eb-line {
+  margin: 0 0 12px 4px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+.eb-line > summary { padding: 6px 2px 6px 0; }
+.eb-day {
+  position: relative;
+  margin: 14px 0 9px;
+  font-size: 11px; letter-spacing: .6px;
+  color: var(--text-mute); font-variant-numeric: tabular-nums;
+}
+/* 时间轴上的点：落在左侧竖线上 */
+.eb-day::before {
+  content: "";
+  position: absolute; left: -19px; top: 4px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background-color: var(--accent);
+}
+.eb-item { display: flex; margin: 0 0 11px; font-size: 13px; line-height: 1.65; }
+.eb-tag {
+  flex: none; width: 30px; padding-top: 2px;
+  font-size: 10px; letter-spacing: .5px; color: var(--text-mute);
+}
 .eb-text { flex: 1; min-width: 0; }
 .eb-heard {
-  font-style: normal; font-size: 11px; color: var(--text-mute);
-  margin-left: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 0 4px;
+  font-style: normal; font-size: 10px; color: var(--text-mute);
+  margin-left: 6px; border-bottom: 1px dashed var(--text-mute);
 }
 
 /* AI 面板的两个标签（AI 创建 / AI 拆分）：分段按钮，选中填主题色底 */
