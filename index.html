@@ -943,6 +943,17 @@
             <b>不改角色卡</b>，只在提示词里叠一层 —— 点「恢复原样」立刻回去。这里也会消耗一次调用。</p>
         </div>
 
+        <div class="field" id="setSpreadRow">
+          <span>别人那儿的事</span>
+          <div class="char-actions" style="justify-content:flex-start">
+            <button id="setSpreadNow" class="btn ghost mini" type="button">同步一次</button>
+          </div>
+          <div id="setSpreadState" class="hint"></div>
+          <p class="hint">其他线最近提过他的事，会按<b>他对那个人的信任</b>决定要不要告诉 TA ——
+            信任够高才主动说起（≥45），一般般就含糊过去。离线剧情生成时会自动跑一次，
+            这里是可以手动补跑的那次。</p>
+        </div>
+
         <div class="mem-title">离线原因（前提：开着时间系统）</div>
         <label class="field"><span>离开应用时按这条来写（只能选，想加去 设置 → 高级功能）</span><select id="setSessionReason"></select></label>
         <label class="check-field"><input type="checkbox" id="setReasonLock"><span>锁定：以后不管怎么离线都按这条算（防止手滑清后台）</span></label>

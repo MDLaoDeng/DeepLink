@@ -1132,6 +1132,8 @@
     if (dt && !dt.dataset.bound) { dt.dataset.bound = "1"; dt.addEventListener("click", toggleDrift); }
     const dr = $("#setDriftReset");
     if (dr && !dr.dataset.bound) { dr.dataset.bound = "1"; dr.addEventListener("click", resetDrift); }
+    const sp = $("#setSpreadNow");
+    if (sp && !sp.dataset.bound) { sp.dataset.bound = "1"; sp.addEventListener("click", doSpreadNow); }
     const cur = s || session();
     sel.innerHTML = "";
     if (!cur) return;
@@ -1304,6 +1306,25 @@
     delete s.drift;
     fillDrift(s);
     UI.toast("已恢复原样（角色卡一直没动过）");
+  }
+
+  /* 手动同步一次传播（10-27 用户口径里的第二个时机）：
+     离线剧情生成后已经自动跑过，这里是补跑 —— 比如刚聊完一场、想立刻看别人那边的事有没有传过来。
+     先把会话重新读一遍：spreadHeard 内部走 pushEvent（getSessions/saveSessions），
+     手上这份 s 是旧引用，不刷新的话去重判断会失效。 */
+  function doSpreadNow() {
+    const cur = session();
+    if (!cur) return;
+    const fresh = Store.getSessions().filter((x) => x.id === cur.id)[0];
+    if (fresh) Object.assign(cur, fresh);
+    const n = spreadHeard(cur);
+    const st = $("#setSpreadState");
+    if (st) {
+      st.textContent = n
+        ? ("新转述了 " + n + " 条，去事件簿看（标着「转述」的就是）")
+        : "这次没有新的可转述内容 —— 要么别的线最近没提过他，要么信任还不够。";
+    }
+    if (n > 0 && window.DL && DL.renderEventBook) { /* 事件簿开着的话顺手刷一下 */ }
   }
 
   function fillCharacterForm(ch) {
