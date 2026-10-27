@@ -1378,6 +1378,13 @@
       const missW = (window.DL && window.DL.charMissingFields) ? window.DL.charMissingFields(s) : [];
       if (missW.length) { state.settings = Store.saveSettings({ lastSeenAt: now }); return; }
       if (!hasAnyMemory(s)) { state.settings = Store.saveSettings({ lastSeenAt: now }); return; }
+      /* ② 前提：这条线必须开着时间系统（用户口径）。
+         没有时间轴就不知道「离开了多久、现在是故事里的几点」，补出来的剧情只能瞎编时段；
+         更糟的是 awayGap 会退回到全局 lastSeenAt，那个值随时被别的会话刷新，根本不准。
+         原来漏了这一条 —— 没开时间系统的线也会弹（2026-10-27 用户报的 bug）。 */
+      if (!s.time || typeof s.time.start !== "number") {
+        state.settings = Store.saveSettings({ lastSeenAt: now }); return;
+      }
       /* ③ 冻结中的线（混搭模式离开自动冻结 / 手动冻结）：离线那段按约定不算，
             不该再弹「补这段剧情」。原来只看 leftAt，冻结标志完全看不见（10-20 修）。 */
       if (Memory && Memory.isFrozen && Memory.isFrozen(s)) {
