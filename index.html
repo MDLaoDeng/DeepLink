@@ -1711,33 +1711,33 @@
   </div>
 </div>
 
-<div id="introModal" class="modal intro" aria-hidden="true">
-  <div class="modal-sheet small">
+<div id="introModal" class="modal intro intro-full" aria-hidden="true">
+  <div class="modal-sheet">
     <div class="modal-body">
       <div class="intro-pages">
         <div class="intro-page">
           <img class="intro-img" src="about.png" alt="DeepLink">
-          <div class="intro-h">欢迎使用 DeepLink</div>
-          <p class="intro-p">一个有温度的 AI 对话与角色扮演工具。<br>界面干净、数据存在本机、尽量帮你省 token。</p>
+          <div class="intro-h">欢迎来到 DeepLink，亲爱的创世主</div>
+          <p class="intro-p">从这里开始，你是这个世界的造物者 ——<br>定角色、铺时间、看他们自己往下走。</p>
         </div>
         <div class="intro-page" hidden>
-          <div class="intro-h">功能全景</div>
+          <div class="intro-h">你能造什么</div>
           <pre id="introTree" class="feat-tree"></pre>
         </div>
         <div class="intro-page" hidden>
-          <div class="intro-h">三步上手</div>
+          <div class="intro-h">第一步：拿到钥匙</div>
           <p class="intro-p">1. 去 DeepSeek 开放平台（<a class="ext-link" href="https://platform.deepseek.com">platform.deepseek.com</a>）注册并创建一个 API Key。<br>2. 打开「设置」→「主模型」→ 把 Key 填进「配置一」→ 滚到底点「保存设置」。<br>3. 回到对话直接开聊；想角色扮演就打开「启用角色扮演模式」。</p>
           <p class="intro-p">· 也可以用<b>别的平台</b>（兼容 OpenAI 接口的都行），但大多比 DeepSeek 贵、地址要自己去官方文档搜。<br>· 聊天页右上角的<b>模型按钮</b>能随时切主模型；听觉 / 朗读 / 画图 / 视觉想用的话，在设置里各配一套（见「使用指南 · 十四」）。<br>· 主模型区那个「<b>模型兼容</b>」开关<b>默认别勾</b>——它表示「主模型自己看得懂图」，DeepSeek 看不了，勾了发图会报错。想发图就配「视觉模型」。</p>
         </div>
         <div class="intro-page" hidden>
-          <div class="intro-h">隐私与安全</div>
+          <div class="intro-h">这个世界只在你手里</div>
           <p class="intro-p">· 聊天记录、角色卡、设置都<b>存在本机</b>，不上传第三方。<br>· 记忆、角色卡、场景 / 关系 / 经历在本机<b>加密存放</b>；导出的文件由你自设口令加密，口令不存进 App。<br>· 可选开「<b>应用加密</b>」：每次冷启动先锁屏；忘了口令可用<b>一次性恢复码</b>或<b>让 AI 出题考你</b>找回。<br>· 实话一句：本机加密挡的是「捡到手机随手翻」，不是对抗专业的数据提取。</p>
         </div>
         <div class="intro-page" hidden>
-          <div class="intro-h">省心小功能</div>
+          <div class="intro-h">一些顺手的</div>
           <p class="intro-p">· <b>快捷回复</b>：输入框<b>左边</b>（加号右边）那个无边框按钮，AI 站在你的立场给几条「这时可以怎么回」，可以换批、点铅笔填进输入框；<b>继续说</b>在角色最后一条消息的操作栏里。<br>· <b>故事时间</b>：给角色填上出生日期和年龄，就能锁定他的合法时段；顶栏「对话设置」按钮上直接显示故事里的时:分。<br>· <b>剧情卡</b>：世界生成采纳后浮一张居中的卡，点开铺满全屏看全文。<br>· 记忆压缩 / 再压缩 / 上下文筛选：让长对话不越聊越贵。<br>· 图片（自己发的 / AI 画的）会在若干轮后删原图、只留「<b>视觉模型</b>」写的文字描述，省空间也省 token。<br>· 对话很长时只先渲染<b>最近 20 条</b>、往上滑再加载，不会越拉越卡。<br>· 对话和角色都能<b>置顶、排序</b>（长按即可）。<br>· 记忆栏能看记忆，记错了可用「<b>记忆纠偏</b>」让 AI 纠正（勿滥用）。<br>· 消息「重新说」存了多版本时，记忆与认知以你<b>当前选定的版本</b>为准。<br>· 用量统计与预警：随时看花了多少。<br>· 导入导出与自动备份：换机、防丢。<br>· <b>群聊</b>：建群时每位成员绑一条线；「对话设置」里能看<b>对彼此的认知</b>（一人一条折叠条，可开关、手动更新），也能一键<b>同步到各自线</b>。<br>· <b>表情包</b>：手机输入栏那个笑脸，内置 48 个；也能自己加图，按「都能用 / TA 用 / 自己用」分范围，模型会挑着发。<br>· <b>模型能力检测</b>：设置 → 主模型 → 检测主模型能力，按结论决定能传哪些文件；配了独立视觉模型就不受这个限制。<br>· <b>手机群</b>：手机页「+」→「建群聊」，和现实群一样每位成员绑一条线，两份绑定互不影响；群里聊的事每轮自动写回各自那条线。<br>· <b>表情是两段式</b>：先把话说完，再带着这段话和他的性格单独挑一个表情，作为<b>单独一条</b>发出来（只在手机里，最多 50 个，按上传时设的「可用范围」）。<br>· <b>角色能自己查资料</b>：设置 → 高级功能 →「让角色按需读取这条线自己的资料」（默认开）。它能自己翻记忆摘要、找旧原话，<b>只读当前这条线</b>，不改任何数据。<br>· <b>检查更新</b>：设置 → 关于，启动时每天自动查一次，有新版本才提示；装之前记得先导出备份。</p>
           <p class="intro-p">· <b>年龄会长</b>：故事时间开着时，角色满周岁就 +1，合法时段跟着后移，提示词里给他的年龄也跟着变（不是卡片上那个静态值）。<br>· <b>TA 的思考</b>：时间开着时，角色按故事日期自己记内心，平时只存不读，每七个故事日压缩一次并读一次；对话设置里能查看、能手动读、能纠偏。<br>· <b>回溯不丢内容</b>：任意一条消息上点「回溯到此刻」会新建一条支线，原线原样保留；记忆按回溯点前 20 条重建。<br>· <b>手机页只列手机群</b>：现实群在侧栏「现实扮演角色」里，不从手机露头（两边消息存的地方不同，混着看会串）。</p>
-          <p class="intro-p">更多在「设置 → 关于 → 使用指南」。</p>
+          <p class="intro-p">更多在「设置 → 关于 → 使用指南」。<b>创世主，去造你的世界吧。</b></p>
         </div>
       </div>
       <div id="introDots" class="intro-dots"></div>

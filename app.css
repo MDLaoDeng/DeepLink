@@ -1054,6 +1054,38 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 .modal.show .modal-sheet { transform: translateY(0) scale(1); opacity: 1; }
 .modal-sheet.small { border-radius: 16px; margin: auto 16px; max-width: 420px; }
 
+/* ── 引导页 = 一整页（10-27 用户口径）────────────────────────────
+   原来是居中卡片（.modal-sheet.small），现在铺满整屏：第一页那句问候要站得住，
+   挤在一个小卡片里没有「创世主」该有的分量。
+   做法上有个坑：.modal 是 flex + 半透明遮罩，sheet 用 position:fixed 会因
+   祖先的层叠上下文/变换而不可靠 —— 直接把底色铺在 .modal 上，sheet 只负责撑满。 */
+#introModal.intro-full {
+  background-color: var(--panel) !important; align-items: stretch !important;
+  /* 顶栏和输入栏是 position:fixed 且层级比 .modal 的 80 高 —— 不抬到它们上面，
+     「一整页」会漏出这两条（第一次做的时候就漏了）。 */
+  z-index: 210;
+}
+#introModal.intro-full .modal-sheet {
+  width: 100%; max-width: none; height: 100%; max-height: none;
+  margin: 0; border: 0; border-radius: 0;
+  align-self: stretch;
+  display: flex; flex-direction: column; justify-content: space-between;
+  background-color: var(--panel) !important;
+  transform: none !important; opacity: 1 !important;
+}
+#introModal.intro-full .modal-body {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 32px 24px 12px;
+}
+#introModal.intro-full .intro-actions {
+  flex: none; padding: 14px 20px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+}
+#introModal.intro-full .intro-h { font-size: 24px; line-height: 1.35; margin-bottom: 14px; }
+#introModal.intro-full .intro-p { font-size: 14px; line-height: 1.85; }
+#introModal.intro-full .intro-img { max-width: 132px; margin-bottom: 22px; }
+
 /* ── 设置 = 整页而非浮窗（10-17 用户要求）────────────────────────
    仍然走 .modal 的 show/hide 机制（UI.openModal/closeModal 不用改），
    只把布局从「底部弹出的 sheet」覆盖成整屏层：背景铺满、去掉圆角与位移。

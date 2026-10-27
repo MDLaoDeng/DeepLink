@@ -79,6 +79,31 @@
     setText("#introTree", CONFIG.FEATURE_TREE || "");
     introShow(0);
     UI.openModal("introModal");
+    /* 整页引导（10-27）：样式表里那套在这台内核上没完全压住顶栏/输入栏
+       （它们 position:fixed 且层级更高），这里用内联样式兜一次 —— 内联优先级最高，
+       一定能盖住。颜色从主题变量取，不写死。 */
+    try {
+      var m = document.getElementById("introModal");
+      if (!m) return;
+      var cs = getComputedStyle(document.body);
+      var panel = String(cs.getPropertyValue("--panel") || "").replace(/^\s+|\s+$/g, "") || "#1B1D23";
+      m.style.zIndex = "210";
+      m.style.backgroundColor = panel;
+      m.style.alignItems = "stretch";
+      /* 最狠也最稳的一招：打开引导时把主界面整块藏起来。
+         顶栏/输入栏是 position:fixed 且层级压着 .modal，z-index 抬到 210 都还透 ——
+         与其继续跟层叠较劲，不如让下面那层直接不可见。 */
+      var app = document.getElementById("app");
+      if (app) app.style.visibility = "hidden";
+      var sheet = m.querySelector(".modal-sheet");
+      if (sheet) {
+        sheet.style.height = "100%";
+        sheet.style.maxHeight = "none";
+        sheet.style.margin = "0";
+        sheet.style.borderRadius = "0";
+        sheet.style.backgroundColor = panel;
+      }
+    } catch (e) { /* 内联兜底失败也不影响引导流程 */ }
   }
 
   /* app.js 的「上一步」按钮原来是 `introShow(introIdx - 1)` —— introIdx 是数值、不能挂到 D 上
@@ -88,6 +113,8 @@
   function introFinish() {
     state.settings = Store.saveSettings({ onboarded: true });
     UI.closeModal("introModal");
+    /* 引导结束 → 把主界面放回来（打开时藏过，见 openIntro） */
+    try { var app = document.getElementById("app"); if (app) app.style.visibility = ""; } catch (e) { /* ignore */ }
   }
 
   function introNext() {
