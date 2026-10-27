@@ -435,6 +435,23 @@
     }
   }
 
+  /* 角色卡上的「关联角色」（10-27）：他和谁认识、有什么往事。
+     和会话级 rel 是两回事 —— 这个是**设定层面**的关系，rel 是这条线里现在的数值态度。 */
+  function linkLine(ch) {
+    const links = (ch && ch.links && typeof ch.links === "object") ? ch.links : {};
+    const ids = Object.keys(links);
+    if (!ids.length) return "";
+    const chars = charListFor();
+    const lines = [];
+    ids.forEach((id) => {
+      const it = links[id];
+      if (!it) return;
+      lines.push("· " + relNameOf(id, chars) + (it.kind ? "（" + it.kind + "）" : "") +
+        (it.shared ? "：" + String(it.shared).slice(0, 300) : ""));
+    });
+    return lines.join("\n");
+  }
+
   function buildSystemText(ch, s, settings, opts) {
     if (!ch) return "";
     const o = opts || {};
@@ -496,6 +513,12 @@
     if (rel) { L.push(""); L.push("【当前关系】"); L.push(rel); }
     if (s && s.scene) { L.push(""); L.push("【当前场景】"); L.push(s.scene); }
     if (f.aiDirective) { L.push(""); L.push("【AI 指令】"); L.push(f.aiDirective); }
+    const _lk = linkLine(ch);
+    if (_lk) {
+      L.push("");
+      L.push("【你和其他角色的关系（设定层面）】");
+      L.push(_lk);
+    }
     /* 关系网（10-27）：这条线里他对其他每个角色的态度。
        除了「他怎么对别人」，还决定「别人告诉他的事，他愿不愿意转述给你」。 */
     const _rl = relLine(s, ch);

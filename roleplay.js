@@ -193,6 +193,15 @@
       ccBtn.dataset.bound = "1";
       ccBtn.addEventListener("click", () => { const p = $("#charSplitPanel"); if (p) p.hidden = true; });
     }
+    /* 关联角色：生成共同经历 */
+    const lkBtn = $("#cfLinkGen");
+    if (lkBtn && !lkBtn.dataset.bound) {
+      lkBtn.dataset.bound = "1";
+      lkBtn.addEventListener("click", () => {
+        const r = genLinkShared();
+        if (r && r.catch) r.catch((e) => UI.toast("生成失败：" + ((e && e.message) || e), true));
+      });
+    }
     /* 角色页的「我的设定」下拉：列全局「我的人设」，选一套点套用 */
     const pab = $("#cfPersonaApply");
     if (pab && !pab.dataset.bound) {
@@ -963,6 +972,132 @@
     }
   }
 
+  /* ── 关联角色（10-27）──────────────────────────────────────
+     character.links = { "c_other": { kind: "旧识", shared: "十年前…", at: 时间戳 } }
+     只写进**本卡**，不会同时改对方 —— 想双向就在对方卡里也关联一次。
+     共同经历由 AI 按双方性格写；注入时并进「你和其他角色的关系」。 */
+  const LINK_KINDS = ["旧识", "朋友", "挚友", "亲人", "恋人", "同事", "师徒", "邻居", "对手", "仇人", "点头之交", "陌生人"];
+  let linkDraft = null;          /* 当前编辑中的 links（跟 charDraft 一起在保存时落库） */
+
+  function renderLinkList() {
+    const box = $("#cfLinkList");
+    if (!box) return;
+    box.innerHTML = "";
+    const links = linkDraft || {};
+    const ids = Object.keys(links);
+    if (!ids.length) {
+      const e = document.createElement("div");
+      e.className = "hint";
+      e.textContent = "还没关联任何角色。";
+      box.appendChild(e);
+      return;
+    }
+    const chars = Store.getCharacters();
+    const nm = (id) => {
+      for (let i = 0; i < chars.length; i++) if (chars[i].id === id) return chars[i].name || "某人";
+      return "（已删除的角色）";
+    };
+    ids.forEach((id) => {
+      const it = links[id] || {};
+      const row = document.createElement("div");
+      row.className = "cf-link-item";
+      const head = document.createElement("div");
+      head.className = "cf-link-head";
+      const t = document.createElement("b");
+      t.textContent = nm(id) + (it.kind ? "（" + it.kind + "）" : "");
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "btn ghost mini";
+      del.textContent = "移除";
+      del.addEventListener("click", () => {
+        delete links[id];
+        renderLinkList();
+        UI.toast("已移除（点「保存设定」才真正落库）");
+      });
+      head.appendChild(t);
+      head.appendChild(del);
+      row.appendChild(head);
+      if (it.shared) {
+        const p = document.createElement("div");
+        p.className = "cf-link-text";
+        p.textContent = it.shared;
+        row.appendChild(p);
+      }
+      box.appendChild(row);
+    });
+  }
+
+  function fillLinkPick() {
+    const sel = $("#cfLinkPick");
+    const kind = $("#cfLinkKind");
+    if (kind && !kind.dataset.built) {
+      kind.dataset.built = "1";
+      LINK_KINDS.forEach((k) => {
+        const o = document.createElement("option");
+        o.value = k; o.textContent = k;
+        kind.appendChild(o);
+      });
+    }
+    if (!sel) return;
+    const me = activeCharacter();
+    const chars = Store.getCharacters().filter((c) => c && (!me || c.id !== me.id));
+    sel.innerHTML = "";
+    if (!chars.length) {
+      const o = document.createElement("option");
+      o.value = ""; o.textContent = "（还没有别的角色）";
+      sel.appendChild(o);
+      return;
+    }
+    chars.forEach((c) => {
+      const o = document.createElement("option");
+      o.value = c.id; o.textContent = c.name || "角色";
+      sel.appendChild(o);
+    });
+    renderLinkList();
+  }
+
+  async function genLinkShared() {
+    const me = activeCharacter();
+    if (!me) { UI.toast("先选一个角色", true); return; }
+    const sel = $("#cfLinkPick");
+    const targetId = sel ? sel.value : "";
+    if (!targetId) { UI.toast("先在角色页里再建一个角色", true); return; }
+    const target = Store.getCharacters().filter((c) => c.id === targetId)[0];
+    if (!target) return;
+    if (!state.settings.apiKey) { UI.toast("先去设置里填 API Key", true); return; }
+    const kindEl = $("#cfLinkKind");
+    const kind = kindEl ? kindEl.value : "旧识";
+    const f1 = me.fields || {}, f2 = target.fields || {};
+    setDisabled("#cfLinkGen", true);
+    UI.toast("正在生成共同经历…");
+    try {
+      const user = "A（这张卡）：" + (me.name || "角色") +
+        "\n性格：" + (f1.aiPersona || "（未填）") +
+        "\n年龄：" + (f1.age || "（未填）") +
+        "\n身份/背景：" + (f1.aiBackground || "（未填）") +
+        "\n\nB（关联对象）：" + (target.name || "角色") +
+        "\n性格：" + (f2.aiPersona || "（未填）") +
+        "\n年龄：" + (f2.age || "（未填）") +
+        "\n身份/背景：" + (f2.aiBackground || "（未填）") +
+        "\n\n他们现在的关系：" + kind;
+      const r = await Api.summarize(state.settings, [
+        { role: "system", content: CONFIG.COMPRESS_PROMPTS.linkShared },
+        { role: "user", content: user }
+      ], { maxTokens: 500 });
+      if (r && r.usage) recordUsage(null, r.usage, me.id, "split");
+      const txt = String((r && r.text) || "").trim();
+      if (!txt) { UI.toast("没生成出内容，再试一次", true); return; }
+      if (!linkDraft) linkDraft = {};
+      linkDraft[targetId] = { kind: kind, shared: txt, at: Date.now() };
+      renderLinkList();
+      UI.toast("已写好，记得点「保存设定」");
+    } catch (e) {
+      UI.toast("生成失败：" + ((e && e.message) || e), true);
+    } finally {
+      setDisabled("#cfLinkGen", false);
+    }
+  }
+
   function fillCharacterForm(ch) {
     try {
       resetCharSplit();
@@ -1000,6 +1135,9 @@
         syncPeriodField();
         setVal("#cfPhoneKind", ch.phoneKind === "close" ? "close" : "casual");        setVal("#cfCharFormat", ch.format || "");
         setVal("#cfStatusCards", (window.DL && DL.cardNamesText) ? DL.cardNamesText(ch.statusCards) : "");
+        /* 关联角色：编辑用副本，点「保存设定」时才落库（和表单其余字段一致） */
+        try { linkDraft = ch.links ? JSON.parse(JSON.stringify(ch.links)) : {}; } catch (e) { linkDraft = {}; }
+        fillLinkPick();
         const cf = Memory.ensureFilter(ch);
         setVal("#charFilterRule", cf.rule || "");
         setVal("#charFilterEvery", cf.every || 10);
@@ -1097,6 +1235,8 @@
     ch.format = $v("#cfCharFormat").trim();
     /* 角色级附带卡片项目：留空 = 跟随全局（空数组就是「没配」，注入时会往上落） */
     ch.statusCards = (window.DL && DL.parseCardNames) ? DL.parseCardNames($v("#cfStatusCards")) : [];
+    /* 关联角色：用编辑中的副本（没动过就沿用原值，别把空对象写回去） */
+    ch.links = linkDraft || {};
     const cf = Memory.ensureFilter(ch);
     cf.rule = $v("#charFilterRule").trim();
     cf.every = readFilterEvery();

@@ -1074,6 +1074,19 @@
           </div>
           <p class="hint">会覆盖下面「世界观」栏里的内容。那栏是这个角色自己的一份，改了不影响库里那一套；留空则用「设置 → 我的人设 → 世界观」里选中的。</p>
         </div>
+        <div class="field" id="cfLinksRow">
+          <span>关联角色（这个角色和谁认识）</span>
+          <div class="cf-link-row">
+            <select id="cfLinkPick"></select>
+            <select id="cfLinkKind"></select>
+          </div>
+          <div class="char-actions" style="justify-content:flex-start">
+            <button id="cfLinkGen" class="btn ghost" type="button">生成共同经历</button>
+          </div>
+          <div id="cfLinkList" class="cf-link-list"></div>
+          <p class="hint">选一个角色 + 关系，点「生成共同经历」—— AI 会按双方性格写一段两人的往事存进这张卡。
+            一个角色可以关联多个。<b>只写进这张卡</b>，不会同时改对方；要双向就在对方卡里也关联一次。</p>
+        </div>
         <div id="charForm"></div>
         <div class="field" id="phoneKindField" hidden>
           <span>手机角色类型（只影响手机页）</span>

@@ -1110,6 +1110,20 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 .cf-persona-row select { flex: 1; min-width: 0; }
 .cf-persona-row .btn { flex: none; margin-left: 10px; }
 
+/* 关联角色（10-27）：两个下拉并排 + 生成按钮 + 已有关联列表 */
+.cf-link-row { display: flex; align-items: center; margin-bottom: 8px; }
+.cf-link-row select { flex: 1; min-width: 0; }
+.cf-link-row select + select { flex: none; width: 96px; margin-left: 8px; }
+.cf-link-list { margin: 8px 0; }
+.cf-link-item {
+  padding: 8px 10px; margin-bottom: 8px; border: 1px solid var(--border);
+  border-radius: 12px; background-color: var(--panel-2);
+}
+.cf-link-head { display: flex; align-items: center; }
+.cf-link-head b { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+.cf-link-head .btn { flex: none; }
+.cf-link-text { margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--text-dim); }
+
 /* 事件簿（10-27）：整页（不是弹窗），世界观 → 世界线 → 日期 三层折叠 */
 .eb-page {
   position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 61;
