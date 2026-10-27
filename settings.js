@@ -778,7 +778,7 @@
     let total = 0;
     rows.forEach(function (r) { total += r.size; });
     const sum = $("#storageSum");
-    if (sum) sum.textContent = total ? ("本机共占约 " + fmt(total) + " · " + rows.length + " 类") : "暂时没有可统计的数据";
+    if (sum) sum.textContent = total ? ("本机共占约 " + fmt(total) + "，" + rows.length + " 类") : "暂时没有可统计的数据";
     box.innerHTML = "";
     rows.sort(function (a, b) { return b.size - a.size; });
     rows.forEach(function (r) {
@@ -795,7 +795,7 @@
       bar.appendChild(fill);
       const val = document.createElement("span");
       val.className = "st-val";
-      val.textContent = fmt(r.size) + (r.extra ? " · " + r.extra : "");
+      val.textContent = fmt(r.size) + (r.extra ? "，" + r.extra : "");
       line.appendChild(nm); line.appendChild(bar); line.appendChild(val);
       box.appendChild(line);
     });
@@ -971,7 +971,7 @@
 
   function usageText(u) {
     u = u || {};
-    return "输入 " + fmtNum(u.prompt) + " · 输出 " + fmtNum(u.completion) + " · 总计 " + fmtNum(u.total) + " · 缓存命中 " + cacheRate(u) + "%";
+    return "输入 " + fmtNum(u.prompt) + "　输出 " + fmtNum(u.completion) + "　总计 " + fmtNum(u.total) + "　缓存命中 " + cacheRate(u) + "%";
   }
 
   /* 消耗类型（用量统计里按类型看花费）。除对话外的每一项也都在这里显示，
@@ -2978,7 +2978,7 @@
     if (eff.tts) on.push("朗读");
     if (eff.img) on.push("画图");
     var srcTxt = caps.manual ? "手动指定" : (caps.src || "");
-    el.textContent = "主模型：" + name + " · " + (on.length ? "支持 " + on.join(" / ") : "只当文字模型") +
+    el.textContent = "主模型：" + name + "，" + (on.length ? "支持 " + on.join(" / ") : "只当文字模型") +
       (srcTxt ? "（" + srcTxt + "）" : "");
   }
   /* 按能力放开上传类型：不能看图的就别让选图片，不能听音的别让选音频 */

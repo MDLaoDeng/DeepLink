@@ -921,7 +921,7 @@
     const names = Object.keys(st || {});
     const det = document.createElement("details");
     det.className = "msg-status";
-    const head = names.slice(0, 3).map((k) => escapeHtml(k) + " " + st[k]).join(" · ");
+    const head = names.slice(0, 3).map((k) => escapeHtml(k) + " " + st[k]).join("　");
     /* carry：这条回复没写卡片行，数值是从上一条沿用来的 —— 必须标出来，别让人当成新数据 */
     det.innerHTML = '<summary><span class="st-ic">' + iconSvg("chart-box-outline") +
       '</span><span class="st-label">卡片' + (carry ? '<span class="st-carry">延续上一条</span>' : "") +
@@ -1446,7 +1446,7 @@
       const card = document.createElement("button");
       card.type = "button";
       card.className = "theme-card" + (t.id === currentId ? " active" : "");
-      card.style.animationDelay = (i * 22) + "ms";
+      if (i < 8) card.style.animationDelay = (i * 22) + "ms";   /* 7.1：只让前 8 项错峰，长列表不再整片在动 */
       card.innerHTML = '<div class="swatch">' +
         t[m].map((c) => '<i style="background:' + c + '"></i>').join("") +
         '</div><div class="t-name">' + t.name + "</div>";
@@ -1473,7 +1473,7 @@
     sessions.forEach((s, i) => {
       const item = document.createElement("div");
       item.className = "session-item" + (s.id === currentId ? " active" : "");
-      item.style.animationDelay = Math.min(i * 20, 200) + "ms";
+      if (i < 8) item.style.animationDelay = (i * 20) + "ms";
 
       const sav = document.createElement("div");
       sav.className = "s-avatar";

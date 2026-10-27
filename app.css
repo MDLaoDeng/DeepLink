@@ -3474,3 +3474,21 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   margin: 0 6px 0 6px; padding: 1px 6px; border-radius: 999px;
   font-size: var(--fs-caption); color: var(--text-dim); background-color: var(--border);
 }
+
+/* ── 7.1 无障碍 ─────────────────────────────────────────
+   热区：图标按钮的视觉尺寸不变，可点区域补到 40px（原来是 32-34）。
+   顶栏例外——那里 7 个元素挤在一行，扩热区会把标题挤没（10-26 踩过），
+   顶栏的解法是重构布局，不是硬扩。 */
+.icon-btn { min-width: 40px; min-height: 40px; }
+.topbar .icon-btn { min-width: 34px; min-height: 34px; }
+
+/* 尊重「减少动态效果」：除启动页的静态呈现外，全局关掉动画与过渡。
+   原来只覆盖了启动页那几个元素，40 多处动效照跑。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+  .splash-mark .w1, .splash-mark .w2, .splash-credit { animation: none; }
+}
