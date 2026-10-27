@@ -375,13 +375,13 @@
     </div>
     <div class="modal-body" id="settingsBody">
       <div id="settingsHome" class="sg-home">
-        <button class="sg-item" data-sg="basic" type="button"><span class="sg-ic" data-icon="settings-outline"></span><span class="sg-tx"><b>基本配置</b><i>主模型 · 生成参数 · 头像 · 背景 · 采用格式 · 启动动画</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
-        <button class="sg-item" data-sg="advanced" type="button"><span class="sg-ic" data-icon="lightbulb-on-outline"></span><span class="sg-tx"><b>高级功能</b><i>记忆压缩 · 功能开关 · 听觉朗读 · 文生图 · 视觉 · live2D · 后台通知 · 加密</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
-        <button class="sg-item" data-sg="persona" type="button"><span class="sg-ic" data-icon="account"></span><span class="sg-tx"><b>我的人设</b><i>关于「你」的设定，最多 10 套，可随时切换</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
-        <button class="sg-item" data-sg="usage" type="button"><span class="sg-ic" data-icon="chart-box-outline"></span><span class="sg-tx"><b>用量统计</b><i>按类型 / 会话 / 角色看用量与花费</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
-        <button class="sg-item" data-sg="io" type="button"><span class="sg-ic" data-icon="content-copy"></span><span class="sg-tx"><b>导入导出</b><i>备份、换机、导出角色 / 会话</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
-        <button class="sg-item" data-sg="storage" type="button"><span class="sg-ic" data-icon="cog-outline"></span><span class="sg-tx"><b>储存占用</b><i>各类型数据占比与 App 对硬盘的占用</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
-        <button class="sg-item" data-sg="about" type="button"><span class="sg-ic" data-icon="information-outline"></span><span class="sg-tx"><b>关于应用</b><i>版本、免责声明、使用指南</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="basic" type="button"><span class="sg-ic" data-icon="settings-outline"></span><span class="sg-tx"><b>基本配置</b><i>模型、头像、背景</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="advanced" type="button"><span class="sg-ic" data-icon="lightbulb-on-outline"></span><span class="sg-tx"><b>高级功能</b><i>记忆、开关、语音、画面</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="persona" type="button"><span class="sg-ic" data-icon="account"></span><span class="sg-tx"><b>我的人设</b><i>关于你的设定</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="usage" type="button"><span class="sg-ic" data-icon="chart-box-outline"></span><span class="sg-tx"><b>用量统计</b><i>用量与花费</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="io" type="button"><span class="sg-ic" data-icon="content-copy"></span><span class="sg-tx"><b>导入导出</b><i>备份与换机</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="storage" type="button"><span class="sg-ic" data-icon="cog-outline"></span><span class="sg-tx"><b>储存占用</b><i>各类型数据的占比</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
+        <button class="sg-item" data-sg="about" type="button"><span class="sg-ic" data-icon="information-outline"></span><span class="sg-tx"><b>关于应用</b><i>版本与使用指南</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
       </div>
       <div class="settings-section">
         <h3 class="sec-head">主模型<button class="btn ghost mini" type="button" data-reset="main">重置本区</button></h3>
@@ -615,7 +615,7 @@
         <label class="field"><span>我的背景</span><textarea id="setMyBackground" rows="2"></textarea></label>
         <label class="field"><span>我的喜好</span><textarea id="setMyLikes" rows="2"></textarea></label>
         <label class="check-field"><input type="checkbox" id="setAssistantCompress"><span>普通对话也自动压缩（默认只压缩角色扮演）</span></label>
-        <label class="field"><span>压缩用的模型（留空则用主模型）</span><input id="setCompressModel" type="text" placeholder="deepseek-flash"></label>
+        <label class="field"><span>压缩用的模型</span><input id="setCompressModel" type="text" placeholder="跟主模型"></label>
         <label class="field"><span>上下文预警阈值（tokens）</span><input id="setTokenWarn" type="text" placeholder="30000"></label>
         <label class="check-field"><input type="checkbox" id="setNotifyTasks"><span>任务完成提示（记忆压缩 / 认知更新 / 自动筛选）</span></label>
         <div class="row-actions"><button id="openUsageBtn" class="btn" type="button"><span data-icon="chart-box-outline"></span>用量统计</button></div>
@@ -830,29 +830,29 @@
       <button class="icon-btn" data-close="sessionModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
     </div>
     <div class="modal-body">
-      <p class="hint">只作用于当前这段对话，不影响其它对话；也不影响「设置」里的全局提示词。</p>
+      <p class="hint">只影响这条对话，不写回角色卡。</p>
       <label class="field">
         <span>对话名称</span>
         <input id="setSessionTitle" type="text" placeholder="留空则自动命名">
       </label>
       <label class="field">
         <span>当前对话称呼</span>
-        <input id="setSessionAlias" type="text" placeholder="留空则显示「DeepLink」">
+        <input id="setSessionAlias" type="text" placeholder="跟随当前角色">
       </label>
       <label class="field">
         <span>本对话的系统提示词</span>
-        <textarea id="setSessionPrompt" rows="6" placeholder="留空则使用「设置」里的全局提示词"></textarea>
+        <textarea id="setSessionPrompt" rows="6" placeholder="留空＝用全局提示词"></textarea>
       </label>
       <div id="sessionRoleWrap" class="settings-section">
         <h3>角色扮演 · 本对话 <span id="sessionLineBadge" class="pill">主线</span></h3>
-        <label class="field"><span>本线年龄（留空 = 用角色卡的；年龄随时间系统变化）</span><input id="setSessionAge" type="text" inputmode="numeric" placeholder="例：17（留空则按出生日期推算）"></label>
+        <label class="field"><span>本线年龄</span><input id="setSessionAge" type="text" inputmode="numeric" placeholder="跟角色卡；也会随故事时间增长"></label>
         <label class="field"><span>本线「我的性别」（留空跟随角色卡 / 全局人设）</span><input id="setSessionMyGender" type="text" placeholder="男 / 女 / 其他（其他可自填）"></label>
         <label class="field"><span>当前关系（本对话专属，随记忆自动更新）</span><textarea id="setSessionRelation" rows="2" placeholder="此刻两人的关系状态…"></textarea></label>
         <label class="field"><span>共同经历（只写这段对话开始之前的事）</span><textarea id="setSessionShared" rows="4" placeholder="开局之前两人共同经历过什么…（聊天之后发生的事不用写这里，那些属于记忆）"></textarea></label>
         <label class="field"><span>当前场景（本对话专属，随对话自动更新）</span><textarea id="setSessionScene" rows="3" placeholder="此刻在哪、发生什么、什么氛围…"></textarea></label>
         <label class="field"><span>场景自动更新间隔（轮，默认 10）</span><input id="setSessionSceneEvery" type="number" min="1" step="1" inputmode="numeric"></label>
-        <label class="field"><span>采用格式（本会话；留空则跟随角色，角色也空就跟随全局）</span><textarea id="setSessionFormat" rows="3" placeholder="留空：按「角色 → 全局」的顺序取第一个填了的"></textarea></label>
-        <label class="field"><span>本线音色（留空则跟随全局）</span><input id="setSessionTtsVoice" type="text" placeholder="例：FunAudioLLM/CosyVoice2-0.5B:alex"></label>
+        <label class="field"><span>采用格式</span><textarea id="setSessionFormat" rows="3" placeholder="跟角色；角色也空就跟全局"></textarea></label>
+        <label class="field"><span>本线音色</span><input id="setSessionTtsVoice" type="text" placeholder="跟全局；例：FunAudioLLM/CosyVoice2-0.5B:alex"></label>
         <label class="field"><span>对我的认知（本对话专属，可手改）</span><textarea id="setSessionCognition" rows="5"></textarea></label>
         <div class="mem-title">记忆（本对话，只读）</div>
         <div id="sessionMemoryBox" class="memory-box"></div>

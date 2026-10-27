@@ -772,12 +772,15 @@ body {
 
 /* 思考面板 */
 .reasoning {
-  margin-bottom: 10px; border: 0.5px solid transparent; border-radius: var(--r-md);
-  background-color: var(--panel-2); overflow: hidden;
+  /* 7.1：去底色。气泡里原本套了三层块（气泡 → 思考条 → 卡片条），
+     每层一种深浅 + 一种圆角，读起来像俄罗斯套娃。现在默认只有一行文字，
+     展开才出现浅底块 —— 层级交给字重和留白，不靠色阶叠加。 */
+  margin-bottom: 8px; border: 0; border-radius: 0;
+  background-color: transparent; overflow: visible;
 }
 .reasoning > summary {
   list-style: none; cursor: pointer; -webkit-user-select: none; user-select: none;
-  padding: 8px 12px; font-size: var(--fs-body); color: var(--text-dim);
+  padding: 0 0 2px; font-size: var(--fs-caption); color: var(--text-mute);
   display: flex; align-items: center;
 }
 .reasoning > summary > *:not(:last-child) { margin-right: 7px; }
@@ -786,8 +789,11 @@ body {
 .reasoning .caret { display: inline-flex; margin-left: auto; transition: transform .28s ease; font-size: var(--fs-caption); }
 .reasoning[open] .caret { transform: rotate(90deg); }
 .reasoning .body {
-  padding: 2px 12px 12px; font-size: var(--fs-body); color: var(--text-dim);
-  white-space: pre-wrap; border-top: 0.5px dashed var(--border);
+  /* 展开态才成块：浅底 + 小圆角，收起时什么都不占 */
+  padding: 8px 10px; margin: 4px 0 2px; border-radius: var(--r-sm);
+  background-color: var(--panel-2);
+  font-size: var(--fs-body); color: var(--text-dim);
+  white-space: pre-wrap; border-top: 0;
   animation: fade-slide .3s both;
 }
 /* 收起也走一段动画（原生 details 收起是瞬时的，和展开不对称） */
@@ -1013,16 +1019,20 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 .composer-tools { display: flex; align-items: center; padding: 8px 2px 0; flex-wrap: wrap; }
 .composer-tools > * { margin-right: 8px; margin-bottom: 8px; }
 .chip {
+  /* 7.1：关闭态退回纯文字（透明底 + 次级色），只有开启态才给底色。
+     以前三个 chip 默认都是「主题色文字 + 面板底」，看着像三个并列主按钮，
+     把视线从输入框上拉走。 */
   display: inline-flex; align-items: center;
-  font-size: var(--fs-body); color: var(--accent); cursor: pointer; user-select: none;
-  padding: 5px 11px; border-radius: 999px;
-  border: 0.5px solid transparent; background-color: var(--panel);
+  font-size: var(--fs-caption); color: var(--text-dim); cursor: pointer; user-select: none;
+  padding: 5px 10px; border-radius: 999px;
+  border: 0.5px solid transparent; background-color: transparent;
   transition: color .25s, border-color .25s, background-color .25s, transform .18s;
 }
+.chip .ic { font-size: 15px; }
 .chip > *:not(:last-child) { margin-right: 6px; }
 .chip:active { transform: scale(.96); }
 .chip input { display: none; }
-.chip.on { color: var(--accent); border-color: var(--accent); }
+.chip.on { color: var(--accent); background-color: var(--panel-2); border-color: transparent; }
 .select-chip { padding: 3px 8px; }
 .select-chip select {
   border: 0; background: transparent; color: inherit; font: inherit; outline: none;
@@ -2769,13 +2779,18 @@ body.no-image .ph-moment-img img { display: none; }
 
 /* ── 6.0.0：状态量化（气泡下方的折叠框）────────────────────── */
 .msg-status {
-  margin-top: 10px; border: 0.5px solid transparent; border-radius: var(--r-md);
-  background-color: var(--panel-2); overflow: hidden;
+  /* 7.1：同思考条 —— 默认只有一行摘要，展开才成块 */
+  margin-top: 8px; border: 0; border-radius: 0;
+  background-color: transparent; overflow: visible;
 }
 .msg-status > summary {
   list-style: none; cursor: pointer; -webkit-user-select: none; user-select: none;
-  padding: 7px 12px; font-size: var(--fs-body); color: var(--text-dim);
+  padding: 0; font-size: var(--fs-caption); color: var(--text-mute);
   display: flex; align-items: center;
+}
+.msg-status[open] {
+  background-color: var(--panel-2); border-radius: var(--r-sm);
+  padding: 6px 8px; margin: 8px -2px 0;
 }
 .msg-status > summary > *:not(:last-child) { margin-right: 7px; }
 .msg-status > summary::-webkit-details-marker { display: none; }
