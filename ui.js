@@ -1092,6 +1092,9 @@
   /* ── 提示条 / 对话框 ───────────────────────────── */
   function toast(text, isError) {
     const box = $("#toasts");
+    /* 最多同时挂 3 条（10-27）：启动阶段的几条提示 + 一次生成失败 + 一次自动压缩失败，
+       很容易同屏堆 4~5 条把输入框盖住。多了就先扔最旧的。 */
+    while (box.children.length >= 3) box.removeChild(box.firstChild);
     const t = document.createElement("div");
     t.className = "toast" + (isError ? " err" : "");
     t.textContent = text;
@@ -1280,6 +1283,12 @@
   /* ── 选择器：把系统 select 弹层换成 App 内自绘（原 select 留在 DOM 里当值来源）── */
   const PICKABLES = [];
   function pickLabel(sel) {
+    /* 多选（如「思考对象」）：selectedIndex 只代表第一个选中项，不能拿来当标签 */
+    if (sel && sel.multiple) {
+      let n = 0;
+      for (let i = 0; i < sel.options.length; i++) if (sel.options[i].selected) n++;
+      return n ? ("已选 " + n + " 项") : "（未选）";
+    }
     const o = sel.options && sel.options[sel.selectedIndex];
     return o ? o.textContent : "（无可选项）";
   }
@@ -1289,16 +1298,18 @@
   }
   function pickRefreshAll() { PICKABLES.forEach((s) => pickRefresh(s)); }
   function pickOpen(sel) {
-    const opts = Array.prototype.map.call(sel.options || [], (o) => ({ value: o.value, label: o.textContent }));
+    const multi = !!sel.multiple;
+    const opts = Array.prototype.map.call(sel.options || [], (o, i) => ({ value: o.value, label: o.textContent, on: !!o.selected, i: i }));
     if (!opts.length) { toast("没有可选项", true); return; }
     const box = $("#pickList");
     if (!box) return;
-    $("#pickTitle").textContent = sel.getAttribute("data-pick-title") || "选择";
+    /* 多选时标题带一句提示，否则用户点完一行发现面板不关会以为坏了 */
+    $("#pickTitle").textContent = (sel.getAttribute("data-pick-title") || "选择") + (multi ? "（可多选）" : "");
     box.innerHTML = "";
     opts.forEach((o) => {
       const row = document.createElement("button");
       row.type = "button";
-      row.className = "pick-row" + (o.value === sel.value ? " on" : "");
+      row.className = "pick-row" + ((multi ? o.on : o.value === sel.value) ? " on" : "");
       const txt = document.createElement("span");
       txt.className = "pick-txt";
       txt.textContent = o.label;
@@ -1307,6 +1318,16 @@
       row.appendChild(txt);
       row.appendChild(mk);
       row.addEventListener("click", () => {
+        /* 多选：点一行只切换它，面板留着让人继续勾；点右上角关闭收起（10-27） */
+        if (multi) {
+          const opt = sel.options[o.i];
+          if (!opt) return;
+          opt.selected = !opt.selected;
+          row.classList.toggle("on", opt.selected);
+          try { sel.dispatchEvent(new Event("change", { bubbles: true })); } catch (e) { /* ignore */ }
+          pickRefresh(sel);
+          return;
+        }
         closeModal("pickModal");
         if (sel.value !== o.value) {
           sel.value = o.value;

@@ -75,8 +75,18 @@
     }
   }
 
+  /* 引导页第 2 屏只放第一层（10-27）：整棵树 60+ 行，手机上一屏要滚半天，
+     而这一屏的活是「先让人知道能干什么」，细节留给使用指南。 */
+  function featureTop(tree) {
+    return String(tree || "").split("\n").filter(function (ln) {
+      return /^[├└]─\s/.test(ln);
+    }).map(function (ln) {
+      return "· " + ln.replace(/^[├└]─\s*/, "");
+    }).join("\n");
+  }
+
   function openIntro() {
-    setText("#introTree", CONFIG.FEATURE_TREE || "");
+    setText("#introTree", featureTop(CONFIG.FEATURE_TREE));
     introShow(0);
     UI.openModal("introModal");
     /* 整页引导（10-27）：样式表里那套在这台内核上没完全压住顶栏/输入栏
@@ -995,6 +1005,8 @@
     { id: "music", name: "音乐生成" },
     { id: "caps", name: "模型能力检测" },
     { id: "think", name: "TA 的思考" },
+    /* 10-27 补：性格变化「规划路线」是一次独立调用，以前记在「角色拆分」里看不出来 */
+    { id: "drift", name: "性格变化（路线规划）" },
     { id: "fork", name: "回溯重建" },
     { id: "other", name: "其它" }
   ];
@@ -3622,8 +3634,21 @@
     for (var i = 0; i < list.length; i++) { if (list[i].id === id) return String(list[i].text || ""); }
     return "";
   }
-  function openReasonDrawer() { renderReasonDrawer(); setHidden("#reasonDrawer", false); }
-  function closeReasonDrawer() { setHidden("#reasonDrawer", true); }
+  function openReasonDrawer() {
+    var el = document.getElementById("reasonDrawer");
+    if (el) el.classList.remove("closing");
+    renderReasonDrawer(); setHidden("#reasonDrawer", false);
+  }
+  /* 收起先播退场再 hidden（10-27）：原来一置 hidden 就硬切，进有动效出没有 */
+  function closeReasonDrawer() {
+    var el = document.getElementById("reasonDrawer");
+    if (!el || el.hidden || el.classList.contains("closing")) return;
+    el.classList.add("closing");
+    setTimeout(function () {
+      el.classList.remove("closing");
+      setHidden("#reasonDrawer", true);
+    }, 200);
+  }
   function renderReasonDrawer() {
     var box = document.getElementById("reasonList");
     if (!box) return;

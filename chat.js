@@ -1565,7 +1565,7 @@
       /* 只出了思考、正文空的：模型常把话全写进思考里，然后就「以为已经答过了」。
          补一句纠正再问一次 —— **只补这一次**，还不行就交给下面那条提示，绝不反复烧钱。
          （用户中途点了停止的话不补：signal 已 abort，再问也只会立刻抛错。） */
-      if (!String(sp0.content || "").trim() && !state.abort.signal.aborted) {
+      if (!String(sp0.content || "").trim() && !ac.signal.aborted) {
         const nudged = messages.slice();
         let li = -1;
         for (let i = nudged.length - 1; i >= 0; i--) { if (nudged[i].role === "user") { li = i; break; } }
@@ -1749,7 +1749,10 @@
       const isAsst = (window.DL && typeof window.DL.isAssistantLine === "function")
         ? (window.DL.isAssistantLine(s) || legacy)
         : legacy;
-      if (isAsst && /关系(剖析|分析)|剖析(一下)?关系|分析(一下)?关系|关系(怎么样|如何)/.test(String(text || ""))) {
+      /* 只在「明确要一份报告」时才触发（10-27）。
+         原来还认「关系怎么样 / 关系如何」，那是很自然的闲聊句子 ——
+         一命中就把这句当指令入库、并跑一次完整的总结调用（真花钱），回一份结构化报告。 */
+      if (isAsst && /关系(剖析|分析)|剖析(一下)?(我们的)?关系|(给我|帮我)(做|出|写)(一份|个)?(关系|关系剖析)|分析(一下)?(我们的)?关系/.test(String(text || ""))) {
         const tl = Store.getSessions();
         const k = tl.findIndex((x) => x.id === sid);
         if (k >= 0) {
@@ -3411,6 +3414,8 @@
     siScope = emojiScope;
     var sheet = $("#stickerImport");
     if (!sheet) return;
+    /* 退场没播完又打开：先撤 closing，否则进场动画不会重放（10-27） */
+    sheet.classList.remove("closing");
     sheet.hidden = false;
     var scopes = sheet.querySelectorAll(".si-scope");
     for (var k = 0; k < scopes.length; k++) {
@@ -3421,8 +3426,16 @@
 
   function closeStickerImport() {
     var sheet = $("#stickerImport");
-    if (sheet) sheet.hidden = true;
+    if (!sheet) { siPending = []; return; }
+    if (sheet.hidden || sheet.classList.contains("closing")) { siPending = []; return; }
+    /* 先播退场再 hidden（10-27）：和表情面板的进场 si-in 对称。
+       180ms 对齐 CSS 的 si-out；动画期间再点取消不重复播。 */
+    sheet.classList.add("closing");
     siPending = [];
+    setTimeout(function () {
+      sheet.classList.remove("closing");
+      sheet.hidden = true;
+    }, 180);
   }
 
   function renderSiGrid() {
@@ -3619,6 +3632,7 @@
     if (!t) { UI.toast("这条没有可看的正文", true); return; }
     worldViewKey = String(m.ts || i);
     body.textContent = t;
+    box.classList.remove("closing");   /* 退场没播完又点开：先把退场撤掉，否则新页会被动画盖住 */
     box.classList.add("show");
     /* 恢复上次读到的地方（首帧布局还没稳定，推到下一帧再设） */
     const keep = worldViewScroll[worldViewKey] || 0;
@@ -3630,8 +3644,15 @@
     const box = $("#worldView");
     const body = $("#worldViewBody");
     if (body && worldViewKey) worldViewScroll[worldViewKey] = body.scrollTop;
-    if (box) box.classList.remove("show");
-    worldViewKey = "";
+    if (!box) { worldViewKey = ""; return; }
+    /* 先播退场再撤 .show（10-27）：200ms 和 CSS 的 wv-out 对齐。
+       正在收就只补一次，别让「返回键 + 点返回」两下把动画重头再来。 */
+    if (box.classList.contains("closing")) return;
+    box.classList.add("closing");
+    setTimeout(() => {
+      box.classList.remove("show", "closing");
+      worldViewKey = "";
+    }, 200);
   }
 
   function bindWorldView() {

@@ -1268,7 +1268,8 @@
     setText("#setDriftState", "AI 正在排路线…");
     try {
       const r = await Memory.planDrift(s, goal, state.settings);
-      if (r && r.usage) recordUsage(s.id, r.usage, s.characterId, "split");
+      /* 单独记一类（10-27）：以前记成 "split"，和角色拆分混在一起，看用量分不出这笔钱 */
+      if (r && r.usage) recordUsage(s.id, r.usage, s.characterId, "drift");
       if (!r || !r.plan.length) { setText("#setDriftState", "没排出可用路线，方向写具体一点再试"); return; }
       Store.updateSession(s.id, {
         drift: { on: true, goal: goal, plan: r.plan, startStory: Memory.nowOf(s) }

@@ -134,16 +134,9 @@ body {
    纯 CSS（动画 / 变换 / 伪元素），Chrome 83 稳过。
    每套比"能跑"多下了一点功夫：光泽扫过、多层光晕、纸页投影、双环呼吸、头像光圈。
    装饰一律用 ::before / ::after，不往 DOM 里塞节点（也就不会影响排版）。 */
-@-webkit-keyframes splash-word {
-  from { opacity: 0; -webkit-transform: translateY(20px); }
-  to { opacity: 1; -webkit-transform: none; }
-}
-@keyframes splash-word {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: none; }
-}
-@-webkit-keyframes splash-line { to { width: 72px; } }
-@keyframes splash-line { to { width: 72px; } }
+/* splash-word / splash-line 只在下面 .splash-credit 之后定义一次（10-27）。
+   这里原来还有一份 translateY(20px) / 72px 的，被后定义的 18px / 68px 整块覆盖 ——
+   等于死代码，而且改这一段不会有任何效果，容易白花时间。 */
 
 /* 1 经典：文字先后浮起 + 下划线展开 + 一道光斜扫过 */
 .splash[data-anim="1"] .splash-mark .w1 {
@@ -981,7 +974,12 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
   display: none; position: fixed; left: 0; top: 0; right: 0; bottom: 0;
   z-index: 420; flex-direction: column; background-color: var(--bg);
 }
-.world-view.show { display: flex; }
+/* 进出场（10-27）：display 由 none 变 flex 的那一帧不会触发 transition，
+   只能用 animation；收起同样得先播动画再撤 .show（见 chat.js 的 closeWorldView）。 */
+.world-view.show { display: flex; animation: wv-in .24s cubic-bezier(.22, 1, .36, 1); }
+.world-view.closing { animation: wv-out .2s ease forwards; }
+@keyframes wv-in { from { opacity: 0; transform: scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes wv-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.985); } }
 .wv-head {
   display: flex; align-items: center; flex: none;
   padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
@@ -1073,7 +1071,8 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
    表现就是「点了没反应」（和 10-17 修过的那次是同一个毛病，只是当时只修了整页页本身）。
    400 的取法：高于上面所有层（最高 120），低于提示条（460）与滚轮选择器（520）。
    ⚠️ 以后新增「从整页层 / 手机层里弹出」的浮层，一律往这里加，不要再去比 DOM 顺序。 */
-#dialogModal, #reminderModal, #pickModal, #groupModal, #bgCropModal, #deleteModal, #filePickModal { z-index: 400; }
+#dialogModal, #reminderModal, #pickModal, #groupModal, #bgCropModal, #deleteModal,
+#passModal, #albumModal { z-index: 400; }
 .modal-sheet {
   width: 100%; max-height: 88vh; display: flex; flex-direction: column;
   background-color: var(--panel); border-top-left-radius: 22px; border-top-right-radius: 22px;
@@ -1216,7 +1215,10 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
   position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 61;
   display: flex; flex-direction: column;
   background-color: var(--bg); color: var(--text);
+  /* 进场（10-27）：元素从 display:none 变回显示时 animation 会重放，正好当进出场用 */
+  animation: eb-in .2s cubic-bezier(.22, 1, .36, 1);
 }
+@keyframes eb-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
 .eb-page-head {
   flex: none; display: flex; align-items: center;
   padding: 10px 12px; border-bottom: 1px solid var(--border);
@@ -1540,6 +1542,11 @@ body.tts-on .act-btn.read-act { display: inline-flex; }
   animation: drawer-in .28s cubic-bezier(.22, 1, .36, 1);
 }
 @keyframes drawer-in { from { transform: translateX(24px); opacity: .6; } to { transform: translateX(0); opacity: 1; } }
+/* 收起也要有动画（10-27）：原来 hidden 一置 true 就硬切，进有动效、出没有，看着像卡了一下。
+   做法：加 .closing 播退场，播完再置 hidden（见 settings.js 的 closeReasonDrawer）。 */
+.drawer.closing .drawer-panel { animation: drawer-out .2s ease forwards; }
+.drawer.closing .drawer-mask { opacity: 0; transition: opacity .2s ease; }
+@keyframes drawer-out { from { transform: translateX(0); opacity: 1; } to { transform: translateX(24px); opacity: .35; } }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .drawer-head h2 { margin: 0; font-size: 17px; }
 .reason-list { flex: 1; min-height: 0; overflow-y: auto; padding-right: 8px; margin: 8px 0 12px; }
@@ -3118,6 +3125,10 @@ body.no-image .ph-moment-img img { display: none; }
   animation: si-in .22s cubic-bezier(.22, 1, .36, 1);
 }
 @keyframes si-in { from { transform: translateY(18px); opacity: .6; } to { transform: none; opacity: 1; } }
+/* 收起动画（10-27）：同抽屉，加 .closing 播完再 hidden（见 chat.js 的 closeStickerImport） */
+.sticker-import.closing .si-card { animation: si-out .18s ease forwards; }
+.sticker-import.closing .si-mask { opacity: 0; transition: opacity .18s ease; }
+@keyframes si-out { from { transform: none; opacity: 1; } to { transform: translateY(18px); opacity: .35; } }
 .si-head { display: flex; align-items: center; justify-content: space-between; font-size: 14px; color: var(--text); margin-bottom: 8px; }
 .si-count { font-size: 12px; color: var(--text-mute); }
 .si-scopes { padding: 0 0 8px; }
