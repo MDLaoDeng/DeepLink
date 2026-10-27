@@ -204,7 +204,16 @@
     }
     if (scope === "settings") return withKeys ? Store.getSettings() : stripKeys(Store.getSettings());
     if (scope === "characters") return withCharImages(Store.getCharacters(), noImg);
-    if (scope === "character") return withCharImages(Store.getCharacters().filter((c) => c.id === $v("#exportCharSel")), noImg)[0] || null;
+    if (scope === "character") {
+      /* 10-27 用户口径：只导某个角色时，要连它的**所有线**一起带走
+         —— 记忆、关系网、对「我」的认知全在会话里，只导卡等于什么都没带。 */
+      const cid = $v("#exportCharSel");
+      const ch = Store.getCharacters().filter((c) => c.id === cid)[0] || null;
+      if (!ch) return null;
+      const pack = withCharImages([ch], noImg)[0] || ch;
+      const ss = sessionsForExport().filter((s) => (s.characterId || "") === cid);
+      return { character: pack, sessions: ss };
+    }
     if (scope === "session") {
       const s = sessionsForExport().find((x) => x.id === $v("#exportSessionSel"));
       if (!s) return null;
@@ -504,7 +513,18 @@
       state.settings = Store.saveSettings(sanitizeImportSettings(d));
       return true;
     }
-    if (kind === "character") return importCharacters([data]);
+    /* 10-27：新格式是 { character, sessions }（角色 + 它的所有线）；
+       老格式直接就是角色卡本身 —— 两种都要认，不然老的导出文件导不进来。 */
+    if (kind === "character") {
+      if (data && data.character && typeof data.character === "object") {
+        let ok = await importCharacters([data.character]);
+        if (Array.isArray(data.sessions) && data.sessions.length) {
+          ok = (await importSessions(data.sessions)) && ok;
+        }
+        return ok;
+      }
+      return importCharacters([data]);
+    }
     if (kind === "characters") return importCharacters(data);
     if (kind === "session") return importSessions([data]);
     if (kind === "full") {
