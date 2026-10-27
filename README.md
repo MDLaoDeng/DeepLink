@@ -5,7 +5,7 @@
 
 **无构建 · 无后端 · 依赖原生桥 · 数据只存本机 · 适配 Chrome 83 老内核**
 
-当前版本：**6.2.7**
+当前版本：**7.0.1**
 
 <p align="center">
   <img src="screenshot-chat.jpg" height="440" alt="聊天界面">
