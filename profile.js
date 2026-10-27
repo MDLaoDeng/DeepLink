@@ -43,6 +43,13 @@
     return (d.avatarUrl && v) ? d.avatarUrl(v) : (v || "");
   }
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  /* 动态里的图可能是「附件对象」（带 imgRef，外置成文件了），也可能只是字符串地址。
+     统一解成能塞进 img.src 的东西 —— 否则外置之后这里会是个 [object Object]。 */
+  function picUrl(x) {
+    if (!x) return "";
+    if (typeof x === "string") return x;
+    return (S().imageURL ? S().imageURL(x) : (x.dataUrl || x.url || ""));
+  }
 
   /* ── 资料字段（懒生成）─────────────────────────────
      存量角色没有这些字段：第一次打开资料页时才补，避免一次性重写全部加密角色卡。 */
@@ -218,6 +225,9 @@
     if (!ch || aiPending[ch.id]) return;
     var so = ch.social;
     if (!so || (so.sign && String(so.sign).trim())) return;
+    /* 试过一次就不再试：以前每次重渲资料页都打一次模型（sign 空 + 失败 → 无限重试）。
+       用户手动清空签名时会把 aiSignTried 抹掉，那时才允许再试。 */
+    if (so.aiSignTried) return;
     if (!(window.Api && Api.summarize)) return;
     var st = (D().state || {}).settings || {};
     if (!st.apiKey) return;
@@ -231,7 +241,7 @@
       "只输出两行，第一行写「签名：xxx」，第二行写「地区：xxx」，不要别的内容。\n\n" +
       "人物：\n" + bg;
     Api.summarize(st, [{ role: "user", content: prompt }]).then(function (r) {
-      var t = String((r && r.content) || "");
+      var t = String((r && r.text) || "");   /* summarize 返回 text，不是 content */
       var ms = /签名[:：]\s*(.+)/.exec(t);
       var mr = /地区[:：]\s*(.+)/.exec(t);
       var live = charById(ch.id);
@@ -245,7 +255,8 @@
         var rg = mr[1].trim().slice(0, 16);
         if (rg && /[\u4e00-\u9fa5]/.test(rg)) { live.social.region = rg; touched = true; }
       }
-      if (touched) saveChar(live);
+      if (live.social) live.social.aiSignTried = true;   /* 标记「试过了」，无论成没成 */
+      saveChar(live);
       if (curId === ch.id) render();
     }).catch(function () { /* 补不出来不影响资料页 */ })
       .then(function () { aiPending[ch.id] = false; });
@@ -473,8 +484,10 @@
         if (m.imgs && m.imgs.length) {
           var grid = el("div", "pf-moment-imgs pf-n" + Math.min(3, m.imgs.length));
           m.imgs.slice(0, 6).forEach(function (src2) {
+            var u = picUrl(src2);
+            if (!u) return;
             var cell = el("div", "pf-moment-img");
-            var i3 = el("img"); i3.src = src2; i3.alt = "";
+            var i3 = el("img"); i3.src = u; i3.alt = "";
             cell.appendChild(i3); grid.appendChild(cell);
           });
           right.appendChild(grid);
@@ -596,7 +609,12 @@
       function finish(v) {
         if (done) return;
         done = true;
-        if (mask.parentNode) mask.parentNode.removeChild(mask);
+        /* 退场：150ms 淡出后再摘节点（和 app.css 的 .pf-edit-out 对齐）。
+           立刻 resolve —— 调用方该更新界面就更新，遮罩自己淡走。 */
+        mask.classList.add("pf-edit-out");
+        setTimeout(function () {
+          if (mask.parentNode) mask.parentNode.removeChild(mask);
+        }, 150);
         resolve(v);
       }
       bCancel.addEventListener("click", function () { finish(null); });
@@ -631,6 +649,7 @@
   function openRequests() {
     var L = ensureLayer();
     if (!L) return false;
+    cancelClose();
     curId = ""; view = "requests"; L.hidden = false;
     var app = document.getElementById("app");
     if (app) app.style.visibility = "hidden";
@@ -642,6 +661,7 @@
     if (!chId) return false;
     var L = ensureLayer();
     if (!L) return false;
+    cancelClose();
     curId = chId;
     view = "main";
     L.hidden = false;
@@ -652,16 +672,35 @@
     render();
     return true;
   }
+  var closeTimer = 0;
+  /* 退场：先播 170ms 动画再摘内容（时长与 app.css 的 .pf-out 对齐）。
+     原先直接 hidden = true，按返回键是一帧硬切，和项目里其它浮层不对称。 */
   function close() {
     var L = ensureLayer();
-    if (L) { L.hidden = true; L.innerHTML = ""; }
     curId = ""; view = "main";
     var app = document.getElementById("app");
     if (app) app.style.visibility = "";
+    if (!L) return;
+    if (L.hidden) { L.innerHTML = ""; return; }
+    L.classList.add("pf-out");
+    if (closeTimer) clearTimeout(closeTimer);
+    closeTimer = setTimeout(function () {
+      closeTimer = 0;
+      L.classList.remove("pf-out");
+      L.hidden = true; L.innerHTML = "";
+    }, 170);
+  }
+  /* 退场途中又被打开：撤掉动画与待执行的卸载，否则「关了又开」会被 170ms 后的定时器清空 */
+  function cancelClose() {
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = 0; }
+    var L = ensureLayer();
+    if (L) L.classList.remove("pf-out");
   }
   function isOpen() {
     var L = ensureLayer();
-    return !!(L && !L.hidden);
+    /* 退场中（pf-out）算「已经关了」：否则按一次返回开始淡出、再按一次又被这里吃掉，
+       用户会感觉「返回键失灵一下」。 */
+    return !!(L && !L.hidden && !L.classList.contains("pf-out"));
   }
   /* 返回键：逐级退（资料页内 → 资料页主视角 → 关闭），对齐手机页那套约定 */
   function back() {

@@ -3504,6 +3504,10 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   animation: pf-in .22s cubic-bezier(.22, 1, .36, 1);
 }
 .profile-layer[hidden] { display: none; }
+/* 退场：原先只有进场动画，按返回键是一帧硬切 —— 和项目里其它浮层（.world-view.closing 等）
+   不对称。duration 要比 JS 里的卸载延时短一点，否则会看到「动画没走完就没了」。 */
+.profile-layer.pf-out { animation: pf-out .17s ease-in forwards; }
+@keyframes pf-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(18px); } }
 @keyframes pf-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
 
 .pf-page { min-height: 100%; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
@@ -3528,7 +3532,7 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 .pf-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pf-av .ic { width: 30px; height: 30px; }
 .pf-info { flex: 1; min-width: 0; padding-top: 2px; }
-.pf-name { font-size: 20px; font-weight: 600; line-height: 1.3; margin-bottom: 8px; word-break: break-all; }
+.pf-name { font-size: var(--fs-hero); font-weight: 600; line-height: 1.25; margin-bottom: 8px; word-break: break-all; }
 .pf-line { font-size: var(--fs-caption); color: var(--text-mute); line-height: 1.7; }
 
 .pf-gap { height: 8px; background-color: var(--panel-2); }
@@ -3581,7 +3585,7 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .pf-row-v.pf-empty { color: var(--text-mute); }
-.pf-row-a { flex: none; margin-left: 6px; color: var(--text-mute); font-size: 18px; line-height: 1; }
+.pf-row-a { flex: none; margin-left: 6px; color: var(--text-mute); font-size: var(--fs-title); line-height: 1; }
 
 /* 朋友圈 */
 .pf-cover {
@@ -3617,12 +3621,18 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 440;
   background-color: var(--scrim); display: flex; align-items: center; justify-content: center;
   padding: 20px;
+  animation: pf-mask-in .16s ease-out;
 }
+.pf-edit.pf-edit-out { animation: pf-mask-out .15s ease-in forwards; }
+@keyframes pf-mask-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pf-mask-out { from { opacity: 1; } to { opacity: 0; } }
 .pf-edit-card {
   width: 100%; max-width: 420px; padding: 18px;
   background-color: var(--panel); border-radius: var(--r-lg);
   border: 0.5px solid var(--border);
+  animation: pf-card-in .2s cubic-bezier(.22, 1, .36, 1);
 }
+@keyframes pf-card-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
 .pf-edit-t { font-size: var(--fs-title); font-weight: 600; margin-bottom: 8px; }
 .pf-edit-h { font-size: var(--fs-caption); color: var(--text-mute); margin-bottom: 10px; line-height: 1.6; }
 .pf-edit-in {
@@ -3658,7 +3668,7 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 .ph-nf-tx i { display: block; font-style: normal; font-size: var(--fs-caption); color: var(--text-mute); margin-top: 2px; }
 .ph-nf-badge {
   flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
-  background-color: var(--danger); color: #fff; font-size: 11px; line-height: 20px;
+  background-color: var(--danger); color: #fff; font-size: var(--fs-caption); line-height: 20px;
   text-align: center;
 }
 
@@ -3678,3 +3688,12 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 .pf-req-via { font-size: var(--fs-caption); color: var(--text-mute); margin-top: 3px; }
 .pf-req-acts { flex: none; display: flex; }
 .pf-req-acts .btn { margin-left: 8px; }
+
+/* 动态多图角标（角色发的一组图，手机页只显示第一张） */
+.ph-moment-more {
+  position: absolute; right: 8px; bottom: 8px;
+  padding: 2px 8px; border-radius: 999px;
+  background-color: rgba(0, 0, 0, .55); color: #fff;
+  font-size: var(--fs-caption); line-height: 18px;
+}
+.ph-moment-img { position: relative; }

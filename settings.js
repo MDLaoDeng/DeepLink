@@ -1279,6 +1279,8 @@
         patch.imgSize = def.imgSize;
         patch.imgToImg = !!def.imgToImg;
         patch.phoneShareImg = !!def.phoneShareImg;
+        patch.charMomentAuto = true;                /* 默认开 */
+        patch.charMomentImg = !!def.charMomentImg;  /* 默认关 */
       }
       if (key === "vision") { patch.visionEnabled = !!def.visionEnabled; }
       const sets = Object.assign({}, state.settings.modelSets);
@@ -1352,6 +1354,8 @@
     setVal("#setImgSize", s.imgSize || "");
     setChecked("#setImgToImg", !!s.imgToImg);
     setChecked("#setPhoneShareImg", !!s.phoneShareImg);
+    setChecked("#setCharMoment", s.charMomentAuto !== false);   /* 默认开 */
+    setChecked("#setMomentImg", !!s.charMomentImg);             /* 默认关 */
 
     setChecked("#setVisionEnabled", !!s.visionEnabled);
 
@@ -1859,6 +1863,8 @@
       imgSize: $v("#setImgSize").trim(),
       imgToImg: checkedOf("#setImgToImg"),
       phoneShareImg: checkedOf("#setPhoneShareImg"),
+      charMomentAuto: checkedOf("#setCharMoment"),
+      charMomentImg: checkedOf("#setMomentImg"),
 
       roleplayEnabled: checkedOf("#setRoleplayEnabled"),
       groupWarnOff: !checkedOf("#setGroupWarn"),

@@ -2839,6 +2839,9 @@
     crossMentions: crossMentions, spreadHeard: spreadHeard,
     generateAutoMessage: generateAutoMessage, applyAutoMessage: applyAutoMessage,
     generatePhoneShare: generatePhoneShare,
+    /* 7.1.1：这两种能力原本只服务「手机主动分享」，动态配图要完全同一套，
+       所以暴露出来而不是抄一份 —— 抄一份迟早跟画风目录走样。 */
+    shareRuleText: shareRuleText, parseShare: parseShare,
     renderSettingsMemory: renderSettingsMemory, runCharSplit: runCharSplit,
     fillCharacterForm: fillCharacterForm, saveCharacter: saveCharacter,
     openUpgrade: openUpgrade, doUpgrade: doUpgrade,

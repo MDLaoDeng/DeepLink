@@ -3307,7 +3307,9 @@
       if (!s || s.isGroup || s.phoneOnly) return;
       var ch = characterFor(s);
       if (!ch) return;
-      if (state.settings.charAutoMoment === false) return;
+      /* 7.1.1 起有了正式开关（设置 → 文生图区）。旧的 charAutoMoment 是当时的后门，
+         两个都认：任一个明确关掉就不发。 */
+      if (state.settings.charMomentAuto === false || state.settings.charAutoMoment === false) return;
       if (!state.settings.apiKey) return;
       if (momentBusy) return;
       if (!(window.Api && Api.summarize)) return;
@@ -3327,20 +3329,45 @@
         s.scene ? ("今天的事：" + s.scene) : "",
         s.shared ? ("最近：" + s.shared) : ""
       ].filter(Boolean).join("\n").slice(0, 900);
+      /* 配图：和「手机模式 · 主动分享」完全同一套机制（画风目录 + [[配图]] 标记 + 图生图参考），
+         但开关独立、默认关 —— 用户点了「动态可以带图」才让 AI 考虑，这就是「需要用户同意」。 */
+      var canImg = !!(state.settings.charMomentImg && window.Media && Media.capable &&
+        Media.capable("img", state.settings));
       var prompt = "你在扮演下面这个人。现在是晚上，他可能会在自己手机上发一条朋友圈。\n\n" +
         ctx + "\n\n规则：\n" +
         "· 只写他自己想让人看见的，不要对话、不要旁白、不要解释。\n" +
         "· 一句话，不超过 40 字，口语，像随手发的。\n" +
         "· 今天没有值得发的事，就别发 —— 宁可空一天。\n" +
-        "· 只输出两种格式之一：\n  发：<那句话>\n  不发\n";
-      Api.summarize(state.settings, [{ role: "user", content: prompt }]).then(function (r) {
+        "· 只输出两种格式之一：\n  发：<那句话>\n  不发\n" +
+        (canImg ? ((window.DL && DL.shareRuleText) ? DL.shareRuleText() : "") : "");
+      Api.summarize(state.settings, [{ role: "user", content: prompt }], { maxTokens: canImg ? 500 : 200 })
+        .then(async function (r) {
         if (r && r.usage && typeof recordUsage === "function") recordUsage(null, r.usage, ch.id, "moment");
-        var t = String((r && r.content) || "").trim();
-        var mt = /^发[:：]\s*(.+)$/m.exec(t);
+        /* Api.summarize 返回的是 { text }，不是 { content }。
+           以前写成 r.content → 永远拿到空串 → 这条动态功能上线以来一直是哑的。 */
+        var raw = String((r && r.text) || "").trim();
+        if (!raw) return;
+        var parsed = (window.DL && DL.parseShare) ? DL.parseShare(raw) : { text: raw, image: null };
+        var mt = /^发[:：]\s*([\s\S]+)$/m.exec(String(parsed.text || "").trim());
         if (!mt) return;
-        var txt = mt[1].trim().replace(/^["「『]|["」』]$/g, "").slice(0, 80);
+        var txt = mt[1].replace(/\[\[配图\]\][\s\S]*$/, "").trim()
+          .replace(/^["「『]|["」』]$/g, "").slice(0, 80);
         if (!txt) return;
-        DL.profile.addCharMoment(ch.id, txt, []);
+        var spec = canImg ? parsed.image : null;
+        if (!spec) { DL.profile.addCharMoment(ch.id, txt, []); return; }
+        /* 带图：先生成、再外置存文件，moments 里只留引用。
+           不能把 dataUrl 直接塞进动态 —— 动态最多 500 条，全带内联图会把 localStorage 撑爆。 */
+        try {
+          var url = await buildShareImage(s, spec);
+          var dataUrl = url ? await urlToDataUrl(url) : "";
+          if (!dataUrl) { DL.profile.addCharMoment(ch.id, txt, []); return; }
+          var att = { kind: "image", name: "moment.png", mime: "image/png", desc: String(spec.subject || "") };
+          att.dataUrl = dataUrl;
+          try { if (Store.hoistImage) Store.hoistImage(att); } catch (e2) { /* ignore */ }
+          DL.profile.addCharMoment(ch.id, txt, [att]);
+        } catch (e3) {
+          DL.profile.addCharMoment(ch.id, txt, []);   /* 图没出来，文字照发 */
+        }
       }).catch(function () { /* 发不出来不影响别的 */ })
         .finally(function () { momentBusy = false; });
     } catch (e) { momentBusy = false; }
@@ -3366,31 +3393,47 @@
     }
     list.forEach(function (m) { box.appendChild(momentEl(m)); });
   }
+  /* 动态里的图有两种存法：我发的是附件对象（m.image），角色发的是同一套附件对象数组（m.imgs）。
+     统一解成能直接塞进 img.src 的地址；外置成文件后必须过 Store.imageURL 才解得回来。 */
+  function picUrl(x) {
+    if (!x) return "";
+    if (typeof x === "string") return x;
+    return (Store.imageURL ? Store.imageURL(x) : (x.dataUrl || x.url || ""));
+  }
+
   function momentEl(m) {
+    var isMine = !m.who;
+    var owner = isMine ? null : charById(m.who);
     var wrap = document.createElement("div");
     wrap.className = "ph-moment";
     var head = document.createElement("div");
     head.className = "ph-moment-head";
-    head.appendChild(avatarEl(state.settings.phoneAvatarUser || state.settings.avatarUser || "", "user"));
+    head.appendChild(avatarEl(isMine
+      ? (state.settings.phoneAvatarUser || state.settings.avatarUser || "")
+      : ((owner && owner.avatar) || ""), isMine ? "user" : "assistant"));
     var meta = document.createElement("div");
     meta.className = "ph-moment-meta";
     var nm = document.createElement("div");
     nm.className = "ph-moment-name";
-    nm.textContent = "我";
+    /* 7.1 起动态有两种来源：我发的（无 who）和角色自己发的（有 who）。
+       以前这里写死「我」和我的头像 —— 角色动态在手机页里长得像自己发的。 */
+    nm.textContent = isMine ? "我" : ((owner && owner.name) || "角色");
     var tm = document.createElement("div");
     tm.className = "ph-moment-time";
     tm.textContent = fmtWhen(m.ts);
     meta.appendChild(nm); meta.appendChild(tm);
     head.appendChild(meta);
-    var del = document.createElement("button");
-    del.className = "ph-moment-del";
-    del.type = "button";
-    del.textContent = "删除";
-    del.addEventListener("click", function () {
-      Store.saveMoments(Store.getMoments().filter(function (x) { return x.id !== m.id; }));
-      renderMoments();
-    });
-    head.appendChild(del);
+    if (isMine) {          /* 别人的动态不给删（微信里也一样） */
+      var del = document.createElement("button");
+      del.className = "ph-moment-del";
+      del.type = "button";
+      del.textContent = "删除";
+      del.addEventListener("click", function () {
+        Store.saveMoments(Store.getMoments().filter(function (x) { return x.id !== m.id; }));
+        renderMoments();
+      });
+      head.appendChild(del);
+    }
     wrap.appendChild(head);
     if (m.text) {
       var t = document.createElement("div");
@@ -3398,25 +3441,36 @@
       t.textContent = String(m.text);
       wrap.appendChild(t);
     }
-    if (m.image) {
-      var url = Store.imageURL ? Store.imageURL(m.image) : (m.image.dataUrl || "");
-      if (url) {
+    var pics = (m.imgs && m.imgs.length) ? m.imgs : (m.image ? [m.image] : []);
+    if (pics.length) {
+      var u0 = picUrl(pics[0]);
+      if (u0) {
         var iw = document.createElement("div");
         iw.className = "ph-moment-img";
         var im = document.createElement("img");
-        im.src = url; im.alt = "";
+        im.src = u0; im.alt = "";
         iw.appendChild(im);
+        if (pics.length > 1) {
+          var more = document.createElement("span");
+          more.className = "ph-moment-more";
+          more.textContent = "共 " + pics.length + " 张";
+          iw.appendChild(more);
+        }
         wrap.appendChild(iw);
       }
     }
     var vis = document.createElement("div");
     vis.className = "ph-moment-vis";
-    var names = [];
-    (m.lines || []).forEach(function (sid) {
-      var s = sessionById(sid);
-      if (s) names.push(momentLineName(s));
-    });
-    vis.textContent = names.length ? "可见：" + names.join("、") : "（没有可见的线）";
+    if (!isMine) {
+      vis.textContent = "公开";      /* 角色的动态没有「哪几条线可见」，本来就是全部人可见 */
+    } else {
+      var names = [];
+      (m.lines || []).forEach(function (sid) {
+        var s = sessionById(sid);
+        if (s) names.push(momentLineName(s));
+      });
+      vis.textContent = names.length ? "可见：" + names.join("、") : "（没有可见的线）";
+    }
     wrap.appendChild(vis);
     return wrap;
   }

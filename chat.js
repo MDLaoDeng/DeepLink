@@ -2842,7 +2842,19 @@
      每批 4 条，一次打开最多换 5 批；每条左边的「修改」把它填进输入框并唤起键盘。 */
   var QUICK_MAX = 5;
   var QUICK_N = 4;
-  var quick = { open: false, batch: 0, busy: false, items: [], sid: "" };
+  var quick = { open: false, batch: 0, busy: false, items: [], sid: "", ctxKey: "" };
+
+  /* 上下文指纹：条数 + 最后一条的时间 + 版本数 + 当前版本字数，任一项变了就是「聊了一轮」。
+     以前只有「换了会话才重生成」，同一会话里沿用上一批 —— 于是出现用户报的现象：
+     发出去一句、角色回完、再点快捷回复，看到的还是针对【上一句】的那四条。
+     换会话能省一次调用，但省错了地方：真正该复用的情况是「没聊新内容、关掉再开」。 */
+  function quickCtxKey(s) {
+    const ms = (s && s.messages) || [];
+    const last = ms[ms.length - 1] || {};
+    const vs = last.variants || [];
+    const cur = vs[last.vi || 0] || {};
+    return [ms.length, last.ts || 0, vs.length, String(cur.content || "").length].join("|");
+  }
 
   function quickSysText(s) {
     const ch = characterFor(s);
@@ -2960,6 +2972,7 @@
     /* 归属先记上，别等结果回来再记：生成中切会话时，renderMessages 靠 quick.sid 判
        「这批台词不属于当前这条线」并收掉面板。晚一步记，面板就会留在新会话上。 */
     quick.sid = s.id;
+    const key0 = quickCtxKey(s);
     quickRender();
     try {
       await ensureMemoryReady();
@@ -2970,8 +2983,18 @@
       ], { maxTokens: 600 });
       if (res && res.usage && typeof recordUsage === "function") recordUsage(s.id, res.usage, s.characterId, "quickreply");
       quick.items = parseQuickLines((res && res.text) || "");
-      if (quick.items.length) { quick.batch++; }
-      else UI.toast("这次没生成出内容，再点一次「换一批」", true);
+      if (quick.items.length) {
+        /* 生成这段时间里又聊了一轮（或切了会话）→ 这批已经答错题了，丢掉，
+           并把 ctxKey 清空，让下一次打开面板重新生成。 */
+        const nowS = session();
+        if (!nowS || nowS.id !== quick.sid || quickCtxKey(nowS) !== key0) {
+          quick.items = []; quick.ctxKey = "";
+        } else {
+          quick.batch++;
+          quick.ctxKey = key0;
+        }
+      }
+      if (!quick.items.length) UI.toast("这次没生成出内容，再点一次「换一批」", true);
     } catch (e) {
       UI.toast("生成失败：" + (e && e.message ? e.message : e), true);
     } finally {
@@ -3003,10 +3026,16 @@
     el.hidden = false;
     quick.open = true;
     const qb = $("#quickBtn"); if (qb) qb.classList.add("on");
-    /* 换了会话就重新生成；同一会话再打开沿用上一批（省一次调用） */
-    if (quick.sid !== s.id) { quick.batch = 0; quick.items = []; }
+    /* 换会话、或上下文变了（聊了新的一轮 / 重新生成过）→ 作废重来。
+       上下文没变（只是关掉又打开）才沿用上一批，省一次调用。 */
+    if (quick.sid !== s.id || quick.ctxKey !== quickCtxKey(s)) {
+      quick.batch = 0; quick.items = []; quick.sid = s.id; quick.ctxKey = quickCtxKey(s);
+      /* 立刻把「空了」画出来：万一下面 quickGen 被守卫拦住（正在生成 / 没填 Key），
+         屏幕上也不会继续挂着上一轮那四条 —— 那正是用户报的「还是上一条的内容」。 */
+      quickRender();
+    }
     if (!quick.items.length && !quick.busy) quickGen();
-    else quickRender();
+    else if (quick.items.length) quickRender();
   }
 
   /* 按钮自身的置灰状态跟着会话走（切到没记忆的线就变灰，一眼看得出为什么点不动）。
@@ -3698,6 +3727,15 @@
     activeText: activeText, buildGroupSystemText: buildGroupSystemText,
     /* 本轮新增：快捷回复面板 + 继续说（continueFrom = 群聊里指定谁接着说） */
     bindQuickReply: bindQuickReply, continueLast: continueLast, continueFrom: continueFrom,
+    /* 回归用：快捷回复的缓存状态（排查「下一条消息还是上一轮候选」这类问题时，肉眼看着最省事） */
+    quickState: function () {
+      var ss = session();
+      return {
+        sid: quick.sid, key: quick.ctxKey, nowKey: quickCtxKey(ss),
+        n: quick.items.length, batch: quick.batch, busy: !!quick.busy,
+        msgs: ((ss && ss.messages) || []).length
+      };
+    },
     syncContinueRow: syncContinueRow, syncRegenRow: syncRegenRow,
     /* 群聊：对彼此的认知 + 同步到各自线（对话设置里那两个按钮用） */
     peerCogOf: peerCogOf, peerCogText: peerCogText, peerCogOn: peerCogOn,
