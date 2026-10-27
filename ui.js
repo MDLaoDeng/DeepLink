@@ -764,6 +764,16 @@
     const avatar = document.createElement("div");
     avatar.className = "avatar";
     fillAvatar(avatar, msg.role, sessionObj || null, msg);
+    /* 7.1：点角色头像进资料页（还原微信）。群聊按这条的说话人取，自己的头像不进去。 */
+    if (msg.role !== "user") {
+      avatar.classList.add("av-click");
+      avatar.addEventListener("click", function (e) {
+        e.stopPropagation();
+        const d = window.DL || {};
+        const id = msg.speaker || (sessionObj && sessionObj.characterId) || "";
+        if (id && d.profile && d.profile.open) d.profile.open(id);
+      });
+    }
     el.appendChild(avatar);
 
     const bubble = document.createElement("div");

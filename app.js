@@ -2904,6 +2904,12 @@
         const backBtn = document.getElementById("settingsBack");
         if (backBtn) { backBtn.click(); return; }
       }
+      /* 1.84) 角色资料页（#profileLayer，z 430，不是 .modal）：先退子页再关，
+              和手机页同一套「逐级退」约定（7.1） */
+      if (window.DL && DL.profile && typeof DL.profile.isOpen === "function" && DL.profile.isOpen()) {
+        DL.profile.back();
+        return;
+      }
       /* 1.85) 事件簿整页（10-27）：和设置页一样是整页浮层，不在 .modal 里，
               不插这条会被下面「关掉当前弹窗」直接关回主界面。 */
       if (window.DL && typeof DL.eventBookOpen === "function" && DL.eventBookOpen()) {

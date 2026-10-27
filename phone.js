@@ -1665,7 +1665,19 @@
     if (m.role === "user") avUrl = state.settings.phoneAvatarUser || state.settings.avatarUser || "";
     else if (m.speaker) avUrl = avatarOf(charById(m.speaker) || ch, s);
     else avUrl = avatarOf(ch, s);
-    wrap.appendChild(avatarEl(avUrl, m.role === "user" ? "user" : "assistant"));
+    /* 7.1：点对方头像进资料页（还原微信）。群聊按这条的说话人取。 */
+    var avNode = avatarEl(avUrl, m.role === "user" ? "user" : "assistant");
+    if (m.role !== "user") {
+      var pid = m.speaker || (ch && ch.id) || "";
+      if (pid) {
+        avNode.classList.add("av-click");
+        avNode.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          if (window.DL && DL.profile && DL.profile.open) DL.profile.open(pid);
+        });
+      }
+    }
+    wrap.appendChild(avNode);
     var col = document.createElement("div");
     col.className = "ph-col";
     /* 群聊：谁说的，标在气泡上方 */

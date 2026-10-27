@@ -101,6 +101,10 @@
   const K_USAGECAT = "aicode.usagecat.v1";
   /* 手机「动态」：全局一条时间线。可见范围记在每条动态自己的 lines 里（会话 id 数组） */
   const K_MOMENTS = "aicode.moments.v1";
+  /* 社交层（7.1）：好友申请队列。角色的资料字段（Sekulum 号 / 电话 / 备注…）
+     存在角色对象自己的 social 子对象上，见 profile.js 的 ensureSocial。
+     这里只放「谁想加谁、通过没有、从哪儿来的」这类关系事件。 */
+  const K_SOCIAL = "aicode.social.v1";
   const K_AMEM = "aicode.assistantmem.v1";
   const K_BACKUPS = "aicode.backups.v1";
   /* 角色个人图库索引：{ 角色id: [ {id, ref, mime, style, styleName, subject, desc, ts} ] }
@@ -1410,6 +1414,18 @@
     saveMoments(list) {
       if (readError) return false;
       return writeRaw(K_MOMENTS, JSON.stringify(Array.isArray(list) ? list : []));
+    },
+    /* 好友申请队列（7.1）。读失败返回空队列，不覆盖。 */
+    getSocial() {
+      const raw = readRaw(K_SOCIAL);
+      const v = raw === undefined ? null : safeParse(raw, null);
+      if (!v || !Array.isArray(v.reqs)) return { reqs: [] };
+      return { reqs: v.reqs };
+    },
+    saveSocial(obj) {
+      if (readError) return false;
+      const o = (obj && Array.isArray(obj.reqs)) ? obj : { reqs: [] };
+      return writeRaw(K_SOCIAL, JSON.stringify(o));
     },
 
     getAssistantMemory() {
