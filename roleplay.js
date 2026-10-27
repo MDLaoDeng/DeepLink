@@ -1119,6 +1119,19 @@
       ub.dataset.bound = "1";
       ub.addEventListener("click", unlinkSession);
     }
+    /* 性格变化的三个按钮（一次性绑，和上面同批） */
+    const dp = $("#setDriftPlanBtn");
+    if (dp && !dp.dataset.bound) {
+      dp.dataset.bound = "1";
+      dp.addEventListener("click", () => {
+        const r = doDriftPlan();
+        if (r && r.catch) r.catch((e) => UI.toast("规划失败：" + ((e && e.message) || e), true));
+      });
+    }
+    const dt = $("#setDriftToggle");
+    if (dt && !dt.dataset.bound) { dt.dataset.bound = "1"; dt.addEventListener("click", toggleDrift); }
+    const dr = $("#setDriftReset");
+    if (dr && !dr.dataset.bound) { dr.dataset.bound = "1"; dr.addEventListener("click", resetDrift); }
     const cur = s || session();
     sel.innerHTML = "";
     if (!cur) return;
@@ -1217,6 +1230,80 @@
     Store.saveSessions(list);
     fillSessionLinkPick(s);
     UI.toast("已解除关联（原先关联的那几条一起解除）");
+  }
+
+  /* ── 性格变化（10-27 用户口径）──────────────────────────
+     设方向 → AI 排 4~6 周路线 → 按**故事时间**每过一周走一格 → 注入时叠一层。
+     不改角色卡，随时能「恢复原样」。 */
+  function fillDrift(s) {
+    const g = $("#setDriftGoal");
+    const st = $("#setDriftState");
+    const tg = $("#setDriftToggle");
+    const cur = s || session();
+    const d = (cur && cur.drift) || null;
+    if (g) g.value = (d && d.goal) ? d.goal : "";
+    if (tg) tg.textContent = (d && d.on) ? "暂停" : "开始";
+    if (st) {
+      if (!d || !Array.isArray(d.plan) || !d.plan.length) {
+        st.textContent = "还没规划路线。";
+      } else {
+        const i = (window.Memory && Memory.driftStepOf) ? Memory.driftStepOf(cur) : 0;
+        const p = d.plan[Math.max(0, i)] || {};
+        st.textContent = (d.on ? "进行中 · " : "已暂停 · ")
+          + "第 " + (Math.max(0, i) + 1) + " / " + d.plan.length + " 周：" + (p.note || "")
+          + (d.on ? "" : "（点「开始」继续）");
+      }
+    }
+  }
+  async function doDriftPlan() {
+    const s = session();
+    if (!s) return;
+    const goal = String($v("#setDriftGoal") || "").trim();
+    if (!goal) { UI.toast("先写一句「想变成什么样」", true); return; }
+    if (!state.settings.apiKey) { UI.toast("先去设置里填 API Key", true); return; }
+    if (!s.time || typeof s.time.start !== "number") { UI.toast("这条线还没开时间系统 —— 性格变化按故事周走，没时间轴推不动", true); return; }
+    setDisabled("#setDriftPlanBtn", true);
+    setText("#setDriftState", "AI 正在排路线…");
+    try {
+      const r = await Memory.planDrift(s, goal, state.settings);
+      if (r && r.usage) recordUsage(s.id, r.usage, s.characterId, "split");
+      if (!r || !r.plan.length) { setText("#setDriftState", "没排出可用路线，方向写具体一点再试"); return; }
+      Store.updateSession(s.id, {
+        drift: { on: true, goal: goal, plan: r.plan, startStory: Memory.nowOf(s) }
+      });
+      Object.assign(s, Store.getSessions().filter((x) => x.id === s.id)[0] || {});
+      fillDrift(s);
+      UI.toast("已排好 " + r.plan.length + " 周路线，从现在开始走");
+    } catch (e) {
+      setText("#setDriftState", "规划失败：" + ((e && e.message) || e));
+    } finally {
+      setDisabled("#setDriftPlanBtn", false);
+    }
+  }
+  function toggleDrift() {
+    const s = session();
+    if (!s || !s.drift || !Array.isArray(s.drift.plan) || !s.drift.plan.length) {
+      UI.toast("先规划一条路线", true); return;
+    }
+    const d = Object.assign({}, s.drift, { on: !s.drift.on });
+    /* 从暂停恢复：把起点往前推「已走过的周数」×7 天 —— 步数保持不变，
+       但暂停那段时间不再算进去（否则一恢复就连跳好几格）。 */
+    if (!s.drift.on) {
+      const i = Math.max(0, Memory.driftStepOf(s));
+      d.startStory = Memory.nowOf(s) - i * 7 * 86400000;
+    }
+    Store.updateSession(s.id, { drift: d });
+    Object.assign(s, Store.getSessions().filter((x) => x.id === s.id)[0] || {});
+    fillDrift(s);
+    UI.toast(d.on ? "已开始，按故事周慢慢走" : "已暂停（他停在这一周的样子）");
+  }
+  function resetDrift() {
+    const s = session();
+    if (!s) return;
+    Store.updateSession(s.id, { drift: null });
+    delete s.drift;
+    fillDrift(s);
+    UI.toast("已恢复原样（角色卡一直没动过）");
   }
 
   function fillCharacterForm(ch) {
@@ -1860,6 +1947,7 @@
       setVal("#setSessionMyGender", s.myGender || "");
       /* 时间域关联下拉（10-27）：列其他线，标出哪些已经关联过 */
       try { fillSessionLinkPick(s); } catch (e) { /* 没有时间系统的线也可能被打开，忽略 */ }
+      try { fillDrift(s); } catch (e) { /* 同上 */ }
       setChecked("#setSessionAutoFreeze", !!s.autoFreeze);
       setChecked("#setSessionAutoBackup", !!s.autoBackup);
       /* 主动发消息：跟随全局 / 允许 / 不允许 */
@@ -2418,15 +2506,17 @@
       });
       s.worldLog.push({ date: day, text: body, mentions: mentions, source: "live", at: Date.now() });
       n++;
-      /* 事件簿：每段一条「剧情」，时间点落在当天中午，免得和消息时间打架 */
+      /* 事件簿：每段一条「剧情」，时间点落在当天中午，免得和消息时间打架。
+         ⚠️ 这里**直接写 s.events**，不走 DL.pushEvent —— 那个会 getSessions/saveSessions，
+         而 applyWorld 手上还攥着旧的 list 引用，等下 saveSessions(list) 会把刚写的冲掉。 */
       try {
-        const t = new Date(day + "T12:00:00").getTime();
-        if (window.DL && DL.pushEvent) {
-          DL.pushEvent(s.id, {
-            t: t, kind: "world", source: "live", mentions: mentions,
-            text: body.replace(/\s+/g, " ").slice(0, 200)
-          });
-        }
+        if (!Array.isArray(s.events)) s.events = [];
+        s.events.push({
+          t: new Date(day + "T12:00:00").getTime(),
+          kind: "world", source: "live", mentions: mentions.slice(0, 8),
+          text: body.replace(/\s+/g, " ").slice(0, 600), at: Date.now()
+        });
+        if (s.events.length > 500) s.events = s.events.slice(-500);
       } catch (e) { /* 事件写失败不影响剧情采纳 */ }
     });
     if (s.worldLog.length > 200) s.worldLog = s.worldLog.slice(-200);
@@ -2453,12 +2543,56 @@
             const c2 = characterFor(o);
             nm = (c2 && c2.name) || "";
           } catch (err) { nm = ""; }
-          out.push({ t: e.t, text: String(e.text || ""), source: e.source, name: nm });
+          out.push({ t: e.t, text: String(e.text || ""), source: e.source, name: nm, chId: o.characterId || "" });
         });
       });
     } catch (e) { /* 读不到就当没有 */ }
     out.sort((a, b) => b.t - a.t);
     return out.slice(0, maxN || 20);
+  }
+
+  /* ── 跨角色传播（10-27 用户口径）────────────────────────────
+     信任/好感/关系决定「别人那儿发生的事，他会不会跟你说」。
+     时机只挑两个：离线剧情生成后（这里）、手动同步（还没做）。
+     平时对话只读关系表、不落传播 —— 每轮都算会让 token 和一致性一起失控。
+
+     判定用的是「本线角色对那个人的信任」：
+       trust ≥ 45  会主动说起  → 落一条 heard 事件（事件簿里显示「转述」）
+       trust 25~44 被问才说    → 不落（他记得，但不会主动讲）
+       trust < 25  不说        → 不落
+
+     亲历 / 听说的处理按用户口径：
+       · 对方那条是 live（他亲自在场/通话/看到）→ 生成剧情时已经作为「已知事实」注入，
+         AI 写出来的内容自然会把两件事揉在一起（加班 + 心里烦喝了一点），这就是「融合」。
+       · 对方那条是 heard（他自己也只是听说）→ 并存，本线这条带上「听说」标记，不覆盖任何东西。 */
+  function spreadHeard(s) {
+    if (!s) return 0;
+    const ch = characterFor(s);
+    if (!ch) return 0;
+    const xm = crossMentions(s, ch, 7, 20);
+    if (!xm.length) return 0;
+    const rel = (s.rel && typeof s.rel === "object") ? s.rel : {};
+    const events = Array.isArray(s.events) ? s.events : [];
+    let n = 0;
+    xm.forEach((x) => {
+      if (!x.chId || x.chId === ch.id) return;
+      const r = rel[x.chId];
+      const trust = (r && typeof r.trust === "number") ? r.trust : 0;
+      if (trust < 45) return;
+      const line = "从「" + (x.name || "别人") + "」那边听来的：" + x.text;
+      /* 去重：同一条听来的事只落一次（每次生成剧情都会回读到它） */
+      for (let i = 0; i < events.length; i++) {
+        if (events[i] && events[i].kind === "spread" && String(events[i].text || "").indexOf(x.text.slice(0, 40)) >= 0) return;
+      }
+      if (window.DL && DL.pushEvent) {
+        const ok = DL.pushEvent(s.id, {
+          t: x.t, kind: "spread", source: "heard",
+          mentions: [x.chId], text: line
+        });
+        if (ok) n++;
+      }
+    });
+    return n;
   }
 
   function applyWorld(sid, text) {
@@ -2479,7 +2613,10 @@
     list[i].updatedAt = Date.now();
     /* 离线这段时间已经用剧情交代过了 → 以此刻为新基准重新起算，旧锚点作废 */
     if (Memory && Memory.rebaseTime) Memory.rebaseTime(list[i], "world");
+    /* 先落库，再做传播 —— 传播走 pushEvent（它会自己 getSessions/saveSessions），
+       顺序反了会被这里的 saveSessions(list) 覆盖掉。 */
     Store.saveSessions(list);
+    try { spreadHeard(list[i]); } catch (e) { console.warn("[DeepLink] 传播判断失败", e); }
     /* 剧情里若写了「角色用手机给你发了消息」，手机页也要补上对应时间点的文本（用户口径）。
        异步做、不挡采纳动作本身；出问题只打日志，绝不影响已经采纳的剧情。 */
     try { fillPhoneFromWorld(sid, txt); } catch (e) { console.warn("[DeepLink] 手机页同步失败", e); }

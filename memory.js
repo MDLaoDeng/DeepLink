@@ -452,6 +452,50 @@
     return lines.join("\n");
   }
 
+  /* ── 性格变化（10-27 用户口径）────────────────────────────
+     session.drift = { on, goal, plan: [{w, note}], startStory }
+     **一点不动角色卡** —— 只在提示词里叠一层「这一周的他」，关掉就回到原始性格。
+     步进按**故事时间**算（每 7 天进一格），不绑周压 —— 周压要攒够 7 个日摘要才跑，
+     聊得少可能两周都不触发，绑它节奏就断了。 */
+  function driftStepOf(s) {
+    const d = s && s.drift;
+    if (!d || !d.on || !Array.isArray(d.plan) || !d.plan.length) return -1;
+    const start = (typeof d.startStory === "number") ? d.startStory : null;
+    if (start == null) return 0;
+    const wk = Math.floor((nowOf(s) - start) / (7 * 86400000));
+    return Math.max(0, Math.min(d.plan.length - 1, wk));
+  }
+  function driftLine(s) {
+    const i = driftStepOf(s);
+    if (i < 0) return "";
+    const d = s.drift;
+    const p = d.plan[i] || {};
+    if (!p.note) return "";
+    return "第 " + (i + 1) + " 周（共 " + d.plan.length + " 周）：" + p.note;
+  }
+  /* 规划：AI 按当前性格 + 目标方向排一条 4~6 周的路线 */
+  async function planDrift(s, goal, settings) {
+    if (!s || !goal) return null;
+    const ch = charListFor().filter(function (c) { return c && c.id === s.characterId; })[0] || null;
+    const f = (ch && ch.fields) || {};
+    const user = "角色：" + ((ch && ch.name) || "他") +
+      "\n现在的性格：" + (f.aiPersona || "（未填）") +
+      "\n说话风格：" + (f.aiStyle || "（未填）") +
+      "\n当前关系：" + (s.relation || "（未填）") +
+      "\n\n希望变成的样子：" + String(goal || "").trim();
+    const out = await summarize(settings, CONFIG.COMPRESS_PROMPTS.driftPlan, user, 700);
+    const got = parseJsonObject(out.text);
+    const arr = Array.isArray(got.weeks) ? got.weeks : [];
+    const plan = [];
+    arr.forEach(function (x, i) {
+      const note = String((x && x.note) || "").trim();
+      if (!note) return;
+      plan.push({ w: plan.length + 1, note: note.slice(0, 40) });
+    });
+    if (!plan.length) return { usage: out.usage, plan: [] };
+    return { usage: out.usage, plan: plan.slice(0, 6) };
+  }
+
   function buildSystemText(ch, s, settings, opts) {
     if (!ch) return "";
     const o = opts || {};
@@ -503,6 +547,14 @@
     if (f.aiStyle) L.push("说话风格：" + f.aiStyle);
     if (f.aiHealth) L.push("身体状况：" + f.aiHealth);
     if (f.aiPeriod) L.push("生理期（上次第一天）：" + f.aiPeriod);
+    const _df = driftLine(s);
+    if (_df) {
+      L.push("");
+      L.push("【性格变化（正在进行）】");
+      L.push("他这一次走到了：" + _df);
+      L.push("表现上要比上面写的原始性格更靠近这个方向，但**只到这一步** ——" +
+        "不要一次变太多，也不要退回原样；嘴上可以还硬，行为上已经松了一点。");
+    }
     /* 世界观只注入一份：角色卡自己填了就用它，没填才用「我的人设」里选中的那套。
        两份一起给，模型会自己揉一个折中版本 —— 那比不填更糟。 */
     const _world = worldFor(ch, settings);
@@ -1390,7 +1442,7 @@
     return { ok: true, usage: out.usage };
   }
 
-  window.Memory = { buildSystemText, worldFor, relOf, relLine, initRel, personaText, memoryText, memoryForPrompt, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, createFields, correctMemory, activePersona,
+  window.Memory = { buildSystemText, worldFor, relOf, relLine, initRel, driftLine, driftStepOf, planDrift, personaText, memoryText, memoryForPrompt, allMsgs, runCompression, reCompress, ensureMemory, updateCognition, updateRelationShared, updateScene, dailyRefresh, recentTranscript, ensureFilter, ensureCtxWash, applyFilter, generateFilterRule, splitCharacterFields, createFields, correctMemory, activePersona,
     /* 表情 → 可读说明（10-19）：手机那边有自己的 msgText，也要用同一套翻译，
        否则模型收到的是 [[s:xxx]] 这种原始标记 */
     emojiReadable, msgText,

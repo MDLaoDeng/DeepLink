@@ -905,6 +905,19 @@
           <b>这两项缺一个就算不出时段，也就开不了时间系统</b>。开了之后<b>年龄会随故事时间增长</b>，时段跟着往后移。
           出生日期填成 <b>0 年 0 月 0 日</b> 是唯一例外：无限年龄，不做时段限制。</p>
 
+        <div class="field" id="setDriftRow">
+          <span>性格变化（让他慢慢变成另一个样子）</span>
+          <input id="setDriftGoal" type="text" placeholder="例：从冷淡慢慢变得会依赖人，但嘴上还是硬">
+          <div class="char-actions" style="justify-content:flex-start">
+            <button id="setDriftPlanBtn" class="btn ghost mini" type="button">规划路线</button>
+            <button id="setDriftToggle" class="btn ghost mini" type="button">开始</button>
+            <button id="setDriftReset" class="btn ghost mini" type="button">恢复原样</button>
+          </div>
+          <div id="setDriftState" class="hint"></div>
+          <p class="hint">点「规划路线」让 AI 排一条 4~6 周的变化表，之后<b>按故事时间每过一周走一格</b>（和聊天频率无关）。
+            <b>不改角色卡</b>，只在提示词里叠一层 —— 点「恢复原样」立刻回去。这里也会消耗一次调用。</p>
+        </div>
+
         <div class="mem-title">离线原因（前提：开着时间系统）</div>
         <label class="field"><span>离开应用时按这条来写（只能选，想加去 设置 → 高级功能）</span><select id="setSessionReason"></select></label>
         <label class="check-field"><input type="checkbox" id="setReasonLock"><span>锁定：以后不管怎么离线都按这条算（防止手滑清后台）</span></label>
