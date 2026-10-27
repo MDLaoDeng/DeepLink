@@ -885,6 +885,20 @@
             10 月 15 日聊的内容就变成 9 月 9 日。真实时间也会留着，搜索时可以选按哪种时间。</p>
         </div>
         <div id="sessionTimeLine" class="hint"></div>
+        <div class="field" id="setSessionLinkRow">
+          <span>时间域关联（把这条线和别人的线接成同一个世界）</span>
+          <div class="cf-persona-row">
+            <select id="setSessionLinkPick"></select>
+          </div>
+          <div class="char-actions" style="justify-content:flex-start">
+            <button id="setSessionLinkBtn" class="btn ghost" type="button">关联</button>
+            <button id="setSessionUnlinkBtn" class="btn ghost" type="button" hidden>解除关联</button>
+          </div>
+          <div id="setSessionLinkState" class="hint"></div>
+          <p class="hint">关联之后两条线<b>共用一个时间轴</b>：冻结 / 解冻一起，故事里的日期也一致。
+            前提是两边世界观差不多 —— 差太多会拒绝（由 AI 判断）。
+            <b>关联会把这条线的时间基准对齐到对方</b>，已经聊过的消息日期按固化值不变。</p>
+        </div>
         <label class="check-field"><input type="checkbox" id="setSessionAutoFreeze"><span>混搭模式：离线自动冻结时间，上线后发第一条消息时解冻（仅本线）</span></label>
         <p class="hint">设好之后，故事时间就按 1:1 跟着现实走。也可以在聊天框里直接写「（第二天）」「（到了约定时间）」把它推过去。
           合法时段由角色的<b>出生日期 + 年龄</b>算出来（例：2012-02-10 出生、年龄写 12 → 只能落在 2024-02-10 ~ 2025-02-10 之间）；

@@ -1098,6 +1098,127 @@
     }
   }
 
+  /* ── 时间域关联（10-27）──────────────────────────────────
+     两条线挂同一个 session.linkGroup，就是「同一个世界的两个人」：
+     时间基准对齐、冻结解冻一起。前提是世界观差不多 —— 文本一模一样直接过，
+     有差异就交给 AI 判一次（几百 token），判过的组不再重判。 */
+  function linkGroupOf(s) { return (s && s.linkGroup) || ""; }
+  function fillSessionLinkPick(s) {
+    const sel = $("#setSessionLinkPick");
+    if (!sel) return;
+    const btn = $("#setSessionLinkBtn");
+    if (btn && !btn.dataset.bound) {
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", () => {
+        const r = doSessionLink();
+        if (r && r.catch) r.catch((e) => UI.toast("关联失败：" + ((e && e.message) || e), true));
+      });
+    }
+    const ub = $("#setSessionUnlinkBtn");
+    if (ub && !ub.dataset.bound) {
+      ub.dataset.bound = "1";
+      ub.addEventListener("click", unlinkSession);
+    }
+    const cur = s || session();
+    sel.innerHTML = "";
+    if (!cur) return;
+    const list = Store.getSessions().filter((o) => o && o.id !== cur.id && characterFor(o));
+    if (!list.length) {
+      const o = document.createElement("option");
+      o.value = ""; o.textContent = "（还没有别的线）";
+      sel.appendChild(o);
+      return;
+    }
+    list.forEach((o) => {
+      const ch = characterFor(o);
+      const g = linkGroupOf(o);
+      const same = linkGroupOf(cur) && g && linkGroupOf(cur) === g;
+      const opt = document.createElement("option");
+      opt.value = o.id;
+      opt.textContent = (ch ? ch.name : "角色") + " · " + (o.mainLine ? "主线" : (o.title || "支线"))
+        + (same ? "（已关联）" : (g ? "（已与别人关联）" : ""));
+      sel.appendChild(opt);
+    });
+    const st = $("#setSessionLinkState");
+    const un = $("#setSessionUnlinkBtn");
+    if (un) un.hidden = !linkGroupOf(cur);
+    if (st) {
+      if (!linkGroupOf(cur)) st.textContent = "这条线还没关联任何线。";
+      else {
+        const names = Store.getSessions()
+          .filter((o) => o && o.id !== cur.id && linkGroupOf(o) === linkGroupOf(cur))
+          .map((o) => { const c = characterFor(o); return (c ? c.name : "角色") + " · " + (o.mainLine ? "主线" : (o.title || "支线")); });
+        st.textContent = names.length
+          ? ("已关联：" + names.join("、"))
+          : "已关联（对方线可能已删除）";
+      }
+    }
+  }
+
+  async function judgeSameWorld(w1, w2) {
+    const r = await Api.summarize(state.settings, [
+      { role: "system", content: "你在判断两段世界观设定是否属于同一个世界：时代、地点、有没有超自然力量、社会结构是否相容。只输出一个字：是 或 否。不要解释、不要标点。" },
+      { role: "user", content: "A：" + w1 + "\n\nB：" + w2 }
+    ], { maxTokens: 16 });
+    return /是/.test(String((r && r.text) || ""));
+  }
+
+  async function doSessionLink() {
+    const s = session();
+    if (!s) return;
+    const sel = $("#setSessionLinkPick");
+    const targetId = sel ? sel.value : "";
+    if (!targetId) { UI.toast("先在角色页里再建一个角色、开一条线", true); return; }
+    const ch1 = characterFor(s);
+    const list = Store.getSessions();
+    const o = list.filter((x) => x.id === targetId)[0];
+    if (!o || !ch1) return;
+    const ch2 = characterFor(o);
+    if (!ch2) { UI.toast("对方那条线没有角色卡", true); return; }
+    if (!s.time || typeof s.time.start !== "number" || !o.time || typeof o.time.start !== "number") {
+      UI.toast("两条线都要开着时间系统才能接时间域", true); return;
+    }
+    const w1 = String((ch1.fields && ch1.fields.world) || "").trim();
+    const w2 = String((ch2.fields && ch2.fields.world) || "").trim();
+    let same = (w1 === w2);
+    if (!same) {
+      if (!state.settings.apiKey) { UI.toast("两边世界观不一样，需要 AI 判断（先去填 API Key）", true); return; }
+      UI.toast("两边世界观不太一样，正在让 AI 判断能不能接…");
+      try { same = await judgeSameWorld(w1 || "（未填）", w2 || "（未填）"); } catch (e) { same = false; }
+    }
+    if (!same) { UI.toast("两条线的世界观差太多，接不成同一个世界", true); return; }
+    const ok = await UI.confirmDialog("关联时间域",
+      "会把「" + (ch1.name || "这条线") + "」和「" + (ch2.name || "对方") + "」接成同一个世界：\n" +
+      "· 冻结 / 解冻一起；\n· 故事时间以「" + (ch2.name || "对方") + "」那条线为准对齐（已经聊过的消息日期不变）；\n" +
+      "· 之后两条线在故事里是同时进行的。\n\n确定吗？");
+    if (!ok) return;
+    /* 对齐：先把对方线的历史固化，再以对方 offset 为准改本线 —— 反过来也行，
+       但以「对方」为准更符合「我这条线加入他的世界」的直觉。 */
+    try { Memory.sealTimes(o); } catch (e) { /* ignore */ }
+    try { Memory.sealTimes(s); } catch (e) { /* ignore */ }
+    const off = o.time.start - o.time.setAt;
+    const now = Date.now();
+    s.time.start = now + off;
+    s.time.setAt = now;
+    const g = linkGroupOf(o) || ("g_" + Date.now().toString(36));
+    o.linkGroup = g;
+    s.linkGroup = g;
+    Store.saveSessions(list);
+    fillSessionLinkPick(s);
+    UI.toast("已接成同一个时间域（冻 / 解一起）");
+  }
+
+  function unlinkSession() {
+    const s = session();
+    if (!s || !s.linkGroup) { UI.toast("这条线还没关联", true); return; }
+    const g = s.linkGroup;
+    const list = Store.getSessions();
+    list.forEach((o) => { if (o && o.linkGroup === g) delete o.linkGroup; });
+    Store.saveSessions(list);
+    fillSessionLinkPick(s);
+    UI.toast("已解除关联（原先关联的那几条一起解除）");
+  }
+
   function fillCharacterForm(ch) {
     try {
       resetCharSplit();
@@ -1737,6 +1858,8 @@
       /* 本线年龄 + 混搭模式（10-20） */
       setVal("#setSessionAge", s.age == null ? "" : String(s.age));
       setVal("#setSessionMyGender", s.myGender || "");
+      /* 时间域关联下拉（10-27）：列其他线，标出哪些已经关联过 */
+      try { fillSessionLinkPick(s); } catch (e) { /* 没有时间系统的线也可能被打开，忽略 */ }
       setChecked("#setSessionAutoFreeze", !!s.autoFreeze);
       setChecked("#setSessionAutoBackup", !!s.autoBackup);
       /* 主动发消息：跟随全局 / 允许 / 不允许 */
