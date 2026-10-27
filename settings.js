@@ -1387,7 +1387,7 @@
     setVal("#setPhoneBgBlur", typeof s.phoneBgBlur === "number" ? s.phoneBgBlur : 0);
     setVal("#setPhoneBgBright", typeof s.phoneBgBright === "number" ? s.phoneBgBright : 100);
     /* 启动动画：动画套系 / 文字 / 图片 / 角色头像 */
-    setVal("#setSplashAnim", String(s.splashAnim == null ? "1" : s.splashAnim));
+    setVal("#setSplashAnim", String(s.splashAnim == null ? "0" : s.splashAnim));
     setVal("#setSplashText", s.splashText || "");
     setVal("#setSplashSub", s.splashSub || "");
     setVal("#setSplashImage", s.splashImage || "");
