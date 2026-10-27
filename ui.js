@@ -1377,7 +1377,14 @@
       document.head.appendChild(themeStyleEl);
     }
     themeStyleEl.textContent = ":root{" +
-      Object.keys(vars).map((k) => k + ":" + vars[k]).join(";") + "}";
+      Object.keys(vars).map((k) => k + ":" + vars[k]).join(";") +
+      /* 骨架常量（字号/圆角/间距/时长）跟主题变量一起注入（7.1）。
+         切主题每次都重写这段，所以不用单独注入一次。 */
+      (function () {
+        const t = window.CONFIG.TOKENS || {};
+        const ks = Object.keys(t);
+        return ks.length ? ";" + ks.map((k) => k + ":" + t[k]).join(";") : "";
+      })() + "}";
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", theme[m][0]);
     return theme.id;

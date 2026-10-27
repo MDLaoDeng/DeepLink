@@ -1178,6 +1178,28 @@
     DEFAULT_SYSTEM_PROMPT,
     THEMES,
     THEME_VARS,
+    /* 与主题无关的骨架常量（7.1）：字号 / 圆角 / 间距 / 时长。
+       由 ui.js 的 applyTheme 跟主题变量一起注入 :root —— 同样不能写进 css 文件
+       （封装工具会剥样式表）。改这里等于改全站节奏，别在别处硬编码数值。
+       字号只留 4 级：12 说明 / 14 正文 / 17 标题 / 26 大字。
+       圆角只留 3 档 + 胶囊：8 内层 / 12 控件 / 20 容器。 */
+    TOKENS: {
+      "--fs-caption": "12px",
+      "--fs-body": "14px",
+      "--fs-title": "17px",
+      "--fs-hero": "26px",
+      "--r-sm": "8px",
+      "--r-md": "12px",
+      "--r-lg": "20px",
+      "--sp-1": "4px",
+      "--sp-2": "8px",
+      "--sp-3": "12px",
+      "--sp-4": "16px",
+      "--sp-6": "24px",
+      "--dur-fast": "150ms",
+      "--dur-base": "220ms",
+      "--ease-out": "cubic-bezier(.22, 1, .36, 1)"
+    },
     MODES,
     SEARXNG_INSTANCES,
     ROLEPLAY_PROMPT,
