@@ -488,6 +488,86 @@
     return wrap;
   }
 
+  /* ④ 新的朋友（好友申请列表）—— 手机页列表顶部那个入口进来 */
+  function requestsView() {
+    var wrap = el("div", "pf-page");
+    wrap.appendChild(head("新的朋友", function () { close(); }));
+    var list = pendingReqs();
+    if (!list.length) {
+      wrap.appendChild(el("div", "pf-empty-box", "没有新的申请。"));
+      return wrap;
+    }
+    list.forEach(function (r) {
+      var from = charById(r.from);
+      var item = el("div", "pf-req");
+      var av = el("div", "pf-req-av");
+      var src = from ? avatarUrl(from.avatar) : "";
+      if (src) { var im = el("img"); im.src = src; im.alt = ""; av.appendChild(im); }
+      else av.innerHTML = icon("account");
+      item.appendChild(av);
+      var tx = el("div", "pf-req-tx");
+      tx.appendChild(el("div", "pf-req-name", (from ? showName(from) : "未知角色") + " 想加你为好友"));
+      tx.appendChild(el("div", "pf-req-via", r.via ? ("来自群聊「" + r.via + "」") : "手动发起"));
+      item.appendChild(tx);
+      var acts = el("div", "pf-req-acts");
+      var ok = el("button", "btn primary mini", "同意");
+      ok.type = "button";
+      ok.addEventListener("click", function () {
+        acceptReq(r.id);
+        if (U().toast) U().toast("已添加");
+        render();
+      });
+      var no = el("button", "btn ghost mini", "忽略");
+      no.type = "button";
+      no.addEventListener("click", function () {
+        rejectReq(r.id);
+        render();
+      });
+      acts.appendChild(ok); acts.appendChild(no);
+      item.appendChild(acts);
+      wrap.appendChild(item);
+    });
+    return wrap;
+  }
+
+  /* ⑤ 群聊里互相加好友（7.1）
+     触发：建群成功后调一次。判定用规则，不调模型 ——
+     建群是低频事件但一次可能牵动好几对成员，每对问一次模型既慢又贵，
+     而且「谁加谁」这件事本来就有很强的社交直觉，规则能覆盖：
+       · 同一个群里 = 有交集，这是「事件」；
+       · 性格外向的先迈这一步（关键词），内向的只有一半概率；
+       · 已经互相是好友（有过 accepted 记录）的不重复申请。 */
+  var OUTGOING = ["开朗", "热络", "健谈", "主动", "热情", "话多", "外向", "自来熟", "活泼"];
+  function maybeGroupFriending(sid) {
+    var g = null;
+    (S().getSessions() || []).forEach(function (x) { if (x.id === sid) g = x; });
+    if (!g || !g.isGroup) return 0;
+    var ms = (g.members || []).map(function (m) {
+      return (m && typeof m === "object") ? (m.id || m.characterId || "") : m;
+    }).filter(Boolean);
+    if (ms.length < 2) return 0;
+    var accepted = {};
+    reqs().forEach(function (r) {
+      if (r.status === "accepted") { accepted[r.from + ">" + r.to] = 1; accepted[r.to + ">" + r.from] = 1; }
+    });
+    var title = g.title || "群聊";
+    var n = 0;
+    for (var i = 0; i < ms.length; i++) {
+      for (var j = 0; j < ms.length; j++) {
+        if (i === j) continue;
+        var a = ms[i], b = ms[j];
+        if (accepted[a + ">" + b]) continue;
+        var cha = charById(a);
+        if (!cha) continue;
+        var persona = String((cha.fields && cha.fields.aiPersona) || "");
+        var eager = OUTGOING.some(function (k) { return persona.indexOf(k) >= 0; });
+        if (!eager && Math.random() > 0.5) continue;
+        if (requestFriend(a, b, title, "group")) n++;
+      }
+    }
+    return n;
+  }
+
   /* ── 自绘输入层（不用原生 prompt，也不复用 askDialog）──────────
      为什么不用 UI.askDialog：它把空串当取消（为了别的调用点方便），
      而这里「清空备注」是个正当需求。自己开一层，语义就清楚了：
@@ -533,9 +613,10 @@
   function render() {
     var L = ensureLayer();
     if (!L || L.hidden) return;
+    L.innerHTML = "";
+    if (view === "requests") { L.appendChild(requestsView()); L.scrollTop = 0; return; }
     var ch = charById(curId);
     if (!ch) { close(); return; }
-    L.innerHTML = "";
     var node = view === "detail" ? detailView(ch)
       : (view === "moments" ? momentsView(ch) : mainView(ch));
     L.appendChild(node);
@@ -546,6 +627,16 @@
   function openMain() { view = "main"; render(); }
   function openDetail() { view = "detail"; render(); }
   function openMoments() { view = "moments"; render(); }
+  /* 新的朋友：不带角色上下文，单独一层 */
+  function openRequests() {
+    var L = ensureLayer();
+    if (!L) return false;
+    curId = ""; view = "requests"; L.hidden = false;
+    var app = document.getElementById("app");
+    if (app) app.style.visibility = "hidden";
+    render();
+    return true;
+  }
 
   function open(chId) {
     if (!chId) return false;
@@ -575,6 +666,7 @@
   /* 返回键：逐级退（资料页内 → 资料页主视角 → 关闭），对齐手机页那套约定 */
   function back() {
     if (!isOpen()) return false;
+    if (view === "requests") { close(); return true; }
     if (view === "detail" || view === "moments") { openMain(); return true; }
     close();
     return true;
@@ -588,7 +680,8 @@
     commonGroups: commonGroups,
     momentsOf: momentsOf, addCharMoment: addCharMoment,
     requestFriend: requestFriend, pendingReqs: pendingReqs,
-    acceptReq: acceptReq, rejectReq: rejectReq
+    acceptReq: acceptReq, rejectReq: rejectReq,
+    openRequests: openRequests, maybeGroupFriending: maybeGroupFriending
   };
   (window.__dlScripts = window.__dlScripts || []).push("profile.js");
 })();

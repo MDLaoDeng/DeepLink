@@ -1855,6 +1855,9 @@
       Memory.dailyRefresh(s, saveSession, state.settings, base).then((usage) => {
         if (usage) recordUsage(null, usage, s.characterId || "", "daily");
         if (notify) UI.toast("本日场景 / 关系 / 经历已更新");
+        /* 7.1 角色自发动态：日更跑完再问一句「今天有没有想发的」。
+           放在这里而不是定时器：日更本来一天一次，跟着它走就不会刷屏。 */
+        try { if (window.DL && DL.maybeCharMoment) DL.maybeCharMoment(s.id); } catch (e) { /* ignore */ }
       }).catch(() => {}).finally(() => { dailyBusy = false; });
     } catch (e) { dailyBusy = false; }
   }

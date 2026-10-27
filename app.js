@@ -1312,6 +1312,9 @@
       /* 手机页可能正开着：让它重画列表，否则新建的群要退出去再进来才看得见 */
       try { if (window.DL && DL.refreshList) DL.refreshList(); } catch (e) { /* ignore */ }
       UI.toast("手机群建好了，去「手机角色」那一栏里进去");
+      /* 7.1：群里的人互相加好友。规则判定（外向的先加 / 内向的一半概率），不调模型 ——
+         建群一次可能牵动好几对成员，每对问一次模型既慢又贵。 */
+      try { if (window.DL && DL.profile && DL.profile.maybeGroupFriending) DL.profile.maybeGroupFriending(s.id); } catch (e) { /* ignore */ }
       return;
     }
     Store.updateSession(s.id, { isGroup: true, members: ids, title: title, memberLine: memberLine });
@@ -1324,6 +1327,9 @@
     UI.closeModal("groupModal");
     renderAll();
     UI.toast("群聊建好了");
+      /* 7.1：群里的人互相加好友。规则判定（外向的先加 / 内向的一半概率），不调模型 ——
+         建群一次可能牵动好几对成员，每对问一次模型既慢又贵。 */
+      try { if (window.DL && DL.profile && DL.profile.maybeGroupFriending) DL.profile.maybeGroupFriending(s.id); } catch (e) { /* ignore */ }
   }
 
   /* 把一条线的记忆导进群聊。用户拍板的口径：

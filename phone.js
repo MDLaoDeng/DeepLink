@@ -841,10 +841,39 @@
   }
 
   /* ── 列表视图（类微信：按角色 / 线）────────────────── */
+  /* 新的朋友入口行（7.1） */
+  function appendNewFriendRow(box) {
+    if (!(window.DL && DL.profile && DL.profile.pendingReqs)) return;
+    var pend = DL.profile.pendingReqs() || [];
+    if (!pend.length) return;
+    var nf = document.createElement("div");
+    nf.className = "ph-newfriend";
+    var ic = document.createElement("span");
+    ic.className = "ph-nf-ic";
+    ic.innerHTML = UI.iconSvg("account-group");
+    nf.appendChild(ic);
+    var tx = document.createElement("div");
+    tx.className = "ph-nf-tx";
+    var t1 = document.createElement("b"); t1.textContent = "新的朋友";
+    var t2 = document.createElement("i"); t2.textContent = pend.length + " 条申请";
+    tx.appendChild(t1); tx.appendChild(t2);
+    nf.appendChild(tx);
+    var bd = document.createElement("span");
+    bd.className = "ph-nf-badge";
+    bd.textContent = String(pend.length);
+    nf.appendChild(bd);
+    nf.addEventListener("click", function () {
+      if (DL.profile.openRequests) DL.profile.openRequests();
+    });
+    box.appendChild(nf);
+  }
+
   function renderList() {
     var box = $("#phoneList");
     if (!box) return;
     box.innerHTML = "";
+    /* 7.1 新的朋友：有待处理的好友申请才显示，排在列表最上面（像微信） */
+    try { appendNewFriendRow(box); } catch (e) { /* ignore */ }
     var chs = Store.getCharacters();
     var sess = Store.getSessions();
     var rows = [];
@@ -3266,6 +3295,57 @@
   function closeMoments() {
     goList();
   }
+  /* ── 角色自发动态（7.1）────────────────────────────────
+     挂在「日更」后面跑：一天最多 2 条，由性格 + 今天发生的事决定发不发。
+     一次调用同时做「判定」和「写文案」—— 拆成两次会多花一倍钱，
+     而且先判再写常出现「判了要发、写出来却是废话」。
+     关掉：settings.charAutoMoment = false。 */
+  var momentBusy = false;
+  function maybeCharMoment(sid) {
+    try {
+      var s = sessionById(sid);
+      if (!s || s.isGroup || s.phoneOnly) return;
+      var ch = characterFor(s);
+      if (!ch) return;
+      if (state.settings.charAutoMoment === false) return;
+      if (!state.settings.apiKey) return;
+      if (momentBusy) return;
+      if (!(window.Api && Api.summarize)) return;
+      if (!(window.DL && DL.profile && DL.profile.addCharMoment)) return;
+      /* 今天已经发够 2 条就不再问模型 */
+      var d0 = new Date(); d0.setHours(0, 0, 0, 0);
+      var mine = (Store.getMoments() || []).filter(function (m) {
+        return m && m.who === ch.id && (m.ts || 0) >= d0.getTime();
+      });
+      if (mine.length >= 2) return;
+      momentBusy = true;
+      var f = ch.fields || {};
+      var ctx = [
+        f.aiPersona ? ("性格：" + f.aiPersona) : "",
+        f.aiLikes ? ("喜好：" + f.aiLikes) : "",
+        s.rel ? ("现在的关系：" + s.rel) : "",
+        s.scene ? ("今天的事：" + s.scene) : "",
+        s.shared ? ("最近：" + s.shared) : ""
+      ].filter(Boolean).join("\n").slice(0, 900);
+      var prompt = "你在扮演下面这个人。现在是晚上，他可能会在自己手机上发一条朋友圈。\n\n" +
+        ctx + "\n\n规则：\n" +
+        "· 只写他自己想让人看见的，不要对话、不要旁白、不要解释。\n" +
+        "· 一句话，不超过 40 字，口语，像随手发的。\n" +
+        "· 今天没有值得发的事，就别发 —— 宁可空一天。\n" +
+        "· 只输出两种格式之一：\n  发：<那句话>\n  不发\n";
+      Api.summarize(state.settings, [{ role: "user", content: prompt }]).then(function (r) {
+        if (r && r.usage && typeof recordUsage === "function") recordUsage(null, r.usage, ch.id, "moment");
+        var t = String((r && r.content) || "").trim();
+        var mt = /^发[:：]\s*(.+)$/m.exec(t);
+        if (!mt) return;
+        var txt = mt[1].trim().replace(/^["「『]|["」』]$/g, "").slice(0, 80);
+        if (!txt) return;
+        DL.profile.addCharMoment(ch.id, txt, []);
+      }).catch(function () { /* 发不出来不影响别的 */ })
+        .finally(function () { momentBusy = false; });
+    } catch (e) { momentBusy = false; }
+  }
+
   function momentLineName(s) {
     if (!s) return "";
     if (s.isGroup) return s.title || "群聊";
@@ -3622,6 +3702,8 @@
     deletePhoneMessage: function (msg) { return deletePhoneMsg(ps.sid, msg); },
     splitSpeakers: function (t, s) { return splitPhoneSpeakers(t, s); },
     syncPhoneOpening: function () { return syncPhoneOpening(); },
+    /* 7.1：角色自发动态（挂在日更后面跑，由 roleplay.js 调） */
+    maybeCharMoment: function (sid) { return maybeCharMoment(sid); },
     /* 回归测试 / 调试：直接跑一轮手机生成，不经过输入框与发送键
        （双段式：正文一段、挑表情一段，两条都在这里验证） */
     reply: function (sid) { return genReply(sid || ps.sid); },
