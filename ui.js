@@ -1476,7 +1476,9 @@
       const empty = document.createElement("div");
       empty.className = "session-item";
       empty.style.color = "var(--text-mute)";
-      empty.textContent = "还没有对话";
+      /* 只说「还没有对话」等于没告诉人下一步该干什么。指个方向。
+         传了 box2 的是别的列表（角色栏/手机侧栏），它们的「上去点哪」不一样，保持原样。 */
+      empty.textContent = box2 ? "还没有对话" : "还没有对话　点左上角「+ 新对话」开始";
       box.appendChild(empty);
       return;
     }

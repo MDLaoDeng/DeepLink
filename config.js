@@ -64,7 +64,7 @@
         "--shadow": "0 12px 26px rgba(28,34,48,.10)",
         "--text": "#1D2026",
         "--text-dim": "#5D646F",
-        "--text-mute": "#676F7B",
+        "--text-mute": "#636A76",
         "--user-bg": "#E7ECF8",
         "--user-ink": "#1D2026"
       },
@@ -89,7 +89,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#E6E8ED",
         "--text-dim": "#9BA1AC",
-        "--text-mute": "#7A818E",
+        "--text-mute": "#888E9A",
         "--user-bg": "#262C38",
         "--user-ink": "#E6E8ED"
       }
@@ -116,7 +116,7 @@
         "--shadow": "0 12px 26px rgba(30,34,58,.10)",
         "--text": "#1E2136",
         "--text-dim": "#5F6582",
-        "--text-mute": "#686E83",
+        "--text-mute": "#63697C",
         "--user-bg": "#E6E9F8",
         "--user-ink": "#1E2136"
       },
@@ -141,7 +141,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#E8E9F5",
         "--text-dim": "#9FA3C0",
-        "--text-mute": "#7980A0",
+        "--text-mute": "#878EAA",
         "--user-bg": "#262B47",
         "--user-ink": "#E8E9F5"
       }
@@ -168,7 +168,7 @@
         "--shadow": "0 12px 26px rgba(22,50,60,.10)",
         "--text": "#16303A",
         "--text-dim": "#4F6E7A",
-        "--text-mute": "#59737E",
+        "--text-mute": "#566E79",
         "--user-bg": "#E2EFF5",
         "--user-ink": "#16303A"
       },
@@ -193,7 +193,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#E4EFF3",
         "--text-dim": "#93B0BA",
-        "--text-mute": "#6A8A95",
+        "--text-mute": "#7C99A2",
         "--user-bg": "#1F313C",
         "--user-ink": "#E4EFF3"
       }
@@ -220,7 +220,7 @@
         "--shadow": "0 12px 26px rgba(24,44,36,.10)",
         "--text": "#1B2A24",
         "--text-dim": "#557061",
-        "--text-mute": "#5E7567",
+        "--text-mute": "#5A7062",
         "--user-bg": "#E4F0EA",
         "--user-ink": "#1B2A24"
       },
@@ -245,7 +245,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#E5EFE9",
         "--text-dim": "#96B0A5",
-        "--text-mute": "#6E8A7D",
+        "--text-mute": "#7B968A",
         "--user-bg": "#20302A",
         "--user-ink": "#E5EFE9"
       }
@@ -272,7 +272,7 @@
         "--shadow": "0 12px 26px rgba(22,42,28,.10)",
         "--text": "#17281B",
         "--text-dim": "#4F6B55",
-        "--text-mute": "#5C7466",
+        "--text-mute": "#587062",
         "--user-bg": "#E2F0E6",
         "--user-ink": "#17281B"
       },
@@ -297,7 +297,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#E4EFE6",
         "--text-dim": "#93B09D",
-        "--text-mute": "#6C8A76",
+        "--text-mute": "#799783",
         "--user-bg": "#1F2E23",
         "--user-ink": "#E4EFE6"
       }
@@ -324,7 +324,7 @@
         "--shadow": "0 12px 26px rgba(36,30,58,.10)",
         "--text": "#221E38",
         "--text-dim": "#665F86",
-        "--text-mute": "#6E6A88",
+        "--text-mute": "#696582",
         "--user-bg": "#EAE5F8",
         "--user-ink": "#221E38"
       },
@@ -349,7 +349,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#EAE7F7",
         "--text-dim": "#A9A2CB",
-        "--text-mute": "#817BA1",
+        "--text-mute": "#8F8AAB",
         "--user-bg": "#2A2348",
         "--user-ink": "#EAE7F7"
       }
@@ -376,7 +376,7 @@
         "--shadow": "0 12px 26px rgba(56,40,48,.10)",
         "--text": "#332A2E",
         "--text-dim": "#6E5B62",
-        "--text-mute": "#7A6A70",
+        "--text-mute": "#78686E",
         "--user-bg": "#F7D9E3",
         "--user-ink": "#3A2C32"
       },
@@ -401,7 +401,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#F0E9EC",
         "--text-dim": "#BAA6AE",
-        "--text-mute": "#8F7E84",
+        "--text-mute": "#9B8C91",
         "--user-bg": "#4E3240",
         "--user-ink": "#F1E7EB"
       }
@@ -428,7 +428,7 @@
         "--shadow": "0 12px 26px rgba(56,42,42,.10)",
         "--text": "#332A2A",
         "--text-dim": "#6F5D5D",
-        "--text-mute": "#7A6A6A",
+        "--text-mute": "#776767",
         "--user-bg": "#F6DCDF",
         "--user-ink": "#3A2C2E"
       },
@@ -453,7 +453,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#F3E9EA",
         "--text-dim": "#BBA2A3",
-        "--text-mute": "#917C7D",
+        "--text-mute": "#9B8989",
         "--user-bg": "#4C3134",
         "--user-ink": "#F3E9EA"
       }
@@ -480,7 +480,7 @@
         "--shadow": "0 12px 26px rgba(56,46,32,.10)",
         "--text": "#332A1E",
         "--text-dim": "#776A57",
-        "--text-mute": "#7A6E5D",
+        "--text-mute": "#736758",
         "--user-bg": "#F7E6D2",
         "--user-ink": "#3A3020"
       },
@@ -505,7 +505,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#F3EBE0",
         "--text-dim": "#C3B09A",
-        "--text-mute": "#94826C",
+        "--text-mute": "#9D8D78",
         "--user-bg": "#45351F",
         "--user-ink": "#F3EBE0"
       }
@@ -532,7 +532,7 @@
         "--shadow": "0 12px 26px rgba(48,46,34,.10)",
         "--text": "#2A2821",
         "--text-dim": "#6B6759",
-        "--text-mute": "#75705E",
+        "--text-mute": "#6E6959",
         "--user-bg": "#F0EBD9",
         "--user-ink": "#2E2B20"
       },
@@ -557,7 +557,7 @@
         "--shadow": "0 18px 40px rgba(0,0,0,.50)",
         "--text": "#EFEDE1",
         "--text-dim": "#B6B29B",
-        "--text-mute": "#87836E",
+        "--text-mute": "#928F7A",
         "--user-bg": "#3B3524",
         "--user-ink": "#EFEDE1"
       }
