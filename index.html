@@ -2337,6 +2337,31 @@
       <div id="phoneMoments" class="phone-moments"></div>
     </div>
 
+    <div id="phoneMeView" class="phone-view" hidden>
+      <div class="phone-head">
+        <span class="phone-head-pad"></span>
+        <div class="phone-head-title">我</div>
+        <span class="phone-head-pad"></span>
+      </div>
+      <div id="phoneMeBody" class="phone-me-body"></div>
+    </div>
+
+    <!-- 底栏：只有三个主 tab 才显示；进聊天详情 / 通话时整条收掉（微信也是这样） -->
+    <nav id="phoneTabs" class="phone-tabs" hidden>
+      <button class="phone-tab on" type="button" data-tab="chat">
+        <span class="phone-tab-ic" data-icon="messages"></span>
+        <span class="phone-tab-tx">聊天</span>
+      </button>
+      <button class="phone-tab" type="button" data-tab="moments">
+        <span class="phone-tab-ic" data-icon="creation"></span>
+        <span class="phone-tab-tx">动态</span>
+      </button>
+      <button class="phone-tab" type="button" data-tab="me">
+        <span class="phone-tab-ic" data-icon="account"></span>
+        <span class="phone-tab-tx">我的</span>
+      </button>
+    </nav>
+
     <div id="phoneSheet" class="phone-sheet" hidden>
       <div class="phone-sheet-card">
         <div class="phone-sheet-title" id="phoneSheetTitle">标题</div>

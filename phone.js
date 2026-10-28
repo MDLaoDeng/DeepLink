@@ -679,7 +679,7 @@
   function switchView(next, dir) {
     if (!next) return;
     if (viewTimer) { clearTimeout(viewTimer); viewTimer = null; }
-    var all = [$("#phoneListView"), $("#phoneChatView"), $("#phoneMomentsView")].filter(Boolean);
+    var all = [$("#phoneListView"), $("#phoneChatView"), $("#phoneMomentsView"), $("#phoneMeView")].filter(Boolean);
     var under = all.filter(function (el) { return !el.hidden && el !== next; });
     /* 上一次动画没播完就又切：先结算，避免两个视图各带一个平移、叠出怪画面 */
     all.forEach(function (el) {
@@ -828,6 +828,122 @@
     if (s && s.id) openChat(s.id);
   }
 
+  /* ── 底栏（7.2 用户口径：像微信，只留聊天 / 动态 / 我的三个）─────
+     底栏只在三个主页面显示；进聊天详情或通话时整条收掉。
+     tab 之间是瞬切（微信也不做滑动），只有「列表 → 聊天」才有横向转场。 */
+  var TAB_ORDER = ["chat", "moments", "me"];
+
+  function syncTabs(name) {
+    var bar = $("#phoneTabs");
+    var shell = document.querySelector(".phone-shell");
+    /* 空字符串 = 当前不在任何 tab 上（聊天详情 / 通话），底栏收掉 */
+    var on = TAB_ORDER.indexOf(name) >= 0;
+    if (bar) bar.hidden = !on;
+    if (shell) shell.classList.toggle("tabs-on", on);
+    if (bar) {
+      var btns = bar.querySelectorAll(".phone-tab");
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle("on", btns[i].getAttribute("data-tab") === name);
+      }
+    }
+  }
+
+  function showTab(name) {
+    if (name === "chat") { goList(); return; }
+    if (name === "moments") { openMoments(); return; }
+    if (name === "me") { openMe(); return; }
+  }
+
+  /* ── 「我的」页 ──────────────────────────────────
+     用户口径：只留一张资料微缩卡 + 一个「服务」入口，别把设置里那堆都搬过来。
+     卡右边的箭头进详细资料（下一批做，先给个明确提示，不做成死按钮）。 */
+  function openMe() {
+    ps.view = "me";
+    switchView($("#phoneMeView"), 0);
+    renderMe();
+    syncTabs("me");
+  }
+
+  function meRow(iconName, label, value, onclick) {
+    var r = document.createElement("button");
+    r.type = "button";
+    r.className = "me-row";
+    var ic = document.createElement("span");
+    ic.className = "me-row-ic";
+    ic.innerHTML = UI.iconSvg(iconName);
+    r.appendChild(ic);
+    var tx = document.createElement("span");
+    tx.className = "me-row-tx";
+    tx.textContent = label;
+    r.appendChild(tx);
+    if (value) {
+      var v = document.createElement("span");
+      v.className = "me-row-v";
+      v.textContent = value;
+      r.appendChild(v);
+    }
+    r.addEventListener("click", onclick);
+    return r;
+  }
+
+  function renderMe() {
+    var box = $("#phoneMeBody");
+    if (!box) return;
+    box.innerHTML = "";
+    var st = state.settings || {};
+
+    var card = document.createElement("button");
+    card.type = "button";
+    card.className = "me-card";
+    var av = document.createElement("div");
+    av.className = "me-av";
+    var src = st.phoneAvatarUser || st.avatarUser || "";
+    if (src) {
+      var im = document.createElement("img");
+      im.src = (window.DL && DL.avatarUrl) ? DL.avatarUrl(src) : src;
+      im.alt = "";
+      av.appendChild(im);
+    } else {
+      av.innerHTML = UI.iconSvg("account");
+    }
+    card.appendChild(av);
+
+    var info = document.createElement("div");
+    info.className = "me-info";
+    var nm = document.createElement("div");
+    nm.className = "me-name";
+    /* 手机里的名字：用户口径 10-28 —— 称呼还是原名，昵称只是网名。
+       这里显示原名；网名机制（网名+灰括号真名）放下一批一起做。 */
+    nm.textContent = String(st.myName || "").trim() || "还没起名";
+    info.appendChild(nm);
+    var sub = document.createElement("div");
+    sub.className = "me-sub";
+    var sid = String(st.mySid || "").trim();
+    sub.textContent = sid ? ("Sekulum 号：" + sid) : "Sekulum 号：还没生成（点右边箭头）";
+    info.appendChild(sub);
+    card.appendChild(info);
+
+    var ar = document.createElement("span");
+    ar.className = "me-arrow";
+    ar.textContent = "›";
+    card.appendChild(ar);
+    card.addEventListener("click", function () {
+      toast("详细资料页在下一批里做，现在还不能改");
+    });
+    box.appendChild(card);
+
+    var gap = document.createElement("div");
+    gap.className = "me-gap";
+    box.appendChild(gap);
+
+    box.appendChild(meRow("cash", "服务", "钱包 · 余额可直接改", function () {
+      toast("钱包在下一批里做");
+    }));
+    box.appendChild(meRow("creation", "我的动态", "", function () {
+      openMoments();
+    }));
+  }
+
   function goList() {
     ps.view = "list";
     /* 回列表就丢掉「正在看哪条线」：否则列表时间和背景会继续按刚才那条线算，
@@ -838,6 +954,7 @@
        刚进手机页时整页外壳已经在播入场，这时直接切，不叠一层视图动画。 */
     switchView(lv, ps.enterAnim ? 0 : -1);
     renderList();
+    syncTabs("chat");
   }
 
   /* ── 列表视图（类微信：按角色 / 线）────────────────── */
@@ -1055,6 +1172,7 @@
     /* 10-18：进角色消息界面要有转场 —— 聊天页从右侧整页推进来，
        下面的列表同步左移一点（视差），推完再藏。用户点名说的就是这一处。 */
     switchView($("#phoneChatView"), ps.enterAnim ? 0 : 1);
+    syncTabs("");            /* 聊天详情是全屏，底栏收掉 */
     resetEnterAnim();   /* 刚进来不播入场，直接到位 */
     renderChat();
     setTimeout(scrollPhoneBottom, 20);
@@ -3289,8 +3407,9 @@
      挑出相符的线并顺手总结「那天发生了什么」，供预览后确认。 */
   function openMoments() {
     ps.view = "moments";
-    switchView($("#phoneMomentsView"), ps.enterAnim ? 0 : 1);
+    switchView($("#phoneMomentsView"), 0);
     renderMoments();
+    syncTabs("moments");
   }
   function closeMoments() {
     goList();
@@ -3676,6 +3795,22 @@
     on("#phoneAddBtn", "click", function () { showAddSheet(true); });
     on("#phoneAddCancel", "click", function () { showAddSheet(false); });
     on("#phAddMoment", "click", function () { showAddSheet(false); openMoments(); });
+    /* 7.2 底栏三个 tab */
+    (function () {
+      var bar = $("#phoneTabs");
+      if (!bar) return;
+      var btns = bar.querySelectorAll(".phone-tab");
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].addEventListener("click", function () {
+          var name = this.getAttribute("data-tab");
+          /* 已经在这个 tab 上就不重复切（否则会把滚动位置和展开状态一起重置） */
+          if (name === "chat" && ps.view === "list") return;
+          if (name === "moments" && ps.view === "moments") return;
+          if (name === "me" && ps.view === "me") return;
+          showTab(name);
+        });
+      }
+    })();
     /* 7.1 即时备忘录：从加号进来，绑当前这条线的故事时间（原入口保留在「这条线」面板里） */
     on("#phAddMemo", "click", function () {
       showAddSheet(false);
@@ -3814,8 +3949,8 @@
       if (addSheet && !addSheet.hidden) { show(addSheet, false); return true; }
       /* 2) 通话中 → 挂断 */
       if (callState) { hangUp(true); return true; }
-      /* 3) 动态页 → 列表 */
-      if (ps.view === "moments") { closeMoments(); return true; }
+      /* 3) 动态 / 我的 → 回「聊天」tab（微信里就是这样，不会直接退出手机） */
+      if (ps.view === "moments" || ps.view === "me") { goList(); return true; }
       /* 4) 聊天页：功能条 → 多选 → 列表 */
       if (ps.view === "chat") {
         var row = document.querySelector("#phoneChatView .phone-actions");
@@ -3829,8 +3964,8 @@
     },
     close: function () {
       if (callState) { hangUp(false); return; }
-      /* 动态页：返回键先退回列表 */
-      if (ps.view === "moments") { closeMoments(); return; }
+      /* 动态 / 我的：先退回聊天 tab */
+      if (ps.view === "moments" || ps.view === "me") { goList(); return; }
       if (ps.view === "chat") { hangUp(true); goList(); return; }
       var el = $("#phoneModal");
       if (el && !el.hidden) closePhone();
