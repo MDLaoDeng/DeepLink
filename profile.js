@@ -285,9 +285,9 @@
   function ensureNickname(ch) {
     if (!ch || nickPending[ch.id]) return;
     if (!ch.social || ch.social.nickname) return;
-    if (!(window.Api && Api.summarize)) return;
+    if (!(window.Api && Api.summarize)) { LG.push("RET 2 Api 不可用"); return; }
     var st = (D().state || {}).settings || {};
-    if (!st.apiKey) return;
+    if (!st.apiKey) { LG.push("RET 3 没 apiKey"); return; }
     nickPending[ch.id] = true;
     var f = ch.fields || {};
     var bg = [f.aiName, f.aiPersona, f.aiBackground, f.aiLikes].filter(Boolean).join("；").slice(0, 400);
@@ -325,9 +325,9 @@
     /* 试过一次就不再试：以前每次重渲资料页都打一次模型（sign 空 + 失败 → 无限重试）。
        用户手动清空签名时会把 aiSignTried 抹掉，那时才允许再试。 */
     if (so.aiSignTried) return;
-    if (!(window.Api && Api.summarize)) return;
+    if (!(window.Api && Api.summarize)) { LG.push("RET 2 没 Api"); return; }
     var st = (D().state || {}).settings || {};
-    if (!st.apiKey) return;
+    if (!st.apiKey) { LG.push("RET 3 没 apiKey"); return; }
     aiPending[ch.id] = true;
     var f = ch.fields || {};
     var bg = [f.aiBackground, f.aiPersona, f.aiLikes, f.world].filter(Boolean).join("；").slice(0, 600);
@@ -1008,23 +1008,11 @@
     var s = sessionById(sid);
     if (!s || !s.isGroup) return;
     var world = String(s.groupWorld || "").trim();
-    if (!world) return;                       /* 没填就是不做这套，零成本 */
-    /* 注意：这里【不能】放 altRunning 守卫 —— 复用的是纯本地操作，不花模型也不用弹窗，
-       放前面会让「上一轮还没收尾时，连已经存在的副本都换不上去」。守卫在 AI 判定之前。 */
-    if (!(window.Api && Api.summarize)) return;
-    var st = (D().state || {}).settings || {};
-    if (!st.apiKey) return;
+    if (!world) return;                        /* 没填就是不做这套，零成本 */
 
-    var ids = (s.members || []).slice();
-    var list = [];
-    ids.forEach(function (id) {
-      var c = charById(id);
-      if (c) list.push(c);
-    });
-    if (!list.length) return;
-
-    /* 先把能直接复用的挑出来（同一个世界以前复制过）：这一步不花模型、不用弹窗，
-       所以放在 altRunning 守卫之前 —— 否则上一轮还没收尾时，连复用都会被跳过。 */
+    /* ① 复用段：纯本地操作，不花模型、不弹窗 —— 所以放在所有守卫之前。
+       以前它排在 apiKey 检查后面，结果是「Key 没填时连已经存在的副本都换不上去」，
+       而那条 return 又没有日志，排查时看着像「复用逻辑根本没跑」。 */
     var mem = (s.members || []).slice();
     var ml = Object.assign({}, s.memberLine || {});
     var changed = false;
@@ -1040,13 +1028,20 @@
         delete ml[id];
         ml[reused.id] = oldLine || "";
         changed = true;
-      } else {
-        todo.push(c);
+        return;
       }
+      /* 以前判过「他属于这个世界」→ 不复制，也不再问第二遍（省钱） */
+      if (altSameOk(c, world)) return;
+      todo.push(c);
     });
     if (changed) S().updateSession(sid, { members: mem, memberLine: ml });
-    if (!todo.length) return;
+    if (!todo.length) return;                 /* 全是老熟人：一声不响就完事 */
+
+    /* ② 判定段：从这里开始才花钱 */
     if (altRunning) return;
+    if (!(window.Api && Api.summarize)) return;
+    var st = (D().state || {}).settings || {};
+    if (!st.apiKey) return;
 
     altRunning = true;
     toast("正在看这几个人是不是同一个世界…");
@@ -1070,11 +1065,41 @@
       if (!m) return;
       var arr = [];
       try { arr = (JSON.parse(m[0]).list || []); } catch (e) { return; }
-      /* 一个个问，串行 —— 同时弹两个框会叠在一起 */
+      /* 判成同一个世界的记一笔，下次同世界建群不再问他 —— 5 个人每次都判一遍，
+         等于每次建群都白花一次调用。只记 true，false 的不记（下次还得问）。 */
+      var sameIds = [];
+      arr.forEach(function (x) {
+        if (x && x.id && x.sameWorld !== false) sameIds.push(x.id);
+      });
+      markAltSame(sameIds, world);
+      /* 异世界的一个个问，串行 —— 同时弹两个框会叠在一起 */
       var q = arr.filter(function (x) { return x && x.id && x.sameWorld === false; });
       askAltOne(sid, world, q, 0);
     }).catch(function () { /* 判定失败就当没这回事，不能拦住建群 */ })
       .then(function () { altRunning = false; });
+  }
+
+  /* 「他已经判过属于这个世界」的快照：世界名 → 判定时他的世界观原文。
+     存原文是为了过期检测 —— 用户后来改了角色的世界，快照就对不上，
+     宁可再判一次，也不拿旧结论糊弄人。 */
+  function altSameOk(ch, world) {
+    var m = ch && ch.altSame;
+    if (!m || !m[world]) return false;
+    return String(m[world]) === String((ch.fields || {}).world || "").trim();
+  }
+
+  /* 批量记，一次整表写：5 个成员各写一次等于把角色表来回存 5 遍 */
+  function markAltSame(ids, world) {
+    if (!ids || !ids.length) return;
+    var list = S().getCharacters() || [];
+    var hit = false;
+    list.forEach(function (c) {
+      if (!c || ids.indexOf(c.id) < 0) return;
+      c.altSame = c.altSame || {};
+      c.altSame[world] = String((c.fields || {}).world || "").trim();
+      hit = true;
+    });
+    if (hit) S().saveCharacters(list);
   }
 
   /* 同一个世界以前复制过 → 直接复用，不再新建 */
