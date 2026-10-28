@@ -53,6 +53,71 @@
                                    要是在后台重试，这里得给它留够时间（但也不能真卡死）。 */
   const splashStartTs = Date.now();
   let splashGone = false;
+
+  /* ── 把「设置 → 启动动画」那几项真正应用到启动页（10-29 修）──
+     之前这五项（动画套系 / 主文字 / 底部小字 / 图片 / 角色头像）全都只存不读：
+     设置页能选能填，存进了 settings，可启动页从头到尾用的是 HTML 里写死的
+     data-anim="1" 和「Sek」+「ulum」——**整块设置是摆设**，用户改了重启也没变化，
+     还找不到原因（没有任何报错）。
+     现在在启动页还挂着的时候应用一次（脚本执行时它一定还在）。 */
+  function applySplashSettings() {
+    try {
+      const sp = document.getElementById("splash");
+      if (!sp) return;
+      const s = (window.Store && Store.getSettings) ? (Store.getSettings() || {}) : {};
+      const anim = String(s.splashAnim == null ? "0" : s.splashAnim);
+      sp.setAttribute("data-anim", anim);
+
+      const w1 = document.getElementById("splashW1");
+      const w2 = document.getElementById("splashW2");
+      const cr = document.getElementById("splashCredit");
+      const stage = document.getElementById("splashStage");
+      const main = String(s.splashText || "").trim();
+      const sub = String(s.splashSub || "").trim();
+
+      if (w1 && w2) {
+        if (main) {
+          /* 填了主文字就整句放在第一段；0 号套系只显示第一段，1~5 两段并排 */
+          w1.textContent = main;
+          w2.textContent = "";
+        } else if (anim === "0") {
+          w1.textContent = "你好，世界";
+          w2.textContent = "";
+        } else {
+          w1.textContent = "Sek";
+          w2.textContent = "ulum";
+        }
+      }
+      if (cr) cr.textContent = sub || "菠萝味柠檬汁/DS共同制作";
+
+      /* 图：splashImage 优先，其次角色头像（splashAvatar 存的是角色 id） */
+      if (stage && !stage.childNodes.length) {
+        const url = String(s.splashImage || "").trim();
+        if (url) {
+          const im = document.createElement("img");
+          im.className = "splash-pic";
+          im.alt = "";
+          im.onerror = function () { im.style.display = "none"; };
+          im.src = url;
+          stage.appendChild(im);
+        } else if (s.splashAvatar) {
+          const list = (window.Store && Store.getCharacters) ? (Store.getCharacters() || []) : [];
+          const c = list.filter((x) => x && x.id === s.splashAvatar)[0];
+          if (c && c.avatar) {
+            const im = document.createElement("img");
+            im.className = "splash-pic";
+            im.alt = "";
+            im.onerror = function () { im.style.display = "none"; };
+            /* 直接用存的值：可能是 avatars/xx.png，也可能已经是 dataURL。
+               不在这里调 bgUrl —— 它定义在文件更靠下的位置，此时可能还在 TDZ 里。 */
+            im.src = String(c.avatar);
+            stage.appendChild(im);
+          }
+        }
+      }
+    } catch (e) { /* 启动页装饰出错绝不能拦住启动 */ }
+  }
+  applySplashSettings();
   function hideSplash() {
     const el = document.getElementById("splash");
     if (el) {
@@ -1473,7 +1538,19 @@
     const box = $("#worldEditBox");
     if (!box) return;
     box.innerHTML = "";
-    lines.forEach((line) => {
+    /* 上面那句只说了「每一段都可以改」，没说一共几段、每段是什么单位。
+       补一行总数 + 每段一个「第 N 天」，才知道自己看到的是不是全貌、也方便只挑某天改。 */
+    if (lines.length) {
+      const cnt = document.createElement("div");
+      cnt.className = "hint world-days";
+      cnt.textContent = "共 " + lines.length + " 天，一段一天，可以只改其中几天。";
+      box.appendChild(cnt);
+    }
+    lines.forEach((line, i) => {
+      const lab = document.createElement("div");
+      lab.className = "world-day-lab";
+      lab.textContent = "第 " + (i + 1) + " 天";
+      box.appendChild(lab);
       const ta = document.createElement("textarea");
       /* 一天一段，段里有几行就开几行高（还是可以自己往下拖） */
       ta.rows = Math.max(2, Math.min(12, String(line).split("\n").length + 1));
@@ -1729,10 +1806,25 @@
   }
 
   /* 启动自检：这些 id 缺任何一个都可能让界面部分失灵 */
-  const REQUIRED_IDS = "cameraModal camStage camVideo camCanvas camShutter camClose camAttach camRetake camTextInput camEdit bgcStage bgcImg bgcZoom bgcZoomVal bgcBlur bgcBlurVal bgcBright bgcBrightVal bgcCancel bgcOk bgcCrop albumModal albumTabs albumGrid albumHint albumSysBtn albumOkBtn albumScopes albumTitle albumTip phoneKindField bgCropModal cfAvPreview cfAvPick cfAvInput cfAvAi cfAvClear charSplitAgain charSplitRoleOnly charReadyHint plusBtn plusCamera plusFile plusVideo plusMusic plusDoc studioModal studioTitle studioHint studioBody studioAsk studioAskQ studioAskInput studioCost studioCancel studioGo plusMenu headMenu headMenuSet worldView worldViewBack worldViewBody attachmentBar audioInput avatarInput chatTitle customSearchField deleteCancel deleteList deleteOk dialogCancel dialogOk dialogText dialogTitle passModal passTitle passNote passInput passConfirmWrap passConfirm passOk passCancel pickModal pickTitle pickList replayIntroBtn resetSettingsBtn dataUsageLine dropHint editCancel editSave editText editTitle effortSelect effortWrap fileInput histFrom histKeyword histKeywordField histResults histSearchBtn histModule histScope histTimeBase histTimeField histTo imgChip imgToggle input main menuBtn messages micBtn modeBtn modeSwitch modelBadge modelPanel modelPanelList modelSwitchBtn msgMenuList rowMenuModal rowMenuList rowMenuTitle newChatBtn openSearchBtn openEventBookBtn openSettingsBtn eventBookPage eventBookBack eventBookBody openThemesBtn saveSettingsBtn scrim searchModeSwitch searchToggle selectBar selectCancel selectCopy selectCount selectDelete selfTestBtn selfTestOut sendBtn sessionBtn sessionList sessionPromptReset sessionPromptSave msetAsr msetImg msetMain msetTts msetVision providerNowLine setAsrEnabled setAsrLang setAvatarAiClear setAvatarAiPick setAvatarAiPreview setAvatarUserClear setAvatarUserPick setAvatarUserPreview setCustomKey setCustomUrl setImgEnabled setImgSize setImgToImg setPhoneShareImg setMainCompat setInstances setSearchProvider setSessionAlias setSessionAvatarAiClear setSessionAvatarAiPick setSessionAvatarAiPreview setSessionAvatarUserClear setSessionAvatarUserPick setSessionAvatarUserPreview setSessionFollow setSessionPrompt setSessionTempVal setSessionTemperature setSessionTitle setSessionTopP setSessionTopPVal setSessionScene setSessionSceneEvery setSessionAge setSessionMyGender setSessionRelation setSessionShared setSessionLinkPick setSessionLinkBtn setSessionUnlinkBtn setSessionLinkState setSpreadRow setSpreadNow setSpreadState setDriftRow setDriftGoal setDriftPlanBtn setDriftToggle setDriftReset setDriftState setSessionCognition setSessionAutoBackup sessionRoleWrap sessionMemoryBox charMemoryBox setMemoryList sessionLineBadge sessionCognitionUpdate sessionRelationUpdate sessionReCompress sessionThinkBox sessionThinkRead sessionThinkDigest sessionThinkCorrect sessionThinkCorrectRun setSessionAutoFreeze setThinkAbout sessionCorrectInput sessionCorrectRun sessionBackupNow sessionRestoreBackup sessionSetMain setSystemPrompt setTavilyKey setTempVal setTemperature setTopP setTopPVal setTtsAuto setTtsEnabled setTtsVoice setVideoEnabled setVideoBaseUrl setVideoKey setVideoModel setVideoMode setVideoRatio setVideoSize setVideoDuration setVideoFps setVideoCreatePath setVideoStatusPath setVideoResultField setVideoPollMs setVideoPollMax setVideoTemplate setMusicEnabled setMusicBaseUrl setMusicKey setMusicModel setMusicDuration setMusicFormat setMusicWithLyrics setMusicCreatePath setMusicStatusPath setMusicResultField setMusicPollMs setMusicPollMax setMusicTemplate setVisionEnabled sidebar stopBtn tavilyField themeGrid thinkToggle toasts characterBtn charBar characterModal charList charNewBtn charForm charEmpty charTools charName charSave charFilterRule charFilterEvery charFilterAI charFilterNow charFilterState cfCharFormat cfStatusCards cfPersonaApply cfWorldPick cfWorldApply cfPersonaPick charSplitBtn charCreateInput charCreateRole charCreateMe charCreateRun charCreateAgain charCreateCancel charCreateState charAiTabs charAiCreate charAiSplit charSplitHelp charSplitHint charSplitPanel charSplitInput charSplitRun charSplitCancel charSplitState  aboutVersion aboutCrypto openDataBtn dataModal exportScope exportCharWrap exportCharSel exportSessionWrap exportSessionSel exportKeys exportDownload exportCopy importText importFileBtn importTextBtn importFileInput importClipBtn exportShare clearCacheBtn setNoImage setNotifyTasks introModal introTree introDots introNext introPrev introSkip guideTree setImgToText setImgExpireTurns charUsageLine usageModal usageGlobal usageSessions usageChars openUsageBtn setRoleplayEnabled setMyName setMyPersona setMyAppearance setMyBackground setMyLikes setAssistantCompress setCompressModel setTokenWarn setBgKeep sessionMakeShortcut sessionRemoveShortcut charMakeShortcut charRemoveShortcut exportNoImg setLockEnabled setLockNote setLockChange setLockCode setLockState lockScreen lockPassBox lockInput lockOk lockForgot lockErr lockRecoverBox recInput recOk recAi recBack recErr recNote lockQuizBox quizNote quizQ quizA quizOk quizBack quizErr lockResetBox resetNote resetPass1 resetPass2 resetOk resetBack resetErr lockDeadBox deadNote deadOk codeScreen codeText codeCopy codeOk setDailyUpdate setWorldGen setEventBook setStatusQuant setStatusCards setAutoMessage setAutoMessagePhone setAdoptFormat setBgPreview setBgPick setBgAi setBgClear bgInput setBgBlur setBgBlurVal setBgBright setBgBrightVal setUsagePriceMode setUsagePriceHit setUsagePriceIn setUsagePriceOut setPhoneWarn resetUsageBtn usageCats setSessionFormat setSessionTtsVoice setSessionBgPreview setSessionBgPick setSessionBgAi setSessionBgClear setSessionBgFollow chatBg charImportBtn charImportInput charImportKeepCode phoneBtn phoneTopBtn phoneModal phoneClock phoneListView phoneCloseBtn phoneList phoneChatView phoneBack phoneTitle phoneMsgs phoneActCall phoneActTransfer phoneActLoc phoneActImg phoneActVoice phoneActVoiceLabel phoneMore phoneSetBtn phoneInput phoneSend phoneSheet phoneSheetTitle phoneSheetBody phoneSheetCancel phoneSheetOk phoneCall phoneCallAvatar phoneCallName phoneCallState phoneCallTimer phoneCallSaid phoneCallTalk phoneCallTalkLabel phoneCallHang phoneImgInput phoneMomentsView phoneMoments phoneMomentsBack phoneMomentsPost phoneMomentsClose phoneMomentImg phoneMeView phoneMeBody phoneTabs newGroupBtn groupModal reminderDot reminderModal reminderText reminderAsTime reminderTimeField reminderAt reminderAddBtn reminderList groupName groupMembers groupImport groupCancel groupOk setSessionStatusQuant setSessionStatusCards setSessionDiary sessionDiarySave sessionDiaryClear sessionDiaryList worldModal worldEditBox worldSkip worldRegen worldAdopt setAutoMessageMin setLive2dEnabled setLive2dModel live2dUploadBtn live2dFolderInput live2dUploadState live2dTestBtn live2dTestOut phoneActVideo phoneCallCam phoneCallCamLabel phoneCallStage phoneCallCanvas phoneCallFallback charPresetBtn presetModal presetList setSplashAnim setSplashText setSplashSub setSplashImage setSplashAvatar phoneTypingBar quickBtn quickPanel qpList qpRefresh qpClose qpCount sessionClockText sessionClockLive setSessionAutoMsg setSessionTime setSessionTimeSync sessionTimeApply sessionTimeNow sessionTimeOpen sessionTimeLine setPhoneBgPreview setPhoneBgPick setPhoneBgClear setPhoneBgBlur setPhoneBgBlurVal setPhoneBgBright setPhoneBgBrightVal charImportUser groupCogSection setPeerCogOn peerCogList peerCogUpdate peerCogState groupSyncBtn groupSyncState updateCheckBtn updateState settingsHome settingsBack settingsTitle settingsBody personaPick personaCount personaFields personaNewBtn personaDelBtn personaApplyBtn personaSplitInput personaSplitRun personaSplitAgain personaSplitState personaAiTabs personaAiCreate personaAiSplit personaCreateInput personaCreateRun personaCreateAgain personaCreateState cfLinksRow cfLinkPick cfLinkKind cfLinkGen cfLinkList worldPick worldCount worldName worldText worldNewBtn worldCopyBtn worldDelBtn worldPanelBtn worldPanel worldSearch worldList sideTabs sidePaneAsst sidePaneRole sidePanePhone sessionListAsst phoneCharList phoneAddSheet phoneAddBtn phoneAddCancel phAddMoment phAddMemo phAddContact freezeAskModal freezeAskOn freezeAskNever freezeAskStay freezeAskGo reasonDrawer reasonMask reasonClose reasonList reasonNewInput reasonAddBtn openReasonBtn setSessionReason setReasonLock sessionReasonExit charUpgradeRow charUpgradeBtn upgradeModal upgradeMeet upgradeCancel upgradeOk".split(" ");
+  /* 启动自检要的元素清单（缺哪个就 console 报警，见 missingIds）。
+     主来源是 ids.js —— 由 check.js 从 index.html 自动生成（715 项），
+     改完 HTML 跑一次 `node check.js --gen` 就行，不用再手动维护清单。
+     下面那行手写的是**兜底**：ids.js 万一没被打进包里，自检不该整个失效。
+     它已冻结在 7.2 的状态，别再往里手动加东西。 */
+  const REQUIRED_IDS = (window.DL_REQUIRED_IDS && window.DL_REQUIRED_IDS.length)
+    ? window.DL_REQUIRED_IDS
+    : "cameraModal camStage camVideo camCanvas camShutter camClose camAttach camRetake camTextInput camEdit bgcStage bgcImg bgcZoom bgcZoomVal bgcBlur bgcBlurVal bgcBright bgcBrightVal bgcCancel bgcOk bgcCrop albumModal albumTabs albumGrid albumHint albumSysBtn albumOkBtn albumScopes albumTitle albumTip phoneKindField bgCropModal cfAvPreview cfAvPick cfAvInput cfAvAi cfAvClear charSplitAgain charSplitRoleOnly charReadyHint plusBtn plusCamera plusFile plusVideo plusMusic plusDoc studioModal studioTitle studioHint studioBody studioAsk studioAskQ studioAskInput studioCost studioCancel studioGo plusMenu headMenu headMenuSet worldView worldViewBack worldViewBody attachmentBar audioInput avatarInput chatTitle customSearchField deleteCancel deleteList deleteOk dialogCancel dialogOk dialogText dialogTitle passModal passTitle passNote passInput passConfirmWrap passConfirm passOk passCancel pickModal pickTitle pickList replayIntroBtn resetSettingsBtn dataUsageLine dropHint editCancel editSave editText editTitle effortSelect effortWrap fileInput histFrom histKeyword histKeywordField histResults histSearchBtn histModule histScope histTimeBase histTimeField histTo imgChip imgToggle input main menuBtn messages micBtn modeBtn modeSwitch modelBadge modelPanel modelPanelList modelSwitchBtn msgMenuList rowMenuModal rowMenuList rowMenuTitle newChatBtn openSearchBtn openEventBookBtn openSettingsBtn eventBookPage eventBookBack eventBookBody openThemesBtn saveSettingsBtn scrim searchModeSwitch searchToggle selectBar selectCancel selectCopy selectCount selectDelete selfTestBtn selfTestOut sendBtn sessionBtn sessionList sessionPromptReset sessionPromptSave msetAsr msetImg msetMain msetTts msetVision providerNowLine setAsrEnabled setAsrLang setAvatarAiClear setAvatarAiPick setAvatarAiPreview setAvatarUserClear setAvatarUserPick setAvatarUserPreview setCustomKey setCustomUrl setImgEnabled setImgSize setImgToImg setPhoneShareImg setMainCompat setInstances setSearchProvider setSessionAlias setSessionAvatarAiClear setSessionAvatarAiPick setSessionAvatarAiPreview setSessionAvatarUserClear setSessionAvatarUserPick setSessionAvatarUserPreview setSessionFollow setSessionPrompt setSessionTempVal setSessionTemperature setSessionTitle setSessionTopP setSessionTopPVal setSessionScene setSessionSceneEvery setSessionAge setSessionMyGender setSessionRelation setSessionShared setSessionLinkPick setSessionLinkBtn setSessionUnlinkBtn setSessionLinkState setSpreadRow setSpreadNow setSpreadState setDriftRow setDriftGoal setDriftPlanBtn setDriftToggle setDriftReset setDriftState setSessionCognition setSessionAutoBackup sessionRoleWrap sessionMemoryBox charMemoryBox setMemoryList sessionLineBadge sessionCognitionUpdate sessionRelationUpdate sessionReCompress sessionThinkBox sessionThinkRead sessionThinkDigest sessionThinkCorrect sessionThinkCorrectRun setSessionAutoFreeze setThinkAbout sessionCorrectInput sessionCorrectRun sessionBackupNow sessionRestoreBackup sessionSetMain setSystemPrompt setTavilyKey setTempVal setTemperature setTopP setTopPVal setTtsAuto setTtsEnabled setTtsVoice setVideoEnabled setVideoBaseUrl setVideoKey setVideoModel setVideoMode setVideoRatio setVideoSize setVideoDuration setVideoFps setVideoCreatePath setVideoStatusPath setVideoResultField setVideoPollMs setVideoPollMax setVideoTemplate setMusicEnabled setMusicBaseUrl setMusicKey setMusicModel setMusicDuration setMusicFormat setMusicWithLyrics setMusicCreatePath setMusicStatusPath setMusicResultField setMusicPollMs setMusicPollMax setMusicTemplate setVisionEnabled sidebar stopBtn tavilyField themeGrid thinkToggle toasts characterBtn charBar characterModal charList charNewBtn charForm charEmpty charTools charName charSave charFilterRule charFilterEvery charFilterAI charFilterNow charFilterState cfCharFormat cfStatusCards cfPersonaApply cfWorldPick cfWorldApply cfPersonaPick charSplitBtn charCreateInput charCreateRole charCreateMe charCreateRun charCreateAgain charCreateCancel charCreateState charAiTabs charAiCreate charAiSplit charSplitHelp charSplitHint charSplitPanel charSplitInput charSplitRun charSplitCancel charSplitState  aboutVersion aboutCrypto openDataBtn dataModal exportScope exportCharWrap exportCharSel exportSessionWrap exportSessionSel exportKeys exportDownload exportCopy importText importFileBtn importTextBtn importFileInput importClipBtn exportShare clearCacheBtn setNoImage setNotifyTasks introModal introTree introDots introNext introPrev introSkip guideTree setImgToText setImgExpireTurns charUsageLine usageModal usageGlobal usageSessions usageChars openUsageBtn setRoleplayEnabled setMyName setMyPersona setMyAppearance setMyBackground setMyLikes setAssistantCompress setCompressModel setTokenWarn setBgKeep sessionMakeShortcut sessionRemoveShortcut charMakeShortcut charRemoveShortcut exportNoImg setLockEnabled setLockNote setLockChange setLockCode setLockState lockScreen lockPassBox lockInput lockOk lockForgot lockErr lockRecoverBox recInput recOk recAi recBack recErr recNote lockQuizBox quizNote quizQ quizA quizOk quizBack quizErr lockResetBox resetNote resetPass1 resetPass2 resetOk resetBack resetErr lockDeadBox deadNote deadOk codeScreen codeText codeCopy codeOk setDailyUpdate setWorldGen setEventBook setStatusQuant setStatusCards setAutoMessage setAutoMessagePhone setAdoptFormat setBgPreview setBgPick setBgAi setBgClear bgInput setBgBlur setBgBlurVal setBgBright setBgBrightVal setUsagePriceMode setUsagePriceHit setUsagePriceIn setUsagePriceOut setPhoneWarn resetUsageBtn usageCats setSessionFormat setSessionTtsVoice setSessionBgPreview setSessionBgPick setSessionBgAi setSessionBgClear setSessionBgFollow chatBg charImportBtn charImportInput charImportKeepCode phoneBtn phoneTopBtn phoneModal phoneClock phoneListView phoneCloseBtn phoneList phoneChatView phoneBack phoneTitle phoneMsgs phoneActCall phoneActTransfer phoneActLoc phoneActImg phoneActVoice phoneActVoiceLabel phoneMore phoneSetBtn phoneInput phoneSend phoneSheet phoneSheetTitle phoneSheetBody phoneSheetCancel phoneSheetOk phoneCall phoneCallAvatar phoneCallName phoneCallState phoneCallTimer phoneCallSaid phoneCallTalk phoneCallTalkLabel phoneCallHang phoneImgInput phoneMomentsView phoneMoments phoneMomentsBack phoneMomentsPost phoneMomentsClose phoneMomentImg phoneMeView phoneMeBody phoneTabs newGroupBtn groupModal reminderDot reminderModal reminderText reminderAsTime reminderTimeField reminderAt reminderAddBtn reminderList groupName groupMembers groupImport groupCancel groupOk setSessionStatusQuant setSessionStatusCards setSessionDiary sessionDiarySave sessionDiaryClear sessionDiaryList worldModal worldEditBox worldSkip worldRegen worldAdopt setAutoMessageMin setLive2dEnabled setLive2dModel live2dUploadBtn live2dFolderInput live2dUploadState live2dTestBtn live2dTestOut phoneActVideo phoneCallCam phoneCallCamLabel phoneCallStage phoneCallCanvas phoneCallFallback charPresetBtn presetModal presetList setSplashAnim setSplashText setSplashSub setSplashImage setSplashAvatar phoneTypingBar quickBtn quickPanel qpList qpRefresh qpClose qpCount sessionClockText sessionClockLive setSessionAutoMsg setSessionTime setSessionTimeSync sessionTimeApply sessionTimeNow sessionTimeOpen sessionTimeLine setPhoneBgPreview setPhoneBgPick setPhoneBgClear setPhoneBgBlur setPhoneBgBlurVal setPhoneBgBright setPhoneBgBrightVal charImportUser groupCogSection setPeerCogOn peerCogList peerCogUpdate peerCogState groupSyncBtn groupSyncState updateCheckBtn updateState settingsHome settingsBack settingsTitle settingsBody personaPick personaCount personaFields personaNewBtn personaDelBtn personaApplyBtn personaSplitInput personaSplitRun personaSplitAgain personaSplitState personaAiTabs personaAiCreate personaAiSplit personaCreateInput personaCreateRun personaCreateAgain personaCreateState cfLinksRow cfLinkPick cfLinkKind cfLinkGen cfLinkList worldPick worldCount worldName worldText worldNewBtn worldCopyBtn worldDelBtn worldPanelBtn worldPanel worldSearch worldList sideTabs sidePaneAsst sidePaneRole sidePanePhone sessionListAsst phoneCharList phoneAddSheet phoneAddBtn phoneAddCancel phAddMoment phAddMemo phAddContact freezeAskModal freezeAskOn freezeAskNever freezeAskStay freezeAskGo reasonDrawer reasonMask reasonClose reasonList reasonNewInput reasonAddBtn openReasonBtn setSessionReason setReasonLock sessionReasonExit charUpgradeRow charUpgradeBtn upgradeModal upgradeMeet upgradeCancel upgradeOk".split(" ");
   /* filter(Boolean)：上面这串用空格分隔，手工删条目时容易留下连续空格 →
      会多出一个空字符串条目，自检永远报「缺一个元素」。这里直接剔掉。 */
-  function missingIds() { return REQUIRED_IDS.filter((id) => !!id && !document.getElementById(id)); }
+  /* 静态 HTML 里有几个元素会在启动过程中被**主动移除**，启动完就查不到了：
+       · #aboutModal  —— 内容搬进设置页「关于」那一节后，空壳扔掉（mountAboutInline）
+       · #splash / #splashStage / #splashW1 / #splashW2 / #splashCredit —— 启动动画，播完摘掉
+     所以这份核对必须在**脚本执行的那一刻**做一次并缓存（此刻静态 DOM 已完整解析、
+     还没开始拆东西），不能在启动完成之后再统计 ——
+     否则每次自检都会把这 6 个当成「缺失」（7.2 换成 ids.js 全量快照时正是这么炸的：
+     快照比手写清单更全，一下就多出这 6 项假阳性）。 */
+  const MISSING_AT_BOOT = REQUIRED_IDS.filter((id) => !!id && !document.getElementById(id));
+  function missingIds() { return MISSING_AT_BOOT; }
 
   /* ── 空值安全的表单读写（元素缺失时不再抛异常）──── */
   const $v = (sel) => { const el = $(sel); return el ? String(el.value == null ? "" : el.value) : ""; };
@@ -2897,80 +2989,128 @@
     }
     return best;
   }
+  /* ── 返回键：一张表 ────────────────────────────────────────
+     以前是十几个 if 顺着写在一个函数里（相机 / 手机 / 滚轮 / 设置子页 / 资料页 /
+     事件簿 / 剧情全屏 / 表情导入 / 离线原因 / 浮窗 / 模型面板 / 任意弹窗 / 侧栏 / 多选）。
+     加一个新层要在几百行里找正确位置插进去，插错就是「按了没反应」或「关错了层」——
+     滚轮和事件簿各漏过一次。
+
+     现在改成数组：**从上往下试，第一个说「我显示了」的层负责处理**。
+     · z 只作阅读参考（真实顺序就是这个数组的顺序，不要靠 z 自动排序：
+       手写顺序里有几个例外，比如设置子页要压在同为整页浮层的事件簿上面）。
+     · close 返回 false 表示「我退到头了，交给下一个」——手机页就是这么逐级退的。
+     · 每一项各自 try：某一层判断/关闭时抛错，只跳过它，不让整个返回键失灵。 */
+  const BACK_LAYERS = [
+    {
+      z: 900, name: "相机",
+      test: () => { const c = window.DL && DL.camera; return !!(c && typeof c.isOpen === "function" && c.isOpen()); },
+      close: () => { window.DL.camera.close(); return true; }
+    },
+    {
+      /* ⚠️ 弹窗必须排在所有整页层之前。
+         理由不是它写死的 z（400 只是基准），而是 ui.js 的 raiseAboveTop 会在打开那一刻
+         把它抬到「现场最高层 + 10」—— 也就是说弹窗**永远是屏幕上最上面那个**。
+         排在后面会出现：手机页里弹确认框，按返回却把手机页退了一级，弹窗还挂在上面
+         （10-29 的返回键测试就是这么抓出来的，旧版那串 if 里也是同样的顺序）。
+         它排滚轮之后：滚轮 520 更高，两者同时开时先关滚轮。 */
+      z: 400, name: "任意弹窗",
+      test: () => !!topOpenModalId(),
+      close: () => { UI.closeModal(topOpenModalId()); return true; }
+    },
+    {
+      /* 手机层自己逐级退（浮层 → 通话 → 动态 → 动作条/多选 → 列表），
+         只有它说「退到头了」才关手机。 */
+      z: 500, name: "手机页",
+      test: () => { const p = window.DL && DL.phone; return !!(p && typeof p.isOpen === "function" && p.isOpen()); },
+      close: () => {
+        const p = window.DL.phone;
+        if (typeof p.back === "function" && p.back()) return true;
+        p.close();
+        return true;
+      }
+    },
+    {
+      /* 自绘滚轮（.wp-mask，不是 .modal，以前漏了 → 返回键会关错层） */
+      z: 465, name: "滚轮选择器",
+      test: () => !!(window.WheelPicker && typeof window.WheelPicker.close === "function" &&
+        document.querySelector(".wp-mask:not([hidden])")),
+      close: () => { window.WheelPicker.close(); return true; }
+    },
+    {
+      /* 设置子页：先退回设置首页，别一脚踩到底。设置页本身是整页浮层，
+         不插这条会被下面「关掉当前弹窗」直接关回主界面。 */
+      z: 460, name: "设置子页",
+      test: () => { const b = document.getElementById("settingsBody"); return !!(b && b.classList.contains("sg")); },
+      close: () => { const b = document.getElementById("settingsBack"); if (b) { b.click(); return true; } return false; }
+    },
+    {
+      z: 430, name: "角色资料页",
+      test: () => { const p = window.DL && DL.profile; return !!(p && typeof p.isOpen === "function" && p.isOpen()); },
+      close: () => { window.DL.profile.back(); return true; }
+    },
+    {
+      z: 425, name: "事件簿整页",
+      test: () => !!(window.DL && typeof DL.eventBookOpen === "function" && DL.eventBookOpen()),
+      close: () => { if (typeof DL.closeEventBook === "function") DL.closeEventBook(); return true; }
+    },
+    {
+      /* 剧情全屏页：走它自己的返回按钮 —— 收起动画、滚动位置记忆都在那个回调里 */
+      z: 420, name: "剧情全屏",
+      test: () => { const v = document.getElementById("worldView"); return !!(v && v.classList.contains("show")); },
+      close: () => { const b = document.getElementById("worldViewBack"); if (b) { b.click(); return true; } return false; }
+    },
+    {
+      z: 420, name: "表情导入",
+      test: () => { const v = document.getElementById("stickerImport"); return !!(v && !v.hidden); },
+      close: () => { const b = document.getElementById("siCancel"); if (b) { b.click(); return true; } return false; }
+    },
+    {
+      z: 95, name: "离线原因抽屉",
+      test: () => { const v = document.getElementById("reasonDrawer"); return !!(v && !v.hidden); },
+      close: () => { const b = document.getElementById("reasonClose"); if (b) { b.click(); return true; } return false; }
+    },
+    {
+      /* 加号菜单 / 顶栏时钟（.popover，不是 .modal） */
+      z: 80, name: "浮窗",
+      test: () => !!document.querySelector(".popover:not([hidden])"),
+      close: () => { popoverClose(); return true; }
+    },
+    {
+      z: 75, name: "模型面板",
+      test: () => { const v = document.getElementById("modelPanel"); return !!(v && !v.hidden); },
+      close: () => {
+        if (window.DL && typeof DL.closeModelPanel === "function") { DL.closeModelPanel(); return true; }
+        return false;
+      }
+    },
+    {
+      z: 50, name: "侧栏",
+      test: () => { const v = document.getElementById("sidebar"); return !!(v && v.classList.contains("open")); },
+      close: () => { closeSidebar(); return true; }
+    },
+    {
+      z: 10, name: "多选态",
+      test: () => !!state.selecting,
+      close: () => { exitSelect(); return true; }
+    }
+  ];
+
   function onBackKey() {
     try {
-      /* 1) 相机层（它是 .camera-layer，不在 .modal 里，要单独判） */
-      const cam = window.DL && window.DL.camera;
-      if (cam && typeof cam.isOpen === "function" && cam.isOpen()) { cam.close(); return; }
-      /* 1.5) 手机层（.phone-layer，不在 .modal 里）：交给它自己逐级退
-             （浮层 → 通话 → 动态 → 动作条/多选 → 列表），只有它说「退到头了」才关手机。 */
-      const ph = window.DL && window.DL.phone;
-      if (ph && typeof ph.isOpen === "function" && ph.isOpen()) {
-        if (typeof ph.back === "function" && ph.back()) return;
-        ph.close();
-        return;
+      for (let i = 0; i < BACK_LAYERS.length; i++) {
+        const L = BACK_LAYERS[i];
+        let hit = false;
+        try { hit = !!L.test(); } catch (e) { hit = false; }
+        if (!hit) continue;
+        let done = false;
+        try { done = L.close() !== false; } catch (e2) {
+          /* 这一层出错就跳过去，别让整只返回键失灵（以前一个异常就全废） */
+          console.warn("[Sekulum] 返回键：处理「" + L.name + "」时出错", e2);
+          done = false;
+        }
+        if (done) return;
       }
-      /* 1.6) 自绘滚轮选择器（.wp-mask，不是 .modal，以前漏了 → 返回键会关错层） */
-      if (window.WheelPicker && typeof window.WheelPicker.close === "function") {
-        const wp = document.querySelector(".wp-mask:not([hidden])");
-        if (wp) { window.WheelPicker.close(); return; }
-      }
-      /* 1.8) 设置子页：返回键先退回设置首页，别一脚踩到底（10-21 用户要求）。
-             设置页本身是整页浮层，不插这条会被下面「关掉当前弹窗」直接关回主界面。 */
-      const sbody = document.getElementById("settingsBody");
-      if (sbody && sbody.classList.contains("sg")) {
-        const backBtn = document.getElementById("settingsBack");
-        if (backBtn) { backBtn.click(); return; }
-      }
-      /* 1.84) 角色资料页（#profileLayer，z 430，不是 .modal）：先退子页再关，
-              和手机页同一套「逐级退」约定（7.1） */
-      if (window.DL && DL.profile && typeof DL.profile.isOpen === "function" && DL.profile.isOpen()) {
-        DL.profile.back();
-        return;
-      }
-      /* 1.85) 事件簿整页（10-27）：和设置页一样是整页浮层，不在 .modal 里，
-              不插这条会被下面「关掉当前弹窗」直接关回主界面。 */
-      if (window.DL && typeof DL.eventBookOpen === "function" && DL.eventBookOpen()) {
-        if (typeof DL.closeEventBook === "function") DL.closeEventBook();
-        return;
-      }
-      /* 1.86) 剧情全屏页（#worldView，z 420，不是 .modal）：
-              不插这条，按返回会一路走到「再按一次退出 App」，人还停在剧情页上（10-27 修）。
-              走它自己的返回按钮 —— 收起动画、滚动位置记忆都在那个回调里，别再写一份。 */
-      const wv = document.getElementById("worldView");
-      if (wv && wv.classList.contains("show")) {
-        const wb = document.getElementById("worldViewBack");
-        if (wb) { wb.click(); return; }
-      }
-      /* 1.87) 表情导入面板（#stickerImport，z 420） */
-      const si = document.getElementById("stickerImport");
-      if (si && !si.hidden) {
-        const sc = document.getElementById("siCancel");
-        if (sc) { sc.click(); return; }
-      }
-      /* 1.88) 离线原因抽屉（#reasonDrawer，z 95；closeReasonDrawer 没挂到 DL，走它的关闭按钮） */
-      const rd = document.getElementById("reasonDrawer");
-      if (rd && !rd.hidden) {
-        const rc = document.getElementById("reasonClose");
-        if (rc) { rc.click(); return; }
-      }
-      /* 1.89) 浮窗：加号菜单 / 顶栏时钟 / 模型切换（都不是 .modal，返回键以前完全不管） */
-      const po = document.querySelector(".popover:not([hidden])");
-      if (po) { popoverClose(); return; }
-      const mp = document.getElementById("modelPanel");
-      if (mp && !mp.hidden) {
-        if (window.DL && typeof DL.closeModelPanel === "function") DL.closeModelPanel();
-        return;
-      }
-      /* 2) 任意打开着的弹窗 */
-      const mid = topOpenModalId();
-      if (mid) { UI.closeModal(mid); return; }
-      /* 3) 侧栏 */
-      const sb = $("#sidebar");
-      if (sb && sb.classList.contains("open")) { closeSidebar(); return; }
-      /* 4) 多选态 */
-      if (state.selecting) { exitSelect(); return; }
-      /* 5) 都没有 → 2 秒内按第二次才真退出 */
+      /* 什么都没有 → 2 秒内按第二次才真退出 */
       const now = Date.now();
       if (now - backAt < 2000) { requestExit(); return; }
       backAt = now;

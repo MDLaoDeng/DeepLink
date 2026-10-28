@@ -3925,3 +3925,55 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   font: inherit; font-size: var(--fs-caption);
 }
 .ph-post-drop:active { background-color: var(--panel-2); }
+
+/* 世界生成弹窗：天数标注（共 N 天 + 第 N 天）
+   上面那句 hint 只说「每段都能改」，没说一共几段、单位是什么。 */
+.world-days { margin: 0 0 4px; }
+.world-day-lab {
+  margin: 10px 0 2px;
+  font-size: var(--fs-caption);
+  color: var(--text-mute);
+}
+
+/* ── 启动动画预览（设置 → 启动动画 →「先看一眼」）────────────
+   把真启动页那套 DOM 原样搬进一个小框里播 3 秒。三条覆盖必须写：
+   · position 从 fixed 改 absolute：不然它会铺满整个视口；
+   · animation: none：.splash 自带 16 秒的 splash-safety（到点把自己隐掉），预览里得掐掉；
+   · z-index 归零：真启动页是 200，盖在设置页上面就看不见设置页了。
+   容器里刻意不用 #splashW1 这类 id —— 同一份 id 在页面上出现两次，
+   getElementById 只会拿到第一个，真启动页那边的文字就改不动了。 */
+.splash-preview {
+  position: relative;
+  height: 220px;
+  margin: 10px 0 6px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  border: 0.5px solid var(--border);
+  background-color: #000;
+}
+.splash-preview .splash {
+  position: absolute;
+  left: 0; top: 0; right: 0; bottom: 0;
+  z-index: 0;
+  animation: none;
+  -webkit-animation: none;
+}
+
+/* ── 发送按钮的「正在处理」态 ──────────────────────────────
+   从点下发送到真正开始生成之间要走网络（先把图片描述拿回来才发得出去），
+   最长可能几秒。这段窗口里消息已经上屏、按钮却一点变化都没有 ——
+   看着像「没点上」，于是再点一次（state.sending 兜住了，但体感是「卡了」）。
+   转圈用伪元素画，不往 DOM 里塞节点；颜色跟 currentColor，深浅主题都自洽。 */
+#sendBtn { position: relative; }
+#sendBtn.sending { pointer-events: none; }
+#sendBtn.sending span[data-icon] { opacity: 0; }
+#sendBtn.sending::after {
+  content: "";
+  position: absolute; left: 50%; top: 50%;
+  width: 15px; height: 15px; margin: -8px 0 0 -8px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: dl-send-spin .7s linear infinite;
+}
+@keyframes dl-send-spin { to { transform: rotate(360deg); } }

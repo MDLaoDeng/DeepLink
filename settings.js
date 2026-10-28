@@ -1429,6 +1429,65 @@
     /* 手机页背景（独立于聊天背景） */
     setVal("#setPhoneBgBlur", typeof s.phoneBgBlur === "number" ? s.phoneBgBlur : 0);
     setVal("#setPhoneBgBright", typeof s.phoneBgBright === "number" ? s.phoneBgBright : 100);
+  /* ── 启动动画预览（10-29）─────────────────────────────
+     六套动效以前只能「保存 → 重启 → 看」，试错一次要一次完整启动；
+     更糟的是那五项设置本来根本没生效（见 app.js 的 applySplashSettings），怎么试都一样。
+     这里把真启动页那套结构搬进一个小框里播 3 秒。
+     ⚠️ 文案规则必须和 applySplashSettings 一字不差 —— 否则「预览看到的」和「真启动」两个样。
+     ⚠️ 容器里不用 #splashW1 这类 id：同一份 id 出现两次，getElementById 只认第一个。 */
+  var splashPrevTimer = 0;
+  function playSplashPreview() {
+    var box = document.getElementById("splashPreview");
+    if (!box) return;
+    var sel = document.getElementById("setSplashAnim");
+    var anim = sel ? String(sel.value || "0") : "0";
+    var tx = document.getElementById("setSplashText");
+    var sb = document.getElementById("setSplashSub");
+    var main = tx ? String(tx.value || "").trim() : "";
+    var sub = sb ? String(sb.value || "").trim() : "";
+
+    var w1 = main, w2 = "";
+    if (!main) {
+      if (anim === "0") { w1 = "你好，世界"; w2 = ""; }
+      else { w1 = "Sek"; w2 = "ulum"; }
+    }
+
+    var sp = document.createElement("div");
+    sp.className = "splash";
+    sp.setAttribute("data-anim", anim);
+
+    var stage = document.createElement("div");
+    stage.className = "splash-stage";
+
+    var mark = document.createElement("div");
+    mark.className = "splash-mark";
+    var s1 = document.createElement("span"); s1.className = "w1"; s1.textContent = w1;
+    var s2 = document.createElement("span"); s2.className = "w2"; s2.textContent = w2;
+    var ln = document.createElement("span"); ln.className = "splash-line";
+    mark.appendChild(s1); mark.appendChild(s2); mark.appendChild(ln);
+
+    var cr = document.createElement("div");
+    cr.className = "splash-credit";
+    cr.textContent = sub || "菠萝味柠檬汁/DS共同制作";
+
+    sp.appendChild(stage); sp.appendChild(mark); sp.appendChild(cr);
+
+    box.hidden = false;
+    box.innerHTML = "";
+    box.appendChild(sp);
+
+    if (splashPrevTimer) clearTimeout(splashPrevTimer);
+    splashPrevTimer = setTimeout(function () {
+      box.hidden = true;
+      box.innerHTML = "";
+      splashPrevTimer = 0;
+    }, 3000);
+  }
+  (function bindSplashPreview() {
+    var b = document.getElementById("splashPreviewBtn");
+    if (b) b.addEventListener("click", playSplashPreview);
+  })();
+
     /* 启动动画：动画套系 / 文字 / 图片 / 角色头像 */
     setVal("#setSplashAnim", String(s.splashAnim == null ? "0" : s.splashAnim));
     setVal("#setSplashText", s.splashText || "");

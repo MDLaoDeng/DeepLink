@@ -1811,13 +1811,41 @@
     /* 从这里到 runGeneration 之间要走网络（等图片描述，可能几秒），state.busy 还没置位。
        上这把锁，堵住「这段窗口里再点一次发送 → 开出第二条生成」的竞态。 */
     state.sending = true;
+    /* 从这里到 runGeneration 之间要走网络（等图片描述，可能几秒），这期间界面上什么都没有：
+       消息已经上屏、按钮却还是原样，看着像没点上。加个转圈，等描述拿到手就撤
+       —— 后面由 runGeneration 自己的 busy 态接管，那里按钮会变成停止。 */
+    const unlockSend = markSending(userMsg.attachments.some((a) => a.kind === "image"));
     try {
       await ensureImageDescriptions(sid);
+      unlockSend();
       describePendingImages(sid);
       await runGeneration(sid, { q: 0 });
     } finally {
       state.sending = false;
+      unlockSend();
     }
+  }
+
+  /* 发送按钮转圈（幂等：调用两次不会出错，也不会重复计时） */
+  function markSending(hasImg) {
+    const btn = $("#sendBtn");
+    let done = false;
+    let tip = 0;
+    if (btn) { btn.classList.add("sending"); btn.setAttribute("aria-busy", "true"); }
+    /* 只有真的带图才提示「正在读图」；纯文字这条路通常一闪而过，弹提示反而像故障。
+       而且延迟 600ms 才出 —— 立刻出会在正常速度下闪一下。 */
+    if (hasImg) {
+      tip = setTimeout(function () {
+        tip = 0;
+        UI.toast("正在读图，马上发出去…");
+      }, 600);
+    }
+    return function () {
+      if (done) return;
+      done = true;
+      if (tip) { clearTimeout(tip); tip = 0; }
+      if (btn) { btn.classList.remove("sending"); btn.removeAttribute("aria-busy"); }
+    };
   }
 
   function stop() {

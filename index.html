@@ -730,7 +730,9 @@
         <label class="field"><span>底部小字（留空＝默认署名）</span><input id="setSplashSub" type="text" placeholder="菠萝味柠檬汁/DS共同制作"></label>
         <label class="field"><span>启动图片（可留空；填 avatars/xxx.png 或图片地址）</span><input id="setSplashImage" type="text" placeholder="avatars/shenyan.png"></label>
         <label class="field"><span>或选一个角色头像</span><select id="setSplashAvatar"></select></label>
-        <p class="hint">图片优先于角色头像。改完<b>下次启动</b>生效。图片要是加载失败，会在后台自动重试，重试期间启动页不会提前退出。</p>
+        <button class="btn ghost" id="splashPreviewBtn" type="button">先看一眼（播 3 秒）</button>
+        <div id="splashPreview" class="splash-preview" hidden></div>
+        <p class="hint">上面那个「先看一眼」只播动效本身（文字按你填的来），图片和头像不在预览里显示——真启动时它们由后台加载。改完<b>下次启动</b>生效。图片要是加载失败，会在后台自动重试，重试期间启动页不会提前退出。</p>
       </div>
 
       <div class="settings-section">
@@ -2480,6 +2482,8 @@
   </div>
 </div>
 
+<!-- id 快照（check.js 生成）：app.js 的启动自检读它，人工不再维护那行清单 -->
+<script src="ids.js"></script>
 <script src="config.js"></script>
 <script src="store.js"></script>
 <script src="search.js"></script>

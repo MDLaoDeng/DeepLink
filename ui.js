@@ -1115,11 +1115,43 @@
     }, 2200);
   }
 
+  /* 二级浮层自动抬层：二级浮层的基准是 400（见 app.css 那段注释），
+     但整页层的 z 后来一路涨上去了 —— 资料页 430、资料页编辑框 440、发布菜单 445、
+     加号菜单 460。这些层里再弹确认框，400 就被压在下面：**看得见、点不到**，
+     表现和「点了没反应」一模一样（10-17 和 P0-2 都是这个病）。
+
+     与其维护一份「谁比谁高」的手册（迟早漏一个），不如打开时量一下现场：
+     找出此刻还显示着的最高层，比它再高 10。没有更高的就清掉内联值，回到 CSS 的 400。 */
+  const OVERLAY_SEL = [
+    ".profile-layer", ".phone-layer", ".camera-layer", ".world-view.show",
+    ".sticker-import", ".ph-pick-mask", "#plusMenu", ".wp-mask", ".modal.show"
+  ].join(",");
+
+  function raiseAboveTop(m) {
+    let top = 0;
+    let nodes = [];
+    try { nodes = document.querySelectorAll(OVERLAY_SEL); } catch (e) { nodes = []; }
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i];
+      if (el === m || el.contains(m)) continue;      /* 自己、或自己所在的父层不算 */
+      if (el.hidden) continue;
+      let st;
+      try { st = window.getComputedStyle(el); } catch (e2) { continue; }
+      if (st.display === "none" || st.visibility === "hidden") continue;
+      /* 不拿 opacity 判可见：整页层都有进场动画（.profile-layer 的 pf-in 从 opacity 0 开始），
+         刚打开那一帧读到的是 0 —— 会把「刚起来的层」当成没开，正好漏掉最该比较的那个。 */
+      const z = parseInt(st.zIndex, 10);
+      if (isFinite(z) && z > top) top = z;
+    }
+    m.style.zIndex = (top >= 400) ? String(top + 10) : "";
+  }
+
   function openModal(id) {
     const m = document.getElementById(id);
     if (!m) return;
     m.classList.add("show");
     m.setAttribute("aria-hidden", "false");
+    try { raiseAboveTop(m); } catch (e) { /* 抬层失败也不能拦住弹窗打开 */ }
     /* 弹窗打开时统一刷一次自绘选择器的文字：这些 select 的选项多半是「打开前才填的」，
        填完不会再触发 change —— 不刷的话按钮上还显示旧值。只改文字，开销可忽略。 */
     pickRefreshAll();
@@ -1129,6 +1161,7 @@
     if (!m) return;
     m.classList.remove("show");
     m.setAttribute("aria-hidden", "true");
+    m.style.zIndex = "";        /* 收掉自动抬的那层，下次按当场的层级重新量 */
     /* 确认框被外部（返回键）关掉时按「取消」结算，避免 promise 悬挂 + 旧回调残留 */
     if (id === "dialogModal" && dialogSettle) {
       const f = dialogSettle; dialogSettle = null;
