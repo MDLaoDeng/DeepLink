@@ -3665,14 +3665,22 @@
 
   /* 发布动态的底部弹层 */
   var postDraft = null;
-  function openPostSheet() {
+  function openPostSheet(preset) {
+    var pre = preset || {};
     var box = document.createElement("div");
-    postDraft = { text: "", image: null, lines: [], previewEl: null, linesBox: null };
+    postDraft = {
+      text: String(pre.text || ""),
+      /* 拍摄 / 相册进来时图已经在了，直接带着走，不用再点一次「选图片」 */
+      image: pre.image || null,
+      lines: Array.isArray(pre.lines) ? pre.lines.slice() : [],
+      previewEl: null, linesBox: null
+    };
 
     var ta = document.createElement("textarea");
     ta.className = "ph-post-text";
     ta.rows = 3;
     ta.placeholder = "说点什么…";
+    if (postDraft.text) ta.value = postDraft.text;
     ta.addEventListener("input", function () { postDraft.text = ta.value; });
     box.appendChild(ta);
 
@@ -3686,6 +3694,13 @@
     imgRow.appendChild(pick); imgRow.appendChild(preview);
     box.appendChild(imgRow);
     postDraft.previewEl = preview;
+    /* 拍摄 / 相册带进来的图：立刻显示预览，并且给一个"去掉这张图"的出口 */
+    if (postDraft.image && postDraft.image.dataUrl) {
+      var pim = document.createElement("img");
+      pim.src = postDraft.image.dataUrl;
+      pim.alt = "";
+      preview.appendChild(pim);
+    }
 
     var aiWrap = document.createElement("div");
     aiWrap.className = "ph-post-ai";
@@ -3718,6 +3733,10 @@
       linesBox.appendChild(p);
     }
     sess.forEach(function (s) {
+      /* 听澜是内置助手，不是联系人 —— 手机列表里早就排除了它，
+         这里漏了：选线时冒出一条「听澜」，把动态发给助手没有任何意义。 */
+      var tid = (window.DL && DL.tinglanId) || "c_tinglan";
+      if (!s || !s.characterId || s.characterId === tid) return;
       var row = document.createElement("label");
       row.className = "ph-line";
       var cb = document.createElement("input");
@@ -3760,6 +3779,96 @@
     closeSheet();
     renderMoments();
     toast("动态已发布，选中的线都看得到");
+  }
+
+  /* ── 发布动态：三个入口（7.2 用户口径）──────────────────
+     相机按钮点开给三条路，拍摄和相册都是自研的（项目自带相机 / 自研相册），
+     不走系统选择器。三条路的终点是同一个发布页，都要能加文字、能选线。 */
+  function openPostMenu() {
+    var mask = document.createElement("div");
+    mask.className = "ph-pick-mask";
+    var card = document.createElement("div");
+    card.className = "ph-pick-card";
+    var title = document.createElement("div");
+    title.className = "ph-pick-title";
+    title.textContent = "发动态";
+    card.appendChild(title);
+
+    var items = [
+      { ic: "camera-outline", t: "手机拍摄发布", s: "打开相机拍一张，拍完再加文字", go: shootMoment },
+      { ic: "image-outline", t: "选择图片发布", s: "从相册里挑一张", go: albumMoment },
+      { ic: "message-text-outline", t: "纯文字发布", s: "只写字，不带图", go: function () { openPostSheet(); } }
+    ];
+    items.forEach(function (it) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "ph-pick-row";
+      var ic = document.createElement("span");
+      ic.className = "ph-pick-ic";
+      ic.innerHTML = UI.iconSvg(it.ic);
+      b.appendChild(ic);
+      var tx = document.createElement("span");
+      tx.className = "ph-pick-tx";
+      var t1 = document.createElement("b");
+      t1.textContent = it.t;
+      var t2 = document.createElement("i");
+      t2.textContent = it.s;
+      tx.appendChild(t1); tx.appendChild(t2);
+      b.appendChild(tx);
+      b.addEventListener("click", function () {
+        closePostMenu();
+        it.go();
+      });
+      card.appendChild(b);
+    });
+
+    var cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "ph-pick-cancel";
+    cancel.textContent = "取消";
+    cancel.addEventListener("click", closePostMenu);
+    card.appendChild(cancel);
+
+    mask.appendChild(card);
+    mask.addEventListener("click", function (e) { if (e.target === mask) closePostMenu(); });
+    document.body.appendChild(mask);
+    phonePostMenu = mask;
+  }
+
+  var phonePostMenu = null;
+  function closePostMenu() {
+    if (!phonePostMenu) return;
+    if (phonePostMenu.parentNode) phonePostMenu.parentNode.removeChild(phonePostMenu);
+    phonePostMenu = null;
+  }
+
+  /* 拍一张 → 直接进发布页带着这张图 */
+  function shootMoment() {
+    var cam = window.DL && DL.camera;
+    if (!cam || typeof cam.open !== "function") { toast("相机没加载出来", true); return; }
+    cam.open({
+      onDone: function (dataUrl) {
+        if (!dataUrl) return;
+        openPostSheet({
+          image: { kind: "image", dataUrl: dataUrl, name: "moment_" + Date.now() + ".jpg", mime: "image/jpeg" }
+        });
+      }
+    });
+  }
+
+  /* 从自研相册挑一张 → 同样进发布页 */
+  function albumMoment() {
+    var open = window.DL && DL.openAlbum;
+    if (typeof open !== "function") { toast("相册不可用", true); return; }
+    open({
+      title: "选一张发动态",
+      onPick: function (url) {
+        if (!url) return;
+        openPostSheet({
+          image: { kind: "image", dataUrl: url, name: "moment_" + Date.now() + ".jpg", mime: "image/jpeg" }
+        });
+      }
+    });
   }
 
   function handleMomentImage(file) {
@@ -3850,6 +3959,8 @@
     on("#phoneAddBtn", "click", function () { showAddSheet(true); });
     on("#phoneAddCancel", "click", function () { showAddSheet(false); });
     on("#phAddMoment", "click", function () { showAddSheet(false); openMoments(); });
+    /* 7.2：动态页右上角相机 → 三个发布入口 */
+    on("#phoneMomentsPost", "click", function () { openPostMenu(); });
     /* 7.2 底栏三个 tab */
     (function () {
       var bar = $("#phoneTabs");
@@ -3883,7 +3994,8 @@
     on("#phoneBack", "click", function () { hangUp(true); goList(); });
     on("#phoneMomentsBack", "click", closeMoments);
     on("#phoneMomentsClose", "click", closePhone);
-    on("#phoneMomentsPost", "click", openPostSheet);
+    /* 发布按钮的绑定在上面「7.2 动态页右上角相机」那条 —— 这里不能再绑一次，
+       否则点一下会同时弹三选一菜单和发布页（已经踩过一次）。 */
     on("#phoneMomentImg", "change", function (e) {
       var f = e.target.files && e.target.files[0];
       e.target.value = "";

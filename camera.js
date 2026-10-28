@@ -50,7 +50,10 @@
     original: null, base: null, snapshot: null,
     shapes: [], drag: null, cropRect: null, textPoint: null,
     tool: null, color: "#ffffff", width: 5,
-    torch: false, focusTimer: null, loadTimer: null, startTimer: null
+    torch: false, focusTimer: null, loadTimer: null, startTimer: null,
+    /* 拍完交给谁。null = 老行为（塞进主聊天的附件栏）；
+       设了函数就走回调，用于「拍完直接发动态」这类外部用途。 */
+    onDone: null
   };
   /* 屏幕→底图的换算比缓存（见 camUnit），0 = 未算/需重算 */
   let camUnitPx = 0;
@@ -807,7 +810,9 @@
     }
   }
 
-  function camOpen() {
+  function camOpen(opts) {
+    /* 外部调用：DL.camera.open({ onDone: fn }) —— 拍完把 dataUrl 交给 fn，不进附件栏 */
+    cam.onDone = (opts && typeof opts.onDone === "function") ? opts.onDone : null;
     $("#cameraModal").hidden = false;
     $("#camStage").hidden = false;
     $("#camEdit").hidden = true;
@@ -895,6 +900,15 @@
     let dataUrl;
     try { dataUrl = camFlatten().toDataURL("image/jpeg", 0.9); }
     catch (e) { UI.toast("图片编码失败", true); return; }
+    /* 有外部回调（发动态）就先交出去，且不碰主聊天的附件栏 ——
+       否则拍个动态会在输入框上多挂一张图，看着像要发给角色。 */
+    if (cam.onDone) {
+      var cb = cam.onDone;
+      cam.onDone = null;
+      camClose();
+      try { cb(dataUrl); } catch (e) { /* 回调自己的错不该炸相机 */ }
+      return;
+    }
     state.attachments.push({
       name: "photo_" + Date.now() + ".jpg",
       kind: "image", mime: "image/jpeg",
