@@ -942,7 +942,9 @@
     gap.className = "me-gap";
     box.appendChild(gap);
 
-    box.appendChild(meRow("cash", "服务", "钱包 · 余额可直接改", function () {
+    /* 用户口径：这一格叫「账户」，不是「服务」。微信那个位置叫服务，
+       但这里放的是钱包和额度，叫账户才对得上。 */
+    box.appendChild(meRow("cash", "账户", "钱包 · 余额", function () {
       toast("钱包在下一批里做");
     }));
     box.appendChild(meRow("creation", "我的动态", "", function () {
