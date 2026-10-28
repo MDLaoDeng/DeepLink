@@ -103,6 +103,12 @@
     if (typeof so.addedAt !== "number") { so.addedAt = ch.createdAt || Date.now(); changed = true; }
     if (typeof so.addedVia !== "string") { so.addedVia = "手动添加"; changed = true; }
     if (!Array.isArray(so.photos)) { so.photos = []; changed = true; }
+    if (typeof so.nickname !== "string") { so.nickname = ""; changed = true; }
+    /* 真名保护：没手动设过就按类型给默认值，用户随时能拨 */
+    if (typeof so.knowsMyName !== "boolean") {
+      so.knowsMyName = !(ch.phoneOnly && ch.phoneKind !== "close");
+      changed = true;
+    }
     if (changed) saveChar(ch);
     return so;
   }
@@ -119,10 +125,14 @@
     var so = ch.social || {};
     return (so.remark && String(so.remark).trim()) || ch.name || ch.fields && ch.fields.aiName || "未命名";
   }
+  /* 网名（10-29）：按性格生成的那个。
+     以前这里返回的是真名（f.aiName），于是资料页出现「外卖小哥 / 昵称：小陈」——
+     小陈就是他的真名，等于把真名冒充成昵称写了两遍。
+     没生成过就返回空，那一行直接不显示。 */
   function nickName(ch) {
     if (!ch) return "";
-    var f = ch.fields || {};
-    return String(f.aiName || ch.name || "").trim();
+    var so = ch.social || {};
+    return String(so.nickname || "").trim();
   }
 
   /* ── 共同群聊 ─────────────────────────────────────
@@ -254,6 +264,44 @@
   /* ── 异步：让 AI 按背景补签名 / 地区（不阻塞渲染）──────────
      规则：只有「签名还是空」时才补一次，补完落库，下次不再调。
      用户手填过的（sign 非空）永远不覆盖。 */
+  /* 角色网名（10-29 用户口径）：按他的性格起一个，像真人微信名。
+     显示成「网名（真名）」，括号里的真名灰化 —— 只在手机页，主聊天保持原名。 */
+  var nickPending = {};
+  function ensureNickname(ch) {
+    if (!ch || nickPending[ch.id]) return;
+    if (!ch.social || ch.social.nickname) return;
+    if (!(window.Api && Api.summarize)) return;
+    var st = (D().state || {}).settings || {};
+    if (!st.apiKey) return;
+    nickPending[ch.id] = true;
+    var f = ch.fields || {};
+    var bg = [f.aiName, f.aiPersona, f.aiBackground, f.aiLikes].filter(Boolean).join("；").slice(0, 400);
+    var prompt = "给下面这个人起一个微信网名（就是他自己会用的那种 ID）。\n\n" +
+      bg + "\n\n规则：\n" +
+      "· 4~10 个字，像一个真人的网名，不要文艺腔、不要括号、不要表情符号。\n" +
+      "· 可以从他的性格 / 职业 / 喜好里取一个具体的意象（书店、修表、雨、猫……）。\n" +
+      "· 不要写成真名，也不要带「的」字堆砌。\n" +
+      "只输出这一串字，不要解释。";
+    Api.summarize(st, [{ role: "user", content: prompt }]).then(function (r) {
+      var t = String((r && r.text) || "").trim().replace(/^["「『]|["」』]$/g, "").slice(0, 16);
+      if (!t) return;
+      var live = charById(ch.id);
+      if (!live) return;
+      live.social = live.social || {};
+      if (live.social.nickname) return;       /* 期间被手改过就不覆盖 */
+      /* 查重：两个角色撞同一个网名很出戏 */
+      var used = {};
+      (S().getCharacters() || []).forEach(function (c) {
+        if (c.social && c.social.nickname) used[c.social.nickname] = 1;
+      });
+      if (used[t]) t = t + "2";
+      live.social.nickname = t;
+      saveChar(live);
+      if (curId === ch.id) render();
+    }).catch(function () { /* 起不出来不影响资料页 */ })
+      .then(function () { nickPending[ch.id] = false; });
+  }
+
   var aiPending = {};
   function fillByAI(ch) {
     if (!ch || aiPending[ch.id]) return;
@@ -487,6 +535,12 @@
     var gs = commonGroups(ch.id);
     var gn = gs.map(function (g) { return g.title || "群聊"; });
     wrap.appendChild(row("我和TA的共同群聊", gs.length ? gs.length + " 个" + (gn.length ? "（" + gn.slice(0, 2).join("、") + (gn.length > 2 ? "…" : "") + "）" : "") : "0 个", null));
+    wrap.appendChild(row("TA 知道我的真名", so.knowsMyName ? "知道" : "只知道网名", function () {
+      so.knowsMyName = !so.knowsMyName;
+      saveChar(ch);
+      render();
+      toast(so.knowsMyName ? "已设为知道你的真名" : "已设为只知道你的网名");
+    }));
     wrap.appendChild(infoRow("签名", so.sign));
     wrap.appendChild(infoRow("来源", so.addedVia));
     wrap.appendChild(infoRow("添加时间", fmtFull(so.addedAt)));
@@ -1064,6 +1118,7 @@
       L.appendChild(node);
       L.scrollTop = 0;
       fillByAI(ch);   /* 签名/地区缺失时后台补一次 */
+      if (ch) ensureNickname(ch);   /* 网名也懒生成 */
     } catch (e) {
       L.innerHTML = "";
       L.appendChild(el("div", "pf-empty-box", "这一页没渲染出来：" + (e && e.message ? e.message : e)));
@@ -1204,7 +1259,8 @@
     /* 7.2 混合流与「我的动态」 */
     feedOf: feedOf, feedRow: feedRow, openMine: openMine, addCharMoment: addCharMoment,
     momentsOf: momentsOf, setLine: function (sid) { curSid = sid || ""; },
-    openMineDetail: openMineDetail, mySocial: mySocial, openWallet: openWallet, money: money
+    openMineDetail: openMineDetail, mySocial: mySocial, openWallet: openWallet, money: money,
+    ensureNickname: ensureNickname
   };
   (window.__dlScripts = window.__dlScripts || []).push("profile.js");
 })();

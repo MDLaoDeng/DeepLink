@@ -219,7 +219,9 @@
       likes: se.myLikes || f.myLikes || p.myLikes || st.myLikes || "",
       /* 身体状况：以前只存在角色卡里、从没进过提示词 */
       health: se.myHealth || f.myHealth || p.myHealth || st.myHealth || "",
-      callMe: f.aiCallMe || p.aiCallMe || ""
+      callMe: f.aiCallMe || p.aiCallMe || "",
+      /* 网名（10-29）：手机里那层皮。角色「不熟」时只能拿到它，拿不到真名。 */
+      nick: String(st.myNickname || "").trim()
     };
   }
 
@@ -496,6 +498,17 @@
     return { usage: out.usage, plan: plan.slice(0, 6) };
   }
 
+  /* 这个角色知不知道我的真名。
+     优先级：角色上手动设的 knowsMyName → 默认按类型判断。
+     默认规则：纯手机角色 + 功能型（phoneKind !== "close"）= 现实里还不认识，不知道。 */
+  function knowsMyName(ch) {
+    if (!ch) return true;
+    const so = ch.social || {};
+    if (typeof so.knowsMyName === "boolean") return so.knowsMyName;
+    if (ch.phoneOnly && ch.phoneKind !== "close") return false;
+    return true;
+  }
+
   function buildSystemText(ch, s, settings, opts) {
     if (!ch) return "";
     const o = opts || {};
@@ -523,7 +536,18 @@
        这三样只在跟听澜对话时触发，角色扮演里不出现 —— 聊天时冒出一句「[[视频]]」
        很出戏，而且角色本来也不该负责调这些。注入点只剩 chat.js 的助手分支。 */
     L.push("【我（用户）的设定】");
-    L.push("名称：" + (my.name || "未设定") + "；你对我的称呼：" + (my.callMe || my.name || "未设定"));
+    /* 真名保护（10-29 用户口径）：
+       纯手机里的功能型角色 = 现实里还不认识的人，除非用户主动讲过，
+       否则不该知道真名 —— 提示词里就别给，让它想说也说不出来。
+       手动开关存在角色的 social.knowsMyName 上，优先级最高。 */
+    const _knowName = knowsMyName(ch);
+    if (_knowName) {
+      L.push("名称：" + (my.name || "未设定") + "；你对我的称呼：" + (my.callMe || my.name || "未设定"));
+    } else {
+      const _nick = my.nick || "对方";
+      L.push("名称：你只知道对方的网名「" + _nick + "」，不知道真名。不要追问真名，也不要自己编一个。");
+      L.push("你对我的称呼：" + _nick);
+    }
     if (my.gender) L.push("性别：" + my.gender);
     if (my.persona) L.push("性格：" + my.persona);
     if (my.appearance) L.push("外貌：" + my.appearance);
