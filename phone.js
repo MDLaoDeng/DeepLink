@@ -940,7 +940,14 @@
       toast("钱包在下一批里做");
     }));
     box.appendChild(meRow("creation", "我的动态", "", function () {
-      openMoments();
+      /* 我自己的动态页（单人版式，不受时间域影响之外的东西干扰）。
+         整屏层，返回回手机——和「新的朋友」页同一条路。 */
+      if (window.DL && DL.profile && DL.profile.openMine) {
+        if (DL.profile.setLine) DL.profile.setLine(ps.sid || (session() ? session().id : ""));
+        DL.profile.openMine();
+      } else {
+        openMoments();
+      }
     }));
   }
 
@@ -3407,6 +3414,9 @@
      挑出相符的线并顺手总结「那天发生了什么」，供预览后确认。 */
   function openMoments() {
     ps.view = "moments";
+    /* 手机页的混合流看「当前主聊天那条线」的时间域，不是上次从手机点开的某个角色。
+       把 profile 那边的临时覆盖清掉，否则会串味。 */
+    try { if (window.DL && DL.profile && DL.profile.setLine) DL.profile.setLine(""); } catch (e) { /* ignore */ }
     switchView($("#phoneMomentsView"), 0);
     renderMoments();
     syncTabs("moments");
@@ -3473,19 +3483,19 @@
           .replace(/^["「『]|["」』]$/g, "").slice(0, 80);
         if (!txt) return;
         var spec = canImg ? parsed.image : null;
-        if (!spec) { DL.profile.addCharMoment(ch.id, txt, []); return; }
+        if (!spec) { DL.profile.addCharMoment(ch.id, txt, [], s.id); return; }
         /* 带图：先生成、再外置存文件，moments 里只留引用。
            不能把 dataUrl 直接塞进动态 —— 动态最多 500 条，全带内联图会把 localStorage 撑爆。 */
         try {
           var url = await buildShareImage(s, spec);
           var dataUrl = url ? await urlToDataUrl(url) : "";
-          if (!dataUrl) { DL.profile.addCharMoment(ch.id, txt, []); return; }
+          if (!dataUrl) { DL.profile.addCharMoment(ch.id, txt, [], s.id); return; }
           var att = { kind: "image", name: "moment.png", mime: "image/png", desc: String(spec.subject || "") };
           att.dataUrl = dataUrl;
           try { if (Store.hoistImage) Store.hoistImage(att); } catch (e2) { /* ignore */ }
-          DL.profile.addCharMoment(ch.id, txt, [att]);
+          DL.profile.addCharMoment(ch.id, txt, [att], s.id);
         } catch (e3) {
-          DL.profile.addCharMoment(ch.id, txt, []);   /* 图没出来，文字照发 */
+          DL.profile.addCharMoment(ch.id, txt, [], s.id);   /* 图没出来，文字照发 */
         }
       }).catch(function () { /* 发不出来不影响别的 */ })
         .finally(function () { momentBusy = false; });
@@ -3498,18 +3508,36 @@
     var c = characterFor(s);
     return (c ? (c.name || "角色") : aiName()) + (s.title && s.title !== "新对话" ? " · " + s.title : "");
   }
+  /* ── 混合流（tab「动态」，7.2）────────────────────────
+     当前时间域里：我发的 + 所有角色发的，按时间倒序，每条带作者头像和名字。
+     别的线的角色动态看不到 —— 时间域是线级的（用户口径 10-28）。 */
   function renderMoments() {
     var box = $("#phoneMoments");
     if (!box) return;
     box.innerHTML = "";
-    /* 7.1.2 用户口径：我自己的动态页要和角色动态页长得一样（封面 + 日期左 / 内容右），
-       所以整块交给 profile.js 渲染，只保留「封面只能上传」这一条差异。
-       下面那段旧渲染留作兜底：profile.js 没加载成功时还能显示。 */
-    if (window.DL && DL.profile && DL.profile.renderMine) {
-      try {
-        if (DL.profile.renderMine(box)) { box.classList.add("pf-host"); return; }
-      } catch (e) { /* 回落旧渲染 */ }
+    box.classList.remove("pf-host");
+    box.classList.add("ph-feed");
+    if (!(window.DL && DL.profile && DL.profile.feedOf)) return;
+    var list = [];
+    try { list = DL.profile.feedOf(); } catch (e) { list = []; }
+    if (!list.length) {
+      var tip = document.createElement("div");
+      tip.className = "pf-empty-box";
+      tip.textContent = "这条线上还没有动态。点右上角相机发一条。";
+      box.appendChild(tip);
+      return;
     }
+    list.forEach(function (m) {
+      box.appendChild(DL.profile.feedRow(m));
+    });
+    return;
+
+    /* 旧渲染不再需要：下面这些留着只会让「混合流」和「单人版」两套逻辑打架 */
+  }
+  function renderMomentsLegacy() {
+    var box = $("#phoneMoments");
+    if (!box) return;
+    box.innerHTML = "";
     var list = Store.getMoments().slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
     if (!list.length) {
       var tip = document.createElement("div");

@@ -4337,7 +4337,19 @@
     return true;
   }
 
+  /* 动态改成线级（7.2）时的一次性清理：老数据没有 sid，归不到任何一条线上。
+     用户 10-28 口径：这版还没分发出去，直接清空，不做迁移。 */
+  function migrateMomentsV2() {
+    try {
+      var st = Store.getSettings() || {};
+      if (st.momentsV === 2) return;
+      Store.saveMoments([]);
+      Store.saveSettings(Object.assign({}, st, { momentsV: 2 }));
+    } catch (e) { /* 清理失败不影响启动 */ }
+  }
+
   async function init() {
+    migrateMomentsV2();
     /* 启动分段计时（10-18：用户反馈启动从 80ms 涨到 230ms，需要知道花在哪一步）。
        只在内存里攒一个数组，设置页「连接自检」会把它和首屏耗时一起打出来 ——
        不写盘、不发请求，真机跑一趟就能定位，比猜快。 */

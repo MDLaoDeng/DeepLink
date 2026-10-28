@@ -16,6 +16,14 @@
 (function () {
   var layer = null;          /* #profileLayer */
   var curId = "";            /* 当前看的角色 id */
+  /* 当前所在的「线」= 时间域。动态按线隔离：不同线的互相看不到。
+     从主聊天进就是主聊天那条线，从手机页进就是手机里正在看的那条。 */
+  var curSid = "";
+  function lineId() {
+    if (curSid) return curSid;
+    var st = (D().state || {});
+    return st.sessionId || "";
+  }
   var view = "main";         /* main | detail | moments */
   var busy = false;
 
@@ -191,17 +199,43 @@
   /* ── 动态（朋友圈）───────────────────────────────
      现有 moments 结构：{ id, ts, text, imgs?, vis? }，没有 who 字段（= 我发的）。
      7.1 起角色发的带 who = 角色 id；读的时候 who 为空一律当我。 */
-  function momentsOf(chId) {
+  /* 取某个人的动态（chId 传 "me" = 我自己的）。
+     时间域规则（用户口径 10-28）：
+       · 角色的动态只属于触发它的那条线（m.sid），别的线看不到；
+       · 我发的动态是我发的，按 m.lines 决定哪几条线看得到；
+       · 两者都只在当前线内可见。 */
+  function momentsOf(chId, sid) {
+    var line = (sid === undefined) ? lineId() : sid;
     return (S().getMoments() || []).filter(function (m) {
       if (!m) return false;
-      return chId === "me" ? !m.who : (m.who === chId);
+      if (chId === "me") {
+        if (m.who) return false;
+        /* 老数据没有 lines 的一律当「全部可见」，别让升级后的人突然看不见自己发过的东西 */
+        if (!Array.isArray(m.lines) || !m.lines.length) return true;
+        return !line || m.lines.indexOf(line) >= 0;
+      }
+      if (m.who !== chId) return false;
+      return !m.sid || m.sid === line;
     }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
   }
-  function addCharMoment(chId, text, imgs) {
+
+  /* 混合流（tab「动态」）：当前时间域里，我发的 + 所有角色发的，按时间倒序 */
+  function feedOf(sid) {
+    var line = (sid === undefined) ? lineId() : sid;
+    return (S().getMoments() || []).filter(function (m) {
+      if (!m) return false;
+      if (m.who) return !m.sid || m.sid === line;          /* 角色：只属于它那条线 */
+      if (!Array.isArray(m.lines) || !m.lines.length) return true;   /* 我发的：老数据全可见 */
+      return !line || m.lines.indexOf(line) >= 0;
+    }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+  }
+  function addCharMoment(chId, text, imgs, sid) {
     var list = S().getMoments() || [];
     var m = {
       id: "m_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       who: chId, ts: Date.now(), text: String(text || ""), imgs: imgs || [],
+      /* sid = 这条动态属于哪条线（时间域）。没有它，别的线也会刷到，串戏。 */
+      sid: sid || lineId(),
       vis: "public", byAI: true
     };
     list.unshift(m);
@@ -500,6 +534,50 @@
     return wrap;
   }
 
+  /* 混合流里的一行：头像 + 名字 + 时间在左、内容在右（微信那种）。
+     和单人版 momentRow 的区别只有一个 —— 单人版不用标「谁发的」。 */
+  function feedRow(m) {
+    var it = el("div", "pf-feed-item");
+    var head = el("div", "pf-feed-head");
+    var av = el("div", "pf-feed-av");
+    var owner = m.who ? charById(m.who) : null;
+    var src = owner ? avatarUrl(owner.avatar) : (((D().state || {}).settings || {}).phoneAvatarUser ||
+      ((D().state || {}).settings || {}).avatarUser || "");
+    var u = src ? ((D().avatarUrl && src) ? D().avatarUrl(src) : src) : "";
+    if (u) { var im = el("img"); im.src = u; im.alt = ""; av.appendChild(im); }
+    else av.innerHTML = icon("account");
+    head.appendChild(av);
+    var meta = el("div", "pf-feed-meta");
+    meta.appendChild(el("div", "pf-feed-name", owner ? showName(owner)
+      : (((D().state || {}).settings || {}).myName || "我")));
+    meta.appendChild(el("div", "pf-feed-time", fmtWhen(m.ts)));
+    head.appendChild(meta);
+    it.appendChild(head);
+
+    var body = el("div", "pf-feed-body");
+    var pics = (m.imgs && m.imgs.length) ? m.imgs : (m.image ? [m.image] : []);
+    if (m.text) body.appendChild(el("div", "pf-feed-text", m.text));
+    if (pics.length) {
+      var grid = el("div", "pf-moment-imgs pf-n" + Math.min(3, pics.length));
+      pics.slice(0, 6).forEach(function (x) {
+        var u2 = picUrl(x);
+        if (!u2) return;
+        var cell = el("div", "pf-moment-img");
+        var i3 = el("img"); i3.src = u2; i3.alt = "";
+        cell.appendChild(i3); grid.appendChild(cell);
+      });
+      if (grid.children.length) body.appendChild(grid);
+    }
+    it.appendChild(body);
+    return it;
+  }
+
+  function fmtWhen(ts) {
+    var d = new Date(ts || Date.now());
+    var h = d.getHours(), mi = d.getMinutes();
+    return (d.getMonth() + 1) + "月" + d.getDate() + "日 " + (h < 10 ? "0" : "") + h + ":" + (mi < 10 ? "0" : "") + mi;
+  }
+
   /* 一条动态（角色版与「我」的版式完全一样，用户要求统一） */
   function momentRow(m) {
     var it = el("div", "pf-moment");
@@ -795,19 +873,39 @@
     var L = ensureLayer();
     if (!L || L.hidden) return;
     L.innerHTML = "";
-    if (view === "requests") { L.appendChild(requestsView()); L.scrollTop = 0; return; }
-    var ch = charById(curId);
-    if (!ch) { close(); return; }
-    var node = view === "detail" ? detailView(ch)
-      : (view === "moments" ? momentsView(ch) : mainView(ch));
-    L.appendChild(node);
-    L.scrollTop = 0;
-    fillByAI(ch);   /* 签名/地区缺失时后台补一次 */
+    /* 一个渲染错误不该变成一块白（黑）屏：出错就把原因写在层里，
+       比让用户对着空白点半天强，也给回归脚本留下线索。 */
+    try {
+      if (view === "requests") { L.appendChild(requestsView()); L.scrollTop = 0; return; }
+      var ch = (curId === "me") ? null : charById(curId);
+      if (curId !== "me" && !ch) { close(); return; }
+      var node = view === "detail" ? detailView(ch)
+        : (view === "moments" ? momentsView(ch) : mainView(ch));
+      L.appendChild(node);
+      L.scrollTop = 0;
+      fillByAI(ch);   /* 签名/地区缺失时后台补一次 */
+    } catch (e) {
+      L.innerHTML = "";
+      L.appendChild(el("div", "pf-empty-box", "这一页没渲染出来：" + (e && e.message ? e.message : e)));
+    }
   }
 
   function openMain() { view = "main"; render(); }
   function openDetail() { view = "detail"; render(); }
   function openMoments() { view = "moments"; render(); }
+  /* 我自己的动态页（「我的」页那一行进这里）。走整屏层，返回回手机页。 */
+  function openMine() {
+    var L = ensureLayer();
+    if (!L) return false;
+    cancelClose();
+    curId = "me"; curSid = "";
+    view = "moments";
+    L.hidden = false;
+    var app = document.getElementById("app");
+    if (app) app.style.visibility = "hidden";
+    render();
+    return true;
+  }
   /* 新的朋友：不带角色上下文，单独一层 */
   function openRequests() {
     var L = ensureLayer();
@@ -841,6 +939,8 @@
   function close() {
     var L = ensureLayer();
     curId = ""; view = "main";
+    /* 线 id 一定要清：它决定动态看哪条时间域，留着就会串到下一条线上 */
+    curSid = "";
     var app = document.getElementById("app");
     if (app) app.style.visibility = "";
     if (!L) return;
@@ -869,6 +969,9 @@
   function back() {
     if (!isOpen()) return false;
     if (view === "requests") { close(); return true; }
+    /* 「我的动态」是从手机页进来的整屏页，没有「上一层资料页」可退 —— 直接关。
+       以前这里会走 openMain()，而 mainView(null) 当场抛错，层就卡在屏幕上了。 */
+    if (curId === "me") { close(); return true; }
     if (view === "detail" || view === "moments") { openMain(); return true; }
     close();
     return true;
@@ -891,7 +994,10 @@
       box.appendChild(momentsView(null, true));
       return true;
     },
-    coverOf: coverOf, setCover: setCover
+    coverOf: coverOf, setCover: setCover,
+    /* 7.2 混合流与「我的动态」 */
+    feedOf: feedOf, feedRow: feedRow, openMine: openMine, addCharMoment: addCharMoment,
+    momentsOf: momentsOf, setLine: function (sid) { curSid = sid || ""; }
   };
   (window.__dlScripts = window.__dlScripts || []).push("profile.js");
 })();
