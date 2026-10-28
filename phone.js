@@ -944,8 +944,14 @@
 
     /* 用户口径：这一格叫「账户」，不是「服务」。微信那个位置叫服务，
        但这里放的是钱包和额度，叫账户才对得上。 */
-    box.appendChild(meRow("cash", "账户", "钱包 · 余额", function () {
-      toast("钱包在下一批里做");
+    var bal = Number((state.settings || {}).walletBalance) || 0;
+    /* 和钱包页用同一个格式化函数：两处一个带千分位一个不带，看着像两个数 */
+    var balTx = (window.DL && DL.profile && DL.profile.money) ? DL.profile.money(bal) : fmtMoney(bal);
+    box.appendChild(meRow("cash", "账户", "¥" + balTx, function () {
+      if (window.DL && DL.profile && DL.profile.openWallet) {
+        DL.profile.openWallet();
+        setTimeout(function () { if (ps.view === "me") renderMe(); }, 600);
+      }
     }));
     box.appendChild(meRow("creation", "我的动态", "", function () {
       /* 我自己的动态页（单人版式，不受时间域影响之外的东西干扰）。
@@ -2851,7 +2857,20 @@
     openSheet("转账", box, function () {
       var amt = Number(money.input.value);
       if (!isFinite(amt) || amt <= 0) { toast("请输入正确的金额", true); return; }
+      /* 余额校验（10-29 用户口径）：不够就提示，别让他转出负数。
+         差额也算出来告诉他，省得自己掰手指。 */
+      var bal = Number((state.settings || {}).walletBalance) || 0;
+      amt = Math.round(amt * 100) / 100;
+      if (amt > bal) {
+        toast("余额不够，还差 ¥" + fmtMoney(Math.round((amt - bal) * 100) / 100), true);
+        return;
+      }
       closeSheet();
+      /* 先扣钱再发消息：反过来的话，消息发出去、扣钱失败就成白送了 */
+      try {
+        var next = Object.assign({}, state.settings, { walletBalance: Math.round((bal - amt) * 100) / 100 });
+        state.settings = Store.saveSettings(next) || next;
+      } catch (e) { /* 扣钱失败不影响发消息，余额页还能手动改回来 */ }
       pushMsg(sid, { role: "user", kind: "transfer", amount: amt, note: String(note.input.value || "").trim() });
       renderChat(); scrollPhoneBottom();
       genReply(sid);

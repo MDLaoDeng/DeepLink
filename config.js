@@ -1423,6 +1423,10 @@
       myTel: "",
       mySid: "",
       mySign: "",
+      /* 钱包余额（10-29）：只在手机转账里用。
+         用户口径「金额随便填」「改一下余额就行了」—— 所以它就是个可手改的数字，
+         不跟任何真实货币挂钩，纯氛围。 */
+      walletBalance: 5200,
       myPersona: "",
       myAppearance: "",
       myBackground: "",

@@ -862,6 +862,57 @@
     });
   }
 
+  /* ③.6 账户 / 钱包（从「我的」页「账户」那一行进来）
+     用户口径 10-29：余额可以随便改，转账不够要提示。
+     所以这里就是「一个大数字 + 一个改它」的地方，不做流水、不做充值。 */
+  function mineWalletView() {
+    var st = (D().state || {}).settings || {};
+    var bal = Number(st.walletBalance) || 0;
+    var wrap = el("div", "pf-page");
+    wrap.appendChild(head("账户", function () { close(); }));
+
+    var box = el("div", "pf-wallet");
+    box.appendChild(el("div", "pf-wallet-label", "余额"));
+    box.appendChild(el("div", "pf-wallet-num", "¥ " + money(bal)));
+    wrap.appendChild(box);
+
+    /* 上面已经有个「余额」标签了，这里再写一次就是重复 */
+    wrap.appendChild(secTitle("操作"));
+    wrap.appendChild(row("改余额", "¥ " + money(bal), function () {
+      ask("改余额", "想写成多少就多少，只在手机转账时用。", String(bal)).then(function (v) {
+        if (v === null) return;
+        var n = Number(String(v).replace(/[^\d.-]/g, ""));
+        if (!isFinite(n)) { toast("这不是一个数字", true); return; }
+        saveMy({ walletBalance: Math.round(n * 100) / 100 });
+        render();
+      });
+    }));
+    wrap.appendChild(row("记一笔", "手动加减", function () {
+      ask("记一笔", "正数是收入，负数是支出。比如 50 或 -20。", "").then(function (v) {
+        if (v === null || String(v).trim() === "") return;
+        var n = Number(String(v).replace(/[^\d.-]/g, ""));
+        if (!isFinite(n)) { toast("这不是一个数字", true); return; }
+        var next = Math.round((bal + n) * 100) / 100;
+        if (next < 0) { toast("扣完就成负数了", true); return; }
+        saveMy({ walletBalance: next });
+        render();
+      });
+    }));
+
+    var tip = el("div", "pf-wallet-tip");
+    tip.textContent = "这个余额只在手机里转账时用。不跟任何真实钱包挂钩，改了也不影响别的地方。";
+    wrap.appendChild(tip);
+
+    return wrap;
+  }
+
+  /* 金额显示：整数不带小数，有小数才留两位 */
+  function money(n) {
+    var v = Number(n) || 0;
+    var fixed = (Math.round(v * 100) % 100 === 0) ? String(Math.round(v)) : v.toFixed(2);
+    return fixed.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
   /* ④ 新的朋友（好友申请列表）—— 手机页列表顶部那个入口进来 */
   function requestsView() {
     var wrap = el("div", "pf-page");
@@ -1006,9 +1057,10 @@
       if (view === "requests") { L.appendChild(requestsView()); L.scrollTop = 0; return; }
       var ch = (curId === "me") ? null : charById(curId);
       if (curId !== "me" && !ch) { close(); return; }
-      var node = view === "medetail" ? mineDetailView()
-        : (view === "detail" ? detailView(ch)
-          : (view === "moments" ? momentsView(ch) : mainView(ch)));
+      var node = view === "mewallet" ? mineWalletView()
+        : (view === "medetail" ? mineDetailView()
+          : (view === "detail" ? detailView(ch)
+            : (view === "moments" ? momentsView(ch) : mainView(ch))));
       L.appendChild(node);
       L.scrollTop = 0;
       fillByAI(ch);   /* 签名/地区缺失时后台补一次 */
@@ -1022,6 +1074,19 @@
   function openDetail() { view = "detail"; render(); }
   function openMoments() { view = "moments"; render(); }
   /* 我自己的动态页（「我的」页那一行进这里）。走整屏层，返回回手机页。 */
+  function openWallet() {
+    var L = ensureLayer();
+    if (!L) return false;
+    cancelClose();
+    curId = "me"; curSid = "";
+    view = "mewallet";
+    L.hidden = false;
+    var app = document.getElementById("app");
+    if (app) app.style.visibility = "hidden";
+    render();
+    return true;
+  }
+
   function openMineDetail() {
     var L = ensureLayer();
     if (!L) return false;
@@ -1139,7 +1204,7 @@
     /* 7.2 混合流与「我的动态」 */
     feedOf: feedOf, feedRow: feedRow, openMine: openMine, addCharMoment: addCharMoment,
     momentsOf: momentsOf, setLine: function (sid) { curSid = sid || ""; },
-    openMineDetail: openMineDetail, mySocial: mySocial
+    openMineDetail: openMineDetail, mySocial: mySocial, openWallet: openWallet, money: money
   };
   (window.__dlScripts = window.__dlScripts || []).push("profile.js");
 })();

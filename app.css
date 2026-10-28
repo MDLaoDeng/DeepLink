@@ -3840,3 +3840,20 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 .pf-feed-body { margin-top: 8px; padding-left: 50px; }
 .pf-feed-text { font-size: var(--fs-body); line-height: 1.65; color: var(--text); word-break: break-word; }
 .pf-feed-body .pf-moment-imgs { margin-top: 8px; margin-bottom: 0; }
+
+
+/* ── 7.2 账户 / 钱包 ────────────────────────────── */
+.pf-wallet {
+  margin: 8px 0 4px; padding: 26px 18px 24px;
+  background-color: var(--panel);
+  border-top: 0.5px solid var(--border); border-bottom: 0.5px solid var(--border);
+}
+.pf-wallet-label { font-size: var(--fs-caption); color: var(--text-mute); }
+.pf-wallet-num {
+  margin-top: 8px; font-size: var(--fs-hero); font-weight: 600;
+  color: var(--text); letter-spacing: .5px;
+}
+.pf-wallet-tip {
+  padding: 16px 18px 28px;
+  font-size: var(--fs-caption); line-height: 1.7; color: var(--text-mute);
+}
