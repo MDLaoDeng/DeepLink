@@ -778,11 +778,12 @@
   }
 
   /* ── 自绘选择层（不用原生 confirm；原生框在暗色主题下会白一块）── */
-  function choose(title, items) {
+  function choose(title, items, hint) {
     return new Promise(function (resolve) {
       var mask = el("div", "pf-edit");
       var card = el("div", "pf-edit-card");
       card.appendChild(el("div", "pf-edit-t", title));
+      if (hint) card.appendChild(el("div", "pf-edit-h", hint));
       var list = el("div", "pf-choose");
       var done = false;
       function finish(v) {
@@ -993,6 +994,209 @@
     var v = Number(n) || 0;
     var fixed = (Math.round(v * 100) % 100 === 0) ? String(Math.round(v)) : v.toFixed(2);
     return fixed.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  /* ── 异世界（10-29 用户口径）─────────────────────────
+     建群时填了「本群的世界观」，就判断一次每位成员是不是同一个世界的人：
+       · 是 → 什么都不做
+       · 否 → 问他「该角色属于异世界」，拉进来就复制一个「原名-另世N」
+     副本自己带着那份世界观，原角色一个字不动。
+     同一个世界只复制一次（原角色上记 altWorlds 映射），换世界才新建。
+     判定合并成一次调用 —— 5 个人逐个问要 5 次，钱不经烧。 */
+  var altRunning = false;
+  function maybeAltWorld(sid) {
+    var s = sessionById(sid);
+    if (!s || !s.isGroup) return;
+    var world = String(s.groupWorld || "").trim();
+    if (!world) return;                       /* 没填就是不做这套，零成本 */
+    /* 注意：这里【不能】放 altRunning 守卫 —— 复用的是纯本地操作，不花模型也不用弹窗，
+       放前面会让「上一轮还没收尾时，连已经存在的副本都换不上去」。守卫在 AI 判定之前。 */
+    if (!(window.Api && Api.summarize)) return;
+    var st = (D().state || {}).settings || {};
+    if (!st.apiKey) return;
+
+    var ids = (s.members || []).slice();
+    var list = [];
+    ids.forEach(function (id) {
+      var c = charById(id);
+      if (c) list.push(c);
+    });
+    if (!list.length) return;
+
+    /* 先把能直接复用的挑出来（同一个世界以前复制过）：这一步不花模型、不用弹窗，
+       所以放在 altRunning 守卫之前 —— 否则上一轮还没收尾时，连复用都会被跳过。 */
+    var mem = (s.members || []).slice();
+    var ml = Object.assign({}, s.memberLine || {});
+    var changed = false;
+    var todo = [];
+    mem.forEach(function (id) {
+      var c = charById(id);
+      if (!c) return;
+      var reused = reuseAlt(c, world);
+      if (reused) {
+        var k = mem.indexOf(id);
+        if (k >= 0) mem[k] = reused.id;
+        var oldLine = ml[id];
+        delete ml[id];
+        ml[reused.id] = oldLine || "";
+        changed = true;
+      } else {
+        todo.push(c);
+      }
+    });
+    if (changed) S().updateSession(sid, { members: mem, memberLine: ml });
+    if (!todo.length) return;
+    if (altRunning) return;
+
+    altRunning = true;
+    toast("正在看这几个人是不是同一个世界…");
+    var body = todo.map(function (c) {
+      var f = c.fields || {};
+      return "- " + c.id + " / " + (f.aiName || c.name || "角色") +
+        " / 他的世界观：" + String(f.world || "（没填）").slice(0, 80) +
+        " / 性格：" + String(f.aiPersona || "").slice(0, 40);
+    }).join("\n");
+    var prompt = "你在判断这几个人是不是和这个群处在同一个世界观里。\n\n" +
+      "这个群的世界观：" + world + "\n\n" +
+      "成员：\n" + body + "\n\n" +
+      "规则：\n" +
+      "· 世界观明显不是一回事（不同年代 / 不同设定体系 / 完全不同的地方）→ sameWorld 给 false。\n" +
+      "· 没填世界观的成员一律给 true（不知道就别冤枉人）。\n" +
+      "· 只是同一国家的不同城市，不算异世界，给 true。\n" +
+      "只输出 JSON：{\"list\":[{\"id\":\"成员id\",\"sameWorld\":true,\"why\":\"不超过20字\"}]}";
+    Api.summarize(st, [{ role: "user", content: prompt }], { maxTokens: 400 }).then(function (r) {
+      var raw = String((r && r.text) || "");
+      var m = raw.match(/\{[\s\S]*\}/);
+      if (!m) return;
+      var arr = [];
+      try { arr = (JSON.parse(m[0]).list || []); } catch (e) { return; }
+      /* 一个个问，串行 —— 同时弹两个框会叠在一起 */
+      var q = arr.filter(function (x) { return x && x.id && x.sameWorld === false; });
+      askAltOne(sid, world, q, 0);
+    }).catch(function () { /* 判定失败就当没这回事，不能拦住建群 */ })
+      .then(function () { altRunning = false; });
+  }
+
+  /* 同一个世界以前复制过 → 直接复用，不再新建 */
+  /* 同一个世界以前复制过 → 直接复用。
+     不查 altWorlds 映射表，直接扫角色列表：映射是写在原角色对象上的，
+     而多处代码各自持有旧对象引用，读它容易读到「还没更新的那一份」。
+     按 altOf + altWorld 扫是纯事实查询，不会有这个坑。 */
+  function reuseAlt(ch, world) {
+    var list = S().getCharacters() || [];
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (c && c.altOf === ch.id && String(c.altWorld || "") === world) return c;
+    }
+    return null;
+  }
+
+  function askAltOne(sid, world, list, i) {
+    if (i >= list.length) return;
+    var it = list[i];
+    var ch = charById(it.id);
+    if (!ch) { askAltOne(sid, world, list, i + 1); return; }
+    var f = ch.fields || {};
+    var hisWorld = String(f.world || "").trim() || "（没填）";
+    var n = nextAltNo(ch);
+    var nm = (ch.name || f.aiName || "角色") + "-另世" + n;
+    choose("该角色属于异世界",
+      [
+        { value: "yes", label: "拉进来", hint: "会复制一个「" + nm + "」，原角色不受影响" },
+        { value: "no", label: "不拉了", hint: "这位不进群，其余人照常" }
+      ],
+      "「" + (f.aiName || ch.name || "角色") + "」的世界观是「" + String(hisWorld).slice(0, 40) +
+      "」，和本群的「" + world + "」不是同一个世界。" +
+      (it.why ? "\n" + it.why : "")
+    ).then(function (v) {
+      if (v === "yes") {
+        var copy = cloneCharForWorld(ch, world, nm);
+        if (copy) {
+          var line = giveAltLine(ch, copy);
+          swapMember(sid, ch.id, copy.id, line);
+          toast("「" + nm + "」进群了");
+        }
+      }
+      askAltOne(sid, world, list, i + 1);
+    });
+  }
+
+  /* 这个角色已经有几个副本了（-另世N 的 N） */
+  function nextAltNo(ch) {
+    var n = 1;
+    (S().getCharacters() || []).forEach(function (c) {
+      if (c && c.altOf === ch.id) n++;
+    });
+    return n;
+  }
+
+  function cloneCharForWorld(ch, world, newName) {
+    var list = S().getCharacters() || [];
+    var copy;
+    try { copy = JSON.parse(JSON.stringify(ch)); } catch (e) { return null; }
+    copy.id = ch.id + "_alt" + Date.now().toString(36);
+    copy.altOf = ch.id;
+    copy.altWorld = world;
+    copy.name = newName;
+    copy.fields = Object.assign({}, copy.fields || {}, { world: world });
+    copy.createdAt = Date.now();
+    /* 副本是「被拉进异世界的那个人」：手机资料重新长一份，别跟原角色共用同一个号 */
+    copy.social = Object.assign({}, copy.social || {}, {
+      sid: "", tel: "", region: "", remark: "", addedAt: Date.now(),
+      addedVia: "通过群聊「异世界」复制", knowsMyName: true
+    });
+    copy.altWorlds = {};
+    list.push(copy);
+    S().saveCharacters(list);
+    /* 原角色记一笔：同一个世界再来就直接复用，不再问第二遍 */
+    var live = charById(ch.id);
+    if (live) {
+      live.altWorlds = live.altWorlds || {};
+      live.altWorlds[world] = copy.id;
+      saveChar(live);
+    }
+    return copy;
+  }
+
+  /* 给副本一条自己的线：记忆摘要照搬，最近 30 条原话一起带过去。
+     不搬全量 —— 一条线几千条消息，复制一份等于体积翻倍。 */
+  function giveAltLine(srcCh, copy) {
+    var sessions = S().getSessions() || [];
+    var src = null;
+    for (var i = 0; i < sessions.length; i++) {
+      var x = sessions[i];
+      if (x && !x.isGroup && x.characterId === srcCh.id) { src = x; break; }
+    }
+    if (!src) return "";
+    var s = S().createSession("");
+    var patch = { characterId: copy.id, title: (src.title || "新对话") + " · 另世" };
+    if (src.memory) {
+      try { patch.memory = JSON.parse(JSON.stringify(src.memory)); } catch (e) { /* ignore */ }
+    }
+    var msgs = (src.messages || []).slice(-30);
+    if (msgs.length) {
+      try { patch.messages = JSON.parse(JSON.stringify(msgs)); } catch (e2) { /* ignore */ }
+    }
+    S().updateSession(s.id, patch);
+    return s.id;
+  }
+
+  /* 把群成员从 oldId 换成 newId，并把它绑到副本自己那条线上 */
+  function swapMember(sid, oldId, newId, newLine) {
+    var s = sessionById(sid);
+    if (!s) return;
+    var mem = (s.members || []).map(function (x) { return x === oldId ? newId : x; });
+    var ml = Object.assign({}, s.memberLine || {});
+    var oldLine = ml[oldId];
+    delete ml[oldId];
+    ml[newId] = newLine || oldLine || "";
+    S().updateSession(sid, { members: mem, memberLine: ml });
+  }
+
+  function sessionById(id) {
+    var list = S().getSessions() || [];
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i];
+    return null;
   }
 
   /* ④ 新的朋友（好友申请列表）—— 手机页列表顶部那个入口进来 */
@@ -1288,7 +1492,8 @@
     feedOf: feedOf, feedRow: feedRow, openMine: openMine, addCharMoment: addCharMoment,
     momentsOf: momentsOf, setLine: function (sid) { curSid = sid || ""; },
     openMineDetail: openMineDetail, mySocial: mySocial, openWallet: openWallet, money: money,
-    ensureNickname: ensureNickname, charNameParts: charNameParts
+    ensureNickname: ensureNickname, charNameParts: charNameParts,
+    maybeAltWorld: maybeAltWorld
   };
   (window.__dlScripts = window.__dlScripts || []).push("profile.js");
 })();

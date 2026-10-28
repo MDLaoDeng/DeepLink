@@ -1292,6 +1292,9 @@
     let title = $v("#groupName").trim();
     if (!title) title = names.join("、");
     const s = Store.createSession("");
+    /* 本群的世界观（10-29）：填了才做「异世界」判断，留空就一切照旧。
+       它不属于任何一条线，是「这个群所在的那一重世界」。 */
+    const groupWorld = $v("#groupWorld").trim();
     /* 导出选项先取出来：两种群都要用（手机群也走导入） */
     const src = $v("#groupImport");
     if (groupMode === "phone") {
@@ -1299,6 +1302,7 @@
          不进主聊天列表。memberLine 是这份群自己的绑定 —— 与主群那份互不覆盖。 */
       Store.updateSession(s.id, {
         isGroup: true, members: ids, title: title, memberLine: memberLine,
+        groupWorld: groupWorld,
         phoneOnly: true, phoneGroup: true,
         phone: { msgs: [] }
       });
@@ -1315,9 +1319,11 @@
       /* 7.1：群里的人互相加好友。规则判定（外向的先加 / 内向的一半概率），不调模型 ——
          建群一次可能牵动好几对成员，每对问一次模型既慢又贵。 */
       try { if (window.DL && DL.profile && DL.profile.maybeGroupFriending) DL.profile.maybeGroupFriending(s.id); } catch (e) { /* ignore */ }
+      /* 7.2 异世界：填了「本群的世界观」才做判断，留空零成本 */
+      try { if (window.DL && DL.profile && DL.profile.maybeAltWorld) DL.profile.maybeAltWorld(s.id); } catch (e2) { /* ignore */ }
       return;
     }
-    Store.updateSession(s.id, { isGroup: true, members: ids, title: title, memberLine: memberLine });
+    Store.updateSession(s.id, { isGroup: true, members: ids, title: title, memberLine: memberLine, groupWorld: groupWorld });
     /* 可选：把某条线的记忆导进群聊（口径见 importLineMemoryToGroup） */
     if (src) {
       const from = sessionById(src);
@@ -1330,6 +1336,8 @@
       /* 7.1：群里的人互相加好友。规则判定（外向的先加 / 内向的一半概率），不调模型 ——
          建群一次可能牵动好几对成员，每对问一次模型既慢又贵。 */
       try { if (window.DL && DL.profile && DL.profile.maybeGroupFriending) DL.profile.maybeGroupFriending(s.id); } catch (e) { /* ignore */ }
+      /* 7.2 异世界：填了「本群的世界观」才做判断，留空零成本 */
+      try { if (window.DL && DL.profile && DL.profile.maybeAltWorld) DL.profile.maybeAltWorld(s.id); } catch (e2) { /* ignore */ }
   }
 
   /* 把一条线的记忆导进群聊。用户拍板的口径：
