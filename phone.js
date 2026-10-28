@@ -918,8 +918,10 @@
     info.appendChild(nm);
     var sub = document.createElement("div");
     sub.className = "me-sub";
+    /* 号是懒生成的：真进了资料页才补，卡片上先显示有没有 */
     var sid = String(st.mySid || "").trim();
-    sub.textContent = sid ? ("Sekulum 号：" + sid) : "Sekulum 号：还没生成（点右边箭头）";
+    var nm2 = String(st.myNickname || "").trim();
+    sub.textContent = (nm2 ? nm2 + "  " : "") + (sid ? ("Sekulum " + sid) : "还没生成 Sekulum 号");
     info.appendChild(sub);
     card.appendChild(info);
 
@@ -928,7 +930,11 @@
     ar.textContent = "›";
     card.appendChild(ar);
     card.addEventListener("click", function () {
-      toast("详细资料页在下一批里做，现在还不能改");
+      if (window.DL && DL.profile && DL.profile.openMineDetail) {
+        DL.profile.openMineDetail();
+        /* 回来时资料可能改过，重新画一遍这张卡 */
+        setTimeout(function () { if (ps.view === "me") renderMe(); }, 600);
+      }
     });
     box.appendChild(card);
 

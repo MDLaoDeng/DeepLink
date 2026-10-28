@@ -630,11 +630,11 @@
 
   /* 压缩后再存：封面会一直躺在设置 / 角色卡里，原图几百 KB 会把配额吃掉不少。
      720 宽足够铺满 180px 高的封面（DPR2 也够）。 */
-  function shrink(url) {
+  function shrink(url, maxW) {
     if (!url || String(url).slice(0, 5) !== "data:") return Promise.resolve(url || "");
     var fn = D().shrinkDataUrl;
     if (typeof fn !== "function") return Promise.resolve(url);
-    return fn(url, 720, 0.82).catch(function () { return url; });
+    return fn(url, maxW || 720, 0.82).catch(function () { return url; });
   }
 
   function editCover(ch, isMe) {
@@ -733,6 +733,133 @@
 
   function toast(t, isErr) {
     if (U() && U().toast) U().toast(t, isErr);
+  }
+
+  /* ③.5 我的个人资料（从「我的」页那张卡右边的箭头进来）
+     用户口径 10-28：这是「手机页资料」，和主聊天里的「我的人设」分开存 ——
+     名字仍然用来被角色称呼，网名只是手机里显示的那层皮。
+     号 / 电话 / 地区都是懒生成：第一次打开才补，补完落盘，以后不再变。 */
+  function mySocial() {
+    var st = (D().state || {}).settings || {};
+    var next = Object.assign({}, st);
+    var touched = false;
+    if (!next.mySid) { next.mySid = String(10000000 + Math.floor(Math.random() * 89999999)); touched = true; }
+    if (!next.myTel) {
+      /* 13 位 = 1 + 两位号段 + 十位尾号（用户口径：坚持 13 位、1 开头） */
+      var tail = String(Math.floor(Math.random() * 1e10));
+      while (tail.length < 10) tail = "0" + tail;
+      next.myTel = "1" + PREFIX[Math.floor(Math.random() * PREFIX.length)] + tail;
+      touched = true;
+    }
+    if (!next.myRegion) { next.myRegion = REGIONS[Math.floor(Math.random() * REGIONS.length)]; touched = true; }
+    if (touched) {
+      var saved = S().saveSettings(next);
+      D().state.settings = saved || next;
+      return saved || next;
+    }
+    return st;
+  }
+
+  function saveMy(patchObj) {
+    var st = (D().state || {}).settings || {};
+    var next = Object.assign({}, st, patchObj);
+    var saved = S().saveSettings(next);
+    D().state.settings = saved || next;
+    return saved || next;
+  }
+
+  function mineDetailView() {
+    var st = mySocial();
+    var wrap = el("div", "pf-page");
+    wrap.appendChild(head("个人资料", function () { close(); }));
+
+    /* 头像单独一块（大图 + 点一下换） */
+    var top = el("div", "pf-top");
+    var av = el("div", "pf-av");
+    var src = st.phoneAvatarUser || st.avatarUser || "";
+    if (src) {
+      var im = el("img");
+      im.src = (D().avatarUrl && src) ? D().avatarUrl(src) : src;
+      im.alt = "";
+      av.appendChild(im);
+    } else av.innerHTML = icon("account");
+    av.addEventListener("click", function () { pickMyAvatar(); });
+    top.appendChild(av);
+    var info = el("div", "pf-info");
+    info.appendChild(el("div", "pf-name", String(st.myName || "").trim() || "还没起名"));
+    info.appendChild(el("div", "pf-line", "点头像换一张"));
+    top.appendChild(info);
+    wrap.appendChild(top);
+
+    wrap.appendChild(secTitle("手机页资料"));
+    wrap.appendChild(row("名字", st.myName, function () {
+      ask("名字", "角色在聊天里怎么称呼你，用的就是它。", st.myName).then(function (v) {
+        if (v === null) return;
+        saveMy({ myName: v }); render();
+      });
+    }));
+    wrap.appendChild(row("网名", st.myNickname, function () {
+      ask("网名", "只是手机里显示的那层皮，角色不会拿它称呼你。留空就用名字。", st.myNickname).then(function (v) {
+        if (v === null) return;
+        saveMy({ myNickname: v }); render();
+      });
+    }));
+    wrap.appendChild(row("性别", st.myGender, function () {
+      choose("性别", [
+        { value: "男", label: "男" },
+        { value: "女", label: "女" },
+        { value: "保密", label: "保密" },
+        { value: "", label: "不填" }
+      ]).then(function (v) {
+        if (v === null) return;
+        saveMy({ myGender: v }); render();
+      });
+    }));
+    wrap.appendChild(row("地区", st.myRegion, function () {
+      ask("地区", "随手写个省市就行。", st.myRegion).then(function (v) {
+        if (v === null) return;
+        saveMy({ myRegion: v }); render();
+      });
+    }));
+    wrap.appendChild(row("电话", st.myTel, function () {
+      ask("电话", "13 位、1 开头。改了不影响任何功能，只显示。", st.myTel).then(function (v) {
+        if (v === null) return;
+        saveMy({ myTel: v }); render();
+      });
+    }));
+    wrap.appendChild(row("Sekulum 号", st.mySid, function () {
+      ask("Sekulum 号", "8 位数字。别人靠它找到你。", st.mySid).then(function (v) {
+        if (v === null) return;
+        saveMy({ mySid: v }); render();
+      });
+    }));
+    wrap.appendChild(row("签名", st.mySign, function () {
+      ask("签名", "一句话，不带标点也成。", st.mySign).then(function (v) {
+        if (v === null) return;
+        saveMy({ mySign: v }); render();
+      });
+    }));
+
+    return wrap;
+  }
+
+  /* 换头像：和封面一样走自研相册，选完压一下再存 */
+  function pickMyAvatar() {
+    var open = D().openAlbum;
+    if (typeof open !== "function") { toast("相册不可用", true); return; }
+    open({
+      title: "选一张做头像",
+      onPick: function (url) {
+        if (!url) return;
+        shrink(url, 512).then(function (u) {
+          saveMy({ phoneAvatarUser: u });
+          /* 全局头像也一起跟着换：手机页和主聊天用同一张脸，别一边一个样 */
+          saveMy({ avatarUser: u });
+          render();
+          toast("头像换好了");
+        });
+      }
+    });
   }
 
   /* ④ 新的朋友（好友申请列表）—— 手机页列表顶部那个入口进来 */
@@ -879,8 +1006,9 @@
       if (view === "requests") { L.appendChild(requestsView()); L.scrollTop = 0; return; }
       var ch = (curId === "me") ? null : charById(curId);
       if (curId !== "me" && !ch) { close(); return; }
-      var node = view === "detail" ? detailView(ch)
-        : (view === "moments" ? momentsView(ch) : mainView(ch));
+      var node = view === "medetail" ? mineDetailView()
+        : (view === "detail" ? detailView(ch)
+          : (view === "moments" ? momentsView(ch) : mainView(ch)));
       L.appendChild(node);
       L.scrollTop = 0;
       fillByAI(ch);   /* 签名/地区缺失时后台补一次 */
@@ -894,6 +1022,19 @@
   function openDetail() { view = "detail"; render(); }
   function openMoments() { view = "moments"; render(); }
   /* 我自己的动态页（「我的」页那一行进这里）。走整屏层，返回回手机页。 */
+  function openMineDetail() {
+    var L = ensureLayer();
+    if (!L) return false;
+    cancelClose();
+    curId = "me"; curSid = "";
+    view = "medetail";
+    L.hidden = false;
+    var app = document.getElementById("app");
+    if (app) app.style.visibility = "hidden";
+    render();
+    return true;
+  }
+
   function openMine() {
     var L = ensureLayer();
     if (!L) return false;
@@ -971,7 +1112,7 @@
     if (view === "requests") { close(); return true; }
     /* 「我的动态」是从手机页进来的整屏页，没有「上一层资料页」可退 —— 直接关。
        以前这里会走 openMain()，而 mainView(null) 当场抛错，层就卡在屏幕上了。 */
-    if (curId === "me") { close(); return true; }
+    if (curId === "me") { close(); return true; }   /* 我的动态 / 个人资料都没有上一层 */
     if (view === "detail" || view === "moments") { openMain(); return true; }
     close();
     return true;
@@ -997,7 +1138,8 @@
     coverOf: coverOf, setCover: setCover,
     /* 7.2 混合流与「我的动态」 */
     feedOf: feedOf, feedRow: feedRow, openMine: openMine, addCharMoment: addCharMoment,
-    momentsOf: momentsOf, setLine: function (sid) { curSid = sid || ""; }
+    momentsOf: momentsOf, setLine: function (sid) { curSid = sid || ""; },
+    openMineDetail: openMineDetail, mySocial: mySocial
   };
   (window.__dlScripts = window.__dlScripts || []).push("profile.js");
 })();

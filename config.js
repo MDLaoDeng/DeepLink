@@ -1415,7 +1415,14 @@
       roleplayEnabled: false,
       activeCharacterId: "",
       myName: "",
+      /* 手机页那套资料（10-28）：和主聊天的「我的人设」是两回事。
+         myNickname 只是网名；角色称呼我时仍然用 myName。 */
+      myNickname: "",
       myGender: "",
+      myRegion: "",
+      myTel: "",
+      mySid: "",
+      mySign: "",
       myPersona: "",
       myAppearance: "",
       myBackground: "",
