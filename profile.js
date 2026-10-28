@@ -129,6 +129,21 @@
      以前这里返回的是真名（f.aiName），于是资料页出现「外卖小哥 / 昵称：小陈」——
      小陈就是他的真名，等于把真名冒充成昵称写了两遍。
      没生成过就返回空，那一行直接不显示。 */
+  /* 手机页显示名（10-29 用户口径）：
+     备注名 > 「网名（真名）」 > 真名。
+     括号里的真名要灰、小一号 —— 主次一眼能分开。
+     主聊天不这么显示，那边还是原名，不然顶栏会挤爆。 */
+  function charNameParts(ch) {
+    if (!ch) return { main: "角色", sub: "" };
+    var so = ch.social || {};
+    var remark = String(so.remark || "").trim();
+    var real = String((ch.fields && ch.fields.aiName) || ch.name || "").trim();
+    var nick = String(so.nickname || "").trim();
+    if (remark) return { main: remark, sub: "" };          /* 改过备注就只显示备注 */
+    if (nick && nick !== real) return { main: nick, sub: real };
+    return { main: real || "角色", sub: "" };
+  }
+
   function nickName(ch) {
     if (!ch) return "";
     var so = ch.social || {};
@@ -419,9 +434,11 @@
     top.appendChild(av);
 
     var info = el("div", "pf-info");
-    info.appendChild(el("div", "pf-name", showName(ch)));
-    var nk = nickName(ch);
-    if (nk && nk !== showName(ch)) info.appendChild(el("div", "pf-line", "昵称：" + nk));
+    var _pn = charNameParts(ch);
+    var nameEl = el("div", "pf-name");
+    nameEl.appendChild(document.createTextNode(_pn.main));
+    if (_pn.sub) nameEl.appendChild(el("span", "pf-name-sub", "（" + _pn.sub + "）"));
+    info.appendChild(nameEl);
     info.appendChild(el("div", "pf-line", "Sekulum 号：" + (so.sid || "—")));
     info.appendChild(el("div", "pf-line", "地区：" + (so.region || "—")));
     top.appendChild(info);
@@ -602,8 +619,19 @@
     else av.innerHTML = icon("account");
     head.appendChild(av);
     var meta = el("div", "pf-feed-meta");
-    meta.appendChild(el("div", "pf-feed-name", owner ? showName(owner)
-      : (((D().state || {}).settings || {}).myName || "我")));
+    var nmEl = el("div", "pf-feed-name");
+    if (owner) {
+      var _np = charNameParts(owner);
+      var _rem = String(((owner.social || {}).remark) || "").trim();
+      nmEl.appendChild(document.createTextNode(_rem ? _rem : _np.main));
+      if (_np.sub) {
+        var _sub = el("span", "pf-name-sub", "（" + _np.sub + "）");
+        nmEl.appendChild(_sub);
+      }
+    } else {
+      nmEl.textContent = (((D().state || {}).settings || {}).myName || "我");
+    }
+    meta.appendChild(nmEl);
     meta.appendChild(el("div", "pf-feed-time", fmtWhen(m.ts)));
     head.appendChild(meta);
     it.appendChild(head);
@@ -1260,7 +1288,7 @@
     feedOf: feedOf, feedRow: feedRow, openMine: openMine, addCharMoment: addCharMoment,
     momentsOf: momentsOf, setLine: function (sid) { curSid = sid || ""; },
     openMineDetail: openMineDetail, mySocial: mySocial, openWallet: openWallet, money: money,
-    ensureNickname: ensureNickname
+    ensureNickname: ensureNickname, charNameParts: charNameParts
   };
   (window.__dlScripts = window.__dlScripts || []).push("profile.js");
 })();

@@ -241,6 +241,16 @@
     return state.settings.avatarAi || "";
   }
   /* 这条线可以单独起昵称（「这条线」设置里设的）；没设就用角色卡的名字 */
+  /* 手机页的「网名（真名）」：逻辑在 profile.charNameParts 里，
+     这里只负责兜底（profile 万一没加载完，不至于把名字弄丢）。 */
+  function nameParts(ch) {
+    if (window.DL && DL.profile && DL.profile.charNameParts) {
+      try { return DL.profile.charNameParts(ch); } catch (e) { /* 回落 */ }
+    }
+    var real = ch ? String((ch.fields && ch.fields.aiName) || ch.name || "角色") : aiName();
+    return { main: real, sub: "" };
+  }
+
   function nameOf(ch, s) {
     var own = s && typeof s === "object" ? String(s.nickChar || "").trim() : "";
     if (own) return own;
@@ -1072,9 +1082,25 @@
       mid.className = "phone-item-mid";
       var nm = document.createElement("div");
       nm.className = "phone-item-name";
-      nm.textContent = r.isGroup
-        ? (r.s.title || "群聊")
-        : (nameOf(r.ch, r.avLine) + (r.lines.length > 1 ? "（" + r.lines.length + " 条线）" : ""));
+      if (r.isGroup) {
+        nm.textContent = r.s.title || "群聊";
+      } else {
+        /* 这条线单独设过称呼就以它为准，否则走「网名（真名）」 */
+        var own = (r.avLine && String(r.avLine.nickChar || "").trim()) || "";
+        if (own) {
+          nm.textContent = own + (r.lines.length > 1 ? "（" + r.lines.length + " 条线）" : "");
+        } else {
+          var np = nameParts(r.ch);
+          nm.appendChild(document.createTextNode(np.main));
+          if (np.sub) {
+            var sub = document.createElement("span");
+            sub.className = "phone-name-sub";
+            sub.textContent = "（" + np.sub + "）";
+            nm.appendChild(sub);
+          }
+          if (r.lines.length > 1) nm.appendChild(document.createTextNode("（" + r.lines.length + " 条线）"));
+        }
+      }
       mid.appendChild(nm);
       var pv = document.createElement("div");
       pv.className = "phone-item-pv";
@@ -1187,9 +1213,26 @@
     ps.pick = null;
     ps.phoneLimit = 0;
     var ch = characterFor(s);
-    setText("#phoneTitle", s.isGroup
-      ? (s.title || "群聊")
-      : (nameOf(ch, s) + (s.title && s.title !== "新对话" ? " · " + s.title : "")));
+    (function () {
+      var title = $("#phoneTitle");
+      if (!title) return;
+      title.textContent = "";
+      if (s.isGroup) { title.textContent = s.title || "群聊"; return; }
+      var own = String(s.nickChar || "").trim();
+      if (own) {
+        title.textContent = own + (s.title && s.title !== "新对话" ? " · " + s.title : "");
+        return;
+      }
+      var np = nameParts(ch);
+      title.appendChild(document.createTextNode(np.main));
+      if (np.sub) title.appendChild((function () {
+        var sp = document.createElement("span");
+        sp.className = "phone-name-sub";
+        sp.textContent = "（" + np.sub + "）";
+        return sp;
+      })());
+      if (s.title && s.title !== "新对话") title.appendChild(document.createTextNode(" · " + s.title));
+    })();
     /* 10-18：进角色消息界面要有转场 —— 聊天页从右侧整页推进来，
        下面的列表同步左移一点（视差），推完再藏。用户点名说的就是这一处。 */
     switchView($("#phoneChatView"), ps.enterAnim ? 0 : 1);
@@ -3700,6 +3743,17 @@
       pim.src = postDraft.image.dataUrl;
       pim.alt = "";
       preview.appendChild(pim);
+      /* 拍摄 / 相册带进来的图，得能给出去 —— 不然选错了只能整个取消重来 */
+      var dropImg = document.createElement("button");
+      dropImg.type = "button";
+      dropImg.className = "ph-post-drop";
+      dropImg.textContent = "去掉这张图";
+      dropImg.addEventListener("click", function () {
+        postDraft.image = null;
+        preview.innerHTML = "";
+        dropImg.parentNode && dropImg.parentNode.removeChild(dropImg);
+      });
+      preview.parentNode.appendChild(dropImg);
     }
 
     var aiWrap = document.createElement("div");

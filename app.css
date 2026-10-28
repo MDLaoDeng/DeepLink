@@ -3908,3 +3908,20 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   background-color: transparent; color: var(--text-dim); font: inherit;
   font-size: var(--fs-body);
 }
+
+
+/* ── 7.2 「网名（真名）」里的真名：灰、小一号，不抢主名 ──
+   主聊天不用这套（顶栏位置本来就紧），只手机页用。 */
+.phone-name-sub,
+.pf-name-sub {
+  color: var(--text-mute); font-weight: 400;
+  font-size: .82em;
+}
+/* 发布页：去掉已选图片 */
+.ph-post-drop {
+  margin-left: 8px; padding: 6px 12px; min-height: 32px;
+  border: 0.5px solid var(--border); border-radius: 999px;
+  background-color: transparent; color: var(--text-dim);
+  font: inherit; font-size: var(--fs-caption);
+}
+.ph-post-drop:active { background-color: var(--panel-2); }
