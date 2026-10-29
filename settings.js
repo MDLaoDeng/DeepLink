@@ -307,6 +307,10 @@
     const noImg = checkedOf("#exportNoImg");
     if (kind === "full") inlineExportImages(data.sessions, noImg);
     else if (kind === "session") inlineExportImages([data], noImg);
+    /* 10-29 修：导出「仅某个角色（含它的所有对话）」以前漏了这条 ——
+       只内联了图库索引，消息里的图仍只带本机路径 imgRef，换台手机导入后
+       这些图全变「图片（原图已过期）」。 */
+    else if (kind === "character") inlineExportImages(data.sessions, noImg);
     const pass = await askPass("给导出文件设个口令", "导出的内容会用这个口令加密，口令不会存进 App；以后导入时要输同一个。忘了就永久解不开。", true);
     if (pass === null) return null;
     let enc;
@@ -675,7 +679,11 @@
     const native = Store.storageBackend() === "native";
     try {
       if (native) {
-        Store.storageKeys().forEach((k) => {
+        /* storageKeys() 是 store.js 的 NATIVE_KEYS 快照，里面没有 social 与两份 bak
+           （它们不在「需要迁移到原生存储」的名单里）。10-29：这里补上，否则
+           `#dataUsageLine` 和下面按类型的 `#storageSum` 会给出两个对不上的总数。 */
+        const extraKeys = ["aicode.social.v1", "aicode.bak.sessions", "aicode.bak.characters"];
+        Store.storageKeys().concat(extraKeys).forEach((k) => {
           const v = Store.callBridge("获取指定文本", k, "");
           if (v) { chars += String(k).length + String(v).length; keys++; }
         });
@@ -759,6 +767,11 @@
       { name: "动态", keys: ["aicode.moments.v1"] },
       { name: "备份快照", keys: ["aicode.backups.v1"] },
       { name: "图库索引", keys: ["aicode.charimg.v1"] },
+      /* 10-29 补：这两项以前两边统计都没算 —— 关系网是角色之间的数值与标签，
+         整库备份是每 5 分钟一份的全量镜像（通常是占得最多的那一坨）。
+         漏掉它们会让「本机数据约 X」明显偏低，用户没法判断空间被谁吃了。 */
+      { name: "关系网", keys: ["aicode.social.v1"] },
+      { name: "整库备份副本", keys: ["aicode.bak.sessions", "aicode.bak.characters"] },
       { name: "设置", keys: ["aicode.settings.v1", "aicode.current.v1"] }
     ];
     const native = Store.storageBackend() === "native";
@@ -1027,7 +1040,11 @@
   function usageCost(u) {
     u = u || {};
     const s = state.settings || {};
-    const pHit = Number(s.usagePriceHit); const pIn = Number(s.usagePriceIn); const pOut = Number(s.usagePriceOut);
+    /* 空串 / null 不能直接过 Number()：Number("") === Number(null) === 0，
+       而 0 在 rate() 里是**合法值**（本地模型就该是 0），于是「没填」会被当成
+       「免费」，整张用量表变成 ¥0。这里先把「没填」归一成 undefined，再交给 rate 兜底。 */
+    const numOr = (v) => (v === null || v === undefined || v === "") ? undefined : Number(v);
+    const pHit = numOr(s.usagePriceHit); const pIn = numOr(s.usagePriceIn); const pOut = numOr(s.usagePriceOut);
     const hit = u.cacheHit || 0;
     const miss = (typeof u.cacheMiss === "number") ? u.cacheMiss : Math.max(0, (u.prompt || 0) - hit);
     const comp = u.completion || 0;
@@ -1064,8 +1081,11 @@
     if (el) el.textContent = ch ? ("本角色累计：" + usageText(ch.usage)) : "";
   }
 
-  /* 手机花费预警只报一次（同一次运行内），免得每次记账都弹 */
-  let phoneWarned = false;
+  /* 手机花费预警：记「已经提示到多少元」而不是一个布尔（10-29 修）。
+     布尔一旦置真永不复位 —— 用户在「用量统计」里点「清零用量」后重新聊，
+     花费再次超线也不会再提示，只有冷启动才会恢复。用水位线就没这个问题：
+     清零后花费从 0 重新涨，涨过线自然又提示一次；同一次超线内不会重复弹。 */
+  let phoneWarnedAt = 0;
 
   /* 记一次用量：会话 / 角色 / 全局 / 按类型，并做预警。
      cat = 消耗类型，必须是 USAGE_CATS 里的 id。
@@ -1114,11 +1134,12 @@
     /* 手机单独一条花费预警（你在 D1 里选的口径：给手机这条线单开预警，并可细分） */
     try {
       const lim = Number(state.settings.phoneWarnYuan) || 0;
-      if (lim > 0 && cat === "phone" && !phoneWarned) {
+      if (lim > 0 && cat === "phone") {
         const pu = Store.getUsageCats().phone || null;
-        if (pu && usageCost(pu) >= lim) {
-          phoneWarned = true;
-          UI.toast("手机用量花费已达 " + fmtYuan(usageCost(pu)) + "，超过设定的 " + fmtYuan(lim) + "；在「用量统计 · 按类型」里看细分", true);
+        const now = pu ? usageCost(pu) : 0;
+        if (now >= lim && now > phoneWarnedAt) {
+          phoneWarnedAt = now;
+          UI.toast("手机用量花费已达 " + fmtYuan(now) + "，超过设定的 " + fmtYuan(lim) + "；在「用量统计 · 按类型」里看细分", true);
         }
       }
     } catch (e) { /* ignore */ }
@@ -1317,10 +1338,18 @@
     resetSettingsKeys(keys, label);
   }
 
+  /* 「恢复默认设置」只该复位**参数**，不该删用户攒出来的东西（10-29 修）。
+     personas / worlds / reminders / stickers 这些都在 DEFAULT_SETTINGS 里、值又是空数组，
+     以前会被一起写成空 —— 点一下「恢复默认」，自建人设、自建世界观、所有备忘录、
+     所有自定义表情同时消失，而确认文案一个字都没提。 */
+  const RESET_KEEP_DATA = ["personas", "activePersonaId", "worlds", "worldId", "worldsSeeded",
+    "offlineReasons", "reminders", "stickers"];
+
   async function resetAllSettings() {
-    const ok = await UI.confirmDialog("恢复默认设置", "把设置里的参数恢复默认？（API Key、API 地址、各密钥、头像、主题都会保留）");
+    const ok = await UI.confirmDialog("恢复默认设置", "把设置里的参数恢复默认？（API Key、API 地址、各密钥、头像、主题、我的人设、世界观库、备忘录、自定义表情都会保留）");
     if (!ok) return;
-    const keys = Object.keys(CONFIG.DEFAULT_SETTINGS).filter((k) => RESET_KEEP.indexOf(k) < 0);
+    const keys = Object.keys(CONFIG.DEFAULT_SETTINGS)
+      .filter((k) => RESET_KEEP.indexOf(k) < 0 && RESET_KEEP_DATA.indexOf(k) < 0);
     resetSettingsKeys(keys, "全部参数");
   }
 
@@ -1483,9 +1512,15 @@
       splashPrevTimer = 0;
     }, 3000);
   }
+  /* 只绑一次（10-29 修）：这段在 fillSettingsInner() 里，而 fillSettings() 每次
+     打开设置、每次导入、每次重置都会跑 —— 以前每跑一次就多挂一个 click 监听，
+     点一次「预览」会把动画重建 N 遍。跟本文件其它绑定一样用 dataset 守卫。 */
   (function bindSplashPreview() {
     var b = document.getElementById("splashPreviewBtn");
-    if (b) b.addEventListener("click", playSplashPreview);
+    if (b && !b.dataset.bound) {
+      b.dataset.bound = "1";
+      b.addEventListener("click", playSplashPreview);
+    }
   })();
 
     /* 启动动画：动画套系 / 文字 / 图片 / 角色头像 */
@@ -3517,7 +3552,11 @@
     });
     state.settings = Store.saveSettings({
       worlds: list,
-      worldId: list.length ? list[0].id : "",
+      /* 10-29 修：以前这里顺手把 worldId 设成 list[0]（现代世界观），于是所有
+         「角色卡没填 world」的线在用户完全没做过选择的情况下，提示词里被静默
+         塞进一段「当下中国，智能手机与外卖都齐全…」。注入一份世界观会实打实
+         改变对话走向，不该由「首次启动」替用户决定 —— 默认不选。 */
+      worldId: "",
       worldsSeeded: true
     });
   }
@@ -3565,6 +3604,13 @@
     var sel = document.getElementById("worldPick");
     if (sel) {
       sel.innerHTML = "";
+      /* 先给一个「不用」的空项（10-29 补）。以前只能在内置的 10 套里挑，
+         一旦首次启动自动选中了某一套，用户就**没有任何办法回到「不注入世界观」**——
+         而注入一份世界观是会实打实改变对话走向的，必须能关。 */
+      var none = document.createElement("option");
+      none.value = "";
+      none.textContent = "（不用世界观）";
+      sel.appendChild(none);
       list.forEach(function (w) {
         var o = document.createElement("option");
         o.value = w.id;

@@ -285,9 +285,9 @@
   function ensureNickname(ch) {
     if (!ch || nickPending[ch.id]) return;
     if (!ch.social || ch.social.nickname) return;
-    if (!(window.Api && Api.summarize)) { LG.push("RET 2 Api 不可用"); return; }
+    if (!(window.Api && Api.summarize)) { console.warn("[profile] Api 未就绪，跳过网名补全"); return; }
     var st = (D().state || {}).settings || {};
-    if (!st.apiKey) { LG.push("RET 3 没 apiKey"); return; }
+    if (!st.apiKey) { console.warn("[profile] 未配置 API Key，跳过网名补全"); return; }
     nickPending[ch.id] = true;
     var f = ch.fields || {};
     var bg = [f.aiName, f.aiPersona, f.aiBackground, f.aiLikes].filter(Boolean).join("；").slice(0, 400);
@@ -325,9 +325,9 @@
     /* 试过一次就不再试：以前每次重渲资料页都打一次模型（sign 空 + 失败 → 无限重试）。
        用户手动清空签名时会把 aiSignTried 抹掉，那时才允许再试。 */
     if (so.aiSignTried) return;
-    if (!(window.Api && Api.summarize)) { LG.push("RET 2 没 Api"); return; }
+    if (!(window.Api && Api.summarize)) { console.warn("[profile] Api 未就绪，跳过签名补全"); return; }
     var st = (D().state || {}).settings || {};
-    if (!st.apiKey) { LG.push("RET 3 没 apiKey"); return; }
+    if (!st.apiKey) { console.warn("[profile] 未配置 API Key，跳过签名补全"); return; }
     aiPending[ch.id] = true;
     var f = ch.fields || {};
     var bg = [f.aiBackground, f.aiPersona, f.aiLikes, f.world].filter(Boolean).join("；").slice(0, 600);

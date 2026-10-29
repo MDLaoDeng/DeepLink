@@ -103,7 +103,15 @@
         }
         if (ALLOW_TAGS.indexOf(tag) < 0) {
           /* 不在白名单：拆掉外壳、把子节点原样搬上去（保留里面的格式）。
-             直接换 textContent 会把 <custom><b>粗</b></custom> 压成纯文字。 */
+             直接换 textContent 会把 <custom><b>粗</b></custom> 压成纯文字。
+
+             ⚠️ 拆壳之前**必须先 walk(el) 把子树消完毒**。
+             以前这里直接拆：kids 是循环前拍的快照，搬上来的子节点既不在快照里、
+             也不会再被 walk/cleanAttrs 碰到 —— 于是
+             `<div><foo><img src=x onerror=…></foo></div>` 里的 onerror 会原样
+             进影子根并执行（影子根不隔离脚本）。先递归再拆壳，保证每个节点
+             至少经过一次 cleanAttrs。 */
+          walk(el);
           if (el.parentNode) {
             while (el.firstChild) el.parentNode.insertBefore(el.firstChild, el);
             el.parentNode.removeChild(el);

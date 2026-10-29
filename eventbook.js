@@ -232,6 +232,17 @@
     /* 入口跟着开关走：关掉事件簿就整块藏起来 */
     var s = stateOf().settings || {};
     if (b) b.hidden = (s.eventBook === false);
+    /* 光在加载时判一次不够（10-29 修）：用户在设置里把开关关掉后，入口要立刻消失，
+       而不是等下次冷启动。refreshEventBookEntry 以前没有任何调用方 —— 这里改成
+       直接盯住那个开关，同时把 refreshEventBookEntry 变成「真的能刷」的入口。 */
+    var sw = document.getElementById("setEventBook");
+    if (sw && !sw.dataset.ebBound) {
+      sw.dataset.ebBound = "1";
+      sw.addEventListener("change", function () {
+        var st2 = stateOf().settings || {};
+        if (b) b.hidden = (st2.eventBook === false);
+      });
+    }
   }
 
   var api = {

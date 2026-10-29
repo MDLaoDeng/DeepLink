@@ -1197,15 +1197,67 @@
   /* 用新增摘要更新「当前关系」「共同经历」（会话级动态值）。base = 角色卡里的初始设定。
      模型经常一次只吐一个键，于是用户得点好几遍才齐 —— 缺哪个就自动再问一次（最多补一轮），
      并把「到底更新到了什么」如实返回，交给调用方说实话。 */
+  /* 关系网（角色↔角色）的四个 0~100 数值以前只在建线时算一次，之后永不更新 ——
+     README 写的是「跟着剧情自己走」，跨线传播也按 trust≥45 判要不要提，等于一直用
+     第一天那个数。10-29：并进这一次日更调用里修正（不新增请求、不额外花钱），
+     每天每个对象最多位移 ±10，靠这个上限防「一天之内人设崩掉」。 */
+  function relTableFor(rec) {
+    const rel = (rec && rec.rel && typeof rec.rel === "object") ? rec.rel : {};
+    const ids = Object.keys(rel);
+    if (!ids.length) return "";
+    let chars = [];
+    try { chars = Store.getCharacters() || []; } catch (e) { chars = []; }
+    const nameOf = function (id) {
+      for (let i = 0; i < chars.length; i++) if (chars[i] && chars[i].id === id) return chars[i].name || "";
+      return "";
+    };
+    return ids.map(function (id) {
+      const r = rel[id] || {};
+      return id + "｜" + (nameOf(id) || "未知") + "｜trust " + (r.trust || 0) +
+        "｜favor " + (r.favor || 0) + "｜familiar " + (r.familiar || 0) +
+        "｜depend " + (r.depend || 0) + "｜" + (r.kind || "");
+    }).join("\n");
+  }
+  /* 单日位移上限 ±10，且夹在 0~100。模型给的是「新值」，这里换算成受控位移 ——
+     直接采信绝对值的后果是它一句话就能把「陌生人」改成「挚友」。 */
+  function relStep(cur, next) {
+    const n = Number(next);
+    if (!isFinite(n)) return cur;
+    const d = Math.max(-10, Math.min(10, Math.round(n) - (cur || 0)));
+    return Math.max(0, Math.min(100, (cur || 0) + d));
+  }
+  function applyRelTable(rec, arr) {
+    if (!rec || !Array.isArray(arr) || !arr.length) return 0;
+    const rel = (rec.rel && typeof rec.rel === "object") ? rec.rel : null;
+    if (!rel) return 0;
+    let n = 0;
+    arr.forEach(function (x) {
+      if (!x || !x.id || !rel[x.id]) return;
+      const cur = rel[x.id];
+      if (typeof x.trust === "number") { cur.trust = relStep(cur.trust, x.trust); n++; }
+      if (typeof x.favor === "number") cur.favor = relStep(cur.favor, x.favor);
+      if (typeof x.familiar === "number") cur.familiar = relStep(cur.familiar, x.familiar);
+      if (typeof x.depend === "number") cur.depend = relStep(cur.depend, x.depend);
+      if (x.kind) cur.kind = String(x.kind).slice(0, 12);
+      if (x.note) cur.note = String(x.note).slice(0, 40);
+      cur.at = Date.now();
+    });
+    return n;
+  }
+
   async function updateRelationShared(rec, save, settings, base, newText) {
     if (!settings.apiKey) return { usage: null, changed: false, relation: false, shared: false };
     const b = base || {};
+    const relTable = relTableFor(rec);
     /* 【10-26 语义收紧】共同经历 =「这段对话开始之前」已有的经历，来自初始设定，不随聊天变化；
        对话开始之后发生的事属于记忆。所以这里只更新 relation，也不再往输入里塞 shared ——
        以前把记忆+原文都喂进去、让它顺手改写 shared，结果这一项和记忆摘要高度重合。 */
     const input = "初始关系：\n" + (b.relation || "（无）") +
       "\n\n当前关系：\n" + (rec.relation || "（无）") +
-      "\n\n近期内容（只用来判断关系走到哪一步）：\n" + ((newText || "").trim() || "（无）");
+      "\n\n近期内容（只用来判断关系走到哪一步）：\n" + ((newText || "").trim() || "（无）") +
+      /* 关系表只在「这条线已经有对象」时才附上。附了就让模型顺手给 rel，
+         没附就完全不提 —— 老数据不会被这次改动影响。 */
+      (relTable ? ("\n\n关系表（角色对他人的当前数值，供你微调）：\n" + relTable) : "");
     let usage = null;
     let gotRel = false;
     for (let attempt = 0; attempt < 2 && !gotRel; attempt++) {
@@ -1215,6 +1267,17 @@
       usage = Api.sumUsage(usage, out.usage);
       const got = relationFromText(out.text);
       if (got.relation) { rec.relation = got.relation; gotRel = true; }
+      /* 关系表的数值修正顺手在这一轮里做掉（同一个 JSON，不额外请求）。
+         模型没给就什么都不动 —— 不会比改之前更差。 */
+      if (relTable) {
+        let obj = null;
+        try {
+          const raw = String(out.text || "").replace(/```json/gi, "").replace(/```/g, "").trim();
+          const a2 = raw.indexOf("{"), b2 = raw.lastIndexOf("}");
+          if (a2 >= 0 && b2 > a2) obj = JSON.parse(raw.slice(a2, b2 + 1));
+        } catch (e) { obj = null; }
+        if (obj && obj.rel) { if (applyRelTable(rec, obj.rel)) gotRel = true; }
+      }
     }
     if (gotRel && save) save();
     return { usage: usage, changed: gotRel, relation: gotRel, shared: false };

@@ -383,7 +383,16 @@
        replaceWith 就变成空操作（父节点已经没了）—— 整条回复连思考一起凭空消失。
        这就是「思考被吞」的根源：生成期间任意 renderAll()（保存设置、切角色、删消息…）
        都会走到这里。重建完把流式节点原样挂回末尾。 */
-    if (state.streamEl && state.streamSid === state.sessionId && state.streamEl.parentNode !== box) box.appendChild(state.streamEl);
+    if (state.streamEl && state.streamSid === state.sessionId && state.streamEl.parentNode !== box) {
+      /* 挂回原位、不要一律挂到末尾（10-29 修）。
+         以前这里无条件 appendChild：对**中段**某条消息点「重新说」时，生成期间
+         任何一次整列重建都会把流式节点甩到列表最后，提交时 replaceWith 就把它
+         留在末尾，而 el.__idx 还是原来的下标 —— 视觉顺序与索引从此不一致，
+         直到下一次全量重建才「自己好」。 */
+      const at = (typeof state.streamEl.__idx === "number") ? msgElAt(state.streamEl.__idx) : null;
+      if (at && at.parentNode === box) box.insertBefore(state.streamEl, at);
+      else box.appendChild(state.streamEl);
+    }
     /* 换了会话就把快捷回复收掉：面板里装的还是上一条会话的台词 */
     if (quick.open && s && quick.sid && quick.sid !== s.id) quickClose();
     syncContinueRow();
@@ -1124,6 +1133,14 @@
       /* 本对话自己设了提示词就用它，否则用全局 */
       const own = s && typeof s.systemPrompt === "string" ? s.systemPrompt.trim() : "";
       systemText = own || state.settings.systemPrompt;
+      /* 多媒体标记（10-29 修）：[[视频]] / [[音乐]] / [[文档]] 的说明以前只被塞进
+         「快捷回复」那段台词提示词里 —— 助手正常对话根本拿不到，于是这三类标记
+         在听澜这边永远出不来（README 承诺的特性形同不存在）。这里才是唯一的注入点：
+         只有「没挂角色、也不是群」的助手线才给。 */
+      try {
+        const mh = (window.Media && Media.promptHint) ? String(Media.promptHint(state.settings) || "") : "";
+        if (mh) systemText += (systemText ? "\n\n" : "") + mh;
+      } catch (e) { /* 提示拼不出来不影响对话 */ }
       if (state.settings.assistantCompress) {
         await ensureMemoryReady();
         const mt = Memory.memoryText(s && s.memory);
@@ -1423,6 +1440,9 @@
        会把整列重建，靠这个引用把流式节点挂回来，否则这条回复会彻底消失。 */
     state.streamEl = view.el;
     state.streamSid = sid;
+    /* 记下它该待的下标：整列重建时按这个位置插回去（见 renderMessages 里那段）。
+       没有目标（新回复追加在末尾）就留空，重建时照旧挂末尾。 */
+    view.el.__idx = startIdx >= 0 ? startIdx : undefined;
     view.showTyping();
     UI.scrollToBottom();
 
@@ -1625,7 +1645,11 @@
       }
       /* 多媒体标记（[[视频]] / [[音乐]] / [[文档]]）：从正文里摘掉再落库，
          对应的活放到 commit 之后异步跑 —— 不能让生成视频把这条回复卡在这里。 */
-      const mediaMarks = takeMediaMarks(fin.content);
+      /* 只有助手线才认这些标记（10-29 修）。以前不分角色/群聊一律摘并执行：
+         角色扮演里模型碰巧写出 [[视频]]，就会真去调视频接口、甚至写盘导出文档 ——
+         而 README 的口径是「这三类标记只在和听澜对话时出现」。 */
+      const mediaOK = !snap.characterId && !snap.isGroup;
+      const mediaMarks = mediaOK ? takeMediaMarks(fin.content) : { text: fin.content, jobs: [] };
       if (mediaMarks.text !== fin.content) fin.content = mediaMarks.text;
       if (finish === "length") fin.truncated = true;
       let el = commit(fin, null);
@@ -1671,7 +1695,12 @@
       const note = aborted ? "已停止生成" : (err && err.message ? err.message : "请求失败");
       /* 用户主动点停止是正常操作：不要把它记成 variant.error（否则气泡下面挂红块，
          而且这条半截回复会被下一轮当作正常上下文继续喂给模型）。 */
-      commit(view.finish(), aborted ? null : note);
+      /* 被「回溯」作废的这一代：一个字都不落库（10-29 修）。只认自己那一代，
+         免得把用户后来新开的那条生成一起丢掉。 */
+      const drop = (state.discardGen === gen);
+      if (drop) state.discardGen = null;
+      if (!drop) commit(view.finish(), aborted ? null : note);
+      else view.el.remove();
       if (!aborted && /Failed to fetch|NetworkError|Load failed/i.test(String(err && err.message))) {
         /* 自动重试过还是挂了才走到这。别再把锅一口咬定给封装工具 —— 这条文案
            以前让用户以为是跨域没配好，反复折腾；其实多数是网络波动。 */
@@ -1737,7 +1766,17 @@
       if (jr && jr.ok) {
         const tl = Store.getSessions();
         const k = tl.findIndex((x) => x.id === sid);
-        if (k >= 0) { tl[k].time = { start: jr.ms, setAt: Date.now() }; Store.saveSessions(tl); }
+        if (k >= 0) {
+          const live = tl[k];
+          /* 改 offset 之前必须先把历史消息的 sts 固化成数值（10-29 修）。
+             memory.js 的 sealTimes 契约：任何改变 offset 的操作都要先 seal，
+             否则未固化的消息会按新 offset 再算一遍 —— 表现为「昨天说的话被整体
+             挪到今天」，同时 frozenAt（混搭模式的冻结点）与 leftAt（离开时刻）
+             会在整块替换时被抹掉。这里改成只覆盖 start/setAt，其余字段保留。 */
+          try { if (Memory && Memory.sealTimes) Memory.sealTimes(live); } catch (e) { /* 固化失败也要让时间能推进 */ }
+          live.time = Object.assign({}, live.time, { start: jr.ms, setAt: Date.now() });
+          Store.saveSessions(tl);
+        }
         if (window.DL && window.DL.syncChatClock) window.DL.syncChatClock();
         UI.toast("时间推进到 " + Memory.fmtStory(jr.ms) + "（" + jr.label + "）");
       } else if (jr) {
@@ -2060,7 +2099,14 @@
     if (!ok) return;
 
     /* 还在生成 → 直接中断（用户口径 5） */
-    if (state.busy && state.abort) { try { state.abort.abort(); } catch (e) { /* ignore */ } }
+    if (state.busy && state.abort) {
+      /* 这条正在跑的生成要「作废」而不是「照常收尾」（10-29 修）。
+         以前只 abort：runGeneration 的 catch 对 AbortError 仍会 commit 一次
+         view.finish()，而那一刻 sid 还是原线 —— 于是原线目标消息多出一个被截断的
+         半截版本、vi 还指向它，「原线原样保留」当场破功。 */
+      state.discardGen = state.gen;
+      try { state.abort.abort(); } catch (e) { /* ignore */ }
+    }
     /* 这里**不**强置 state.busy：中断后老生成会在自己的 finally 里按代次收尾。
        强置会让「还在跑」的旧请求看起来已结束——发送键提前解锁、还能开出第二条生成，
        而旧请求稍后提交时又会把半截回复写进原线。 */
@@ -2073,6 +2119,12 @@
     while (taken[title]) { n++; title = baseTitle + " " + n; }
 
     const clone = JSON.parse(JSON.stringify(s));
+    /* 新线不能继承原线的记忆密文（10-29 修）。
+       memEnc 是「这条线记忆的密文形态」，和下面被清空的 memory/cognition/scene/relation/shared
+       是同一份数据的两种表示 —— 只清明文不加密文，一旦重建失败（比如没配 API Key，
+       rebuildForked 第一句就直接返回）或重建途中进程被杀，下次启动 unlockMemory 会解出
+       原线那份完整记忆，把本该是空白的支线直接灌满。 */
+    clone.memEnc = "";
     clone.id = "s_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     clone.title = title;
     clone.mainLine = false;          /* 支线：想转正自己点「设为主线」 */
@@ -2120,14 +2172,14 @@
     renderAll();
     UI.toast("已新建支线「" + title + "」，正在重建记忆…");
 
-    try { await rebuildForked(clone.id, s.id, i, target); } catch (e) {
+    try { await rebuildForked(clone.id, s.id, i, target, base); } catch (e) {
       UI.toast("记忆重建失败：" + (e && e.message ? e.message : e) + "（新线已经建好，记忆还是空的）", true);
     }
   }
 
   /* 按「回溯点前 20 条」重建新线的记忆 / 认知 / 关系 / 共同经历 / 场景。
      后 20 条只作比对材料，不进结果。花费记在「回溯重建」。 */
-  async function rebuildForked(newSid, oldSid, i, target) {
+  async function rebuildForked(newSid, oldSid, i, target, base) {
     const list = Store.getSessions();
     const oldS = list.filter((x) => x.id === oldSid)[0];
     const newS = list.filter((x) => x.id === newSid)[0];
@@ -2182,7 +2234,12 @@
     /* memory.days 的约构是 {date, summary}（见 memory.js 的 memoryText / dailyCompress），
        不是 think.js 的 {d, t} —— 写成后者会变成〖undefined〗undefined，还会被周压缩固化。 */
     if (obj.memory) mem.days = [{ date: day, summary: String(obj.memory) }];
-    mem.coveredUntil = target;
+    /* 水位线必须落**真实时间轴**（msg.ts），不能落 target（故事毫秒）。
+       dailyCompress（memory.js）与 buildModelMessages 都用 m.ts 跟它比；
+       写故事毫秒的后果：故事时间在未来的线上 target > 所有 ts，整条线的原文会被
+       当成「已摘要」全部跳过（模型看到一条空白线）；在过去则会把压过的重压一遍。
+       2106 行创建 clone 时用的就是 base，这里必须同一个口径。 */
+    mem.coveredUntil = (typeof base === "number" && base > 0) ? base : target;
     if (obj.cognition) live.cognition = String(obj.cognition);
     if (obj.relation) live.relation = String(obj.relation);
     if (obj.shared) live.shared = String(obj.shared);
@@ -2899,10 +2956,11 @@
     else if (ch) sys = Memory.buildSystemText(ch, s, state.settings);
     else {
       sys = ((s && typeof s.systemPrompt === "string" && s.systemPrompt.trim()) || state.settings.systemPrompt || "");
-      /* 助手（听澜）没有角色卡，走的不是 Memory.buildSystemText 那条，
-         多媒体标记的说明要在这里单独补上，否则跟听澜说话时这些标记它根本不知道。 */
-      const mh = (window.Media && Media.promptHint) ? Media.promptHint(state.settings) : "";
-      if (mh) sys += (sys ? "\n\n" : "") + mh;
+      /* 10-29 修：多媒体标记的说明以前挂在这里，注释以为这是「跟听澜说话」的路径，
+         其实这是「站在我的立场写 4 条候选台词」的提示词 —— 让候选台词里冒出
+         [[视频]] 只会是噪音，而且它一发出去就被当普通用户消息（不是助手回复，
+         根本走不到 takeMediaMarks）。真正该注入的地方是 buildModelMessages 的
+         助手分支，那里已经补上了。这里什么都不加。 */
     }
     const fmt = adoptFormatFor(s);
     if (fmt) sys += "\n\n【采用格式】\n" + fmt;

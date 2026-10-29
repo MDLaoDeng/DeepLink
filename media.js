@@ -332,7 +332,13 @@
       await new Promise(function (r) { setTimeout(r, c.pollMs); });
       var r2 = await fetchTimeout(c.base + url, { method: "GET", headers: { "Authorization": "Bearer " + c.key } }, 60000);
       if (!r2.ok) {
-        if (r2.status === 202 || r2.status === 404) continue;   /* 还没好 */
+        /* 202 = 还在排队，正常；404 以前也被当成「还没好」继续等，
+           可多数服务对「任务不存在」就是回 404 —— 于是用户白等满 pollMax×pollMs
+           （默认 3 分钟）才看到一句「等了 60 次还没好」。10-29：404 直接报错。 */
+        if (r2.status === 202) continue;
+        if (r2.status === 404) {
+          throw new Error("查询任务时返回 404：任务号可能已失效，或「查询任务路径」填错了");
+        }
         throw await httpError(r2);
       }
       var st = await r2.json();
@@ -519,13 +525,19 @@
       } catch (e) { return false; }
     };
     var okMd = false, okHtml = false;
-    for (var i = 0; i < dirs.length && !usedDir; i++) {
+    /* 10-29 修：以前只要 .md 写进去就锁定目录，.html 失败也不换下一个目录，
+       而返回值 ok 是 `okMd || okHtml` —— 用户只会看到「已导出」，永远不知道
+       少了一个文件。现在要求同一个目录两个文件都写成，否则换下一个目录重试。 */
+    for (var i = 0; i < dirs.length; i++) {
       var d = String(dirs[i]).replace(/\/+$/, "");
-      if (put(d + "/" + doc.base + ".md", doc.md, "text/markdown")) {
-        usedDir = d;
-        okMd = true;
-        okHtml = put(d + "/" + doc.base + ".html", doc.html, "text/html");
+      var before = files.length;
+      var mdOk = put(d + "/" + doc.base + ".md", doc.md, "text/markdown");
+      var htmlOk = mdOk ? put(d + "/" + doc.base + ".html", doc.html, "text/html") : false;
+      if (mdOk && htmlOk) {
+        usedDir = d; okMd = true; okHtml = true; break;
       }
+      /* 半份不留：把这一轮记进去的路径撤掉，换下一个目录 */
+      files.length = before;
     }
     /* 极端情况：两个都写不进去，但至少报告第一个目录，方便用户去翻 */
     return { ok: okMd || okHtml, dir: usedDir || dirs[0], files: files, doc: doc,
@@ -538,10 +550,14 @@
   function promptHint(s) {
     const st = s || {};
     const can = [];
-    if (st.videoEnabled && st.videoBaseUrl && st.videoKey) {
+    /* 判据必须和 capable() 一致（10-29 修）：以前只看「开了 + 有地址 + 有 Key」，
+       而 runJob 还要求 创建路径 / 查询路径 / 模型名。缺一项就会变成
+       「模型老老实实写了标记，用户看到的是一串失败提示」—— 正是本函数注释里
+       说的那种最糟的情况。 */
+    if (capable("video", st) && st.videoCreatePath && st.videoStatusPath) {
       can.push("[[视频]] 一句话描述画面（会在下面生成一段视频）");
     }
-    if (st.musicEnabled && st.musicBaseUrl && st.musicKey) {
+    if (capable("music", st) && st.musicCreatePath && st.musicStatusPath) {
       can.push("[[音乐]] 一句话描述风格与情绪（会在下面生成一段音乐）");
     }
     if (typeof window.Store !== "undefined" && window.Store && window.Store.hasBridge &&

@@ -92,6 +92,9 @@
       let settled = false;
       let lastErr = null;
       let timer = null;
+      /* 只用于「结算后掐掉落败的那几条」：各源通过 run(sig) 拿到这个信号，
+         外层用户点停止的那个 signal 由调用方自己并进来（见 run 里的实现）。 */
+      const ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
 
       if (!pending) return reject(new Error("没有可用的搜索源"));
 
@@ -100,13 +103,25 @@
       }
       function maybeSettle(final) {
         if (settled) return;
-        if (got.length) { settled = true; clearTimeout(timer); resolve(best()); return; }
-        if (final) { settled = true; clearTimeout(timer); reject(lastErr || new Error("没有搜索结果")); }
+        if (got.length) {
+          settled = true; clearTimeout(timer);
+          /* 10-29 修：结算之后落败的那几条请求以前照跑不误（最长 8~10 秒），
+             连发几次搜索就会叠一堆并发。这里主动掐掉，别再白烧流量和连接。 */
+          try { if (ctrl) ctrl.abort(); } catch (e) { /* ignore */ }
+          resolve(best()); return;
+        }
+        if (final) {
+          settled = true; clearTimeout(timer);
+          try { if (ctrl) ctrl.abort(); } catch (e) { /* ignore */ }
+          reject(lastErr || new Error("没有搜索结果"));
+        }
       }
 
       timer = setTimeout(() => maybeSettle(false), windowMs);
-      tasks.forEach(({ name, promise }) => {
-        Promise.resolve(promise).then((results) => {
+      tasks.forEach(({ name, promise, run }) => {
+        let p;
+        try { p = run ? run(ctrl ? ctrl.signal : null) : promise; } catch (e) { p = Promise.reject(e); }
+        Promise.resolve(p).then((results) => {
           if (settled) return;
           if (results && results.length) got.push({ name, results });
           if (--pending === 0) maybeSettle(true);
@@ -286,7 +301,14 @@
         return { provider: "Tavily", results: await tavily(query, settings, signal) };
       }
       if (mode === "custom") {
-        return { provider: "自定义", results: await custom(query, settings) };
+        /* 10-29 修：以前这里没把 signal 传下去 —— 用户在聊天里点「停止」时
+           自定义源那条请求不会中断，最长还要等 15 秒超时，结果照样被插进消息列表。 */
+        return { provider: "自定义", results: await custom(query, settings, signal) };
+      }
+      /* 10-29 补：searxng 以前只能躲在「自动」里参与 650ms 竞速，用户没法指定「只用
+         自建 SearXNG」。自己有实例的人恰恰最想固定用它。 */
+      if (mode === "searxng") {
+        return { provider: "SearXNG", results: await searxng(query, settings, signal) };
       }
 
       /* auto：主模型就是 DeepSeek 时**先走它自己的搜索** —— 质量比免费源稳、带长摘要，
@@ -301,10 +323,12 @@
 
       // 免 Key 源并行，按 SearXNG > DuckDuckGo > Wikipedia 优先级择优
       try {
+        /* 用 run(sig) 的形式发请求：sig 是 racePrefer 内部的取消信号，
+           它一结算就 abort 掉落败的源；外层「用户点停止」的 signal 仍然各自并进去。 */
         const hit = await racePrefer([
-          { name: "SearXNG", promise: searxng(query, settings, signal) },
-          { name: "DuckDuckGo", promise: duckduckgo(query, signal) },
-          { name: "Wikipedia", promise: wikipedia(query, signal) }
+          { name: "SearXNG", run: (sg) => searxng(query, settings, sg || signal) },
+          { name: "DuckDuckGo", run: (sg) => duckduckgo(query, sg || signal) },
+          { name: "Wikipedia", run: (sg) => wikipedia(query, sg || signal) }
         ], 650);
         if (hit.results.length) return { provider: hit.name, results: hit.results };
       } catch (e) { lastErr = e; }

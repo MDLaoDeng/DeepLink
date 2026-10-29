@@ -54,8 +54,16 @@
         canvas.height = Math.round(img.height * scale);
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        try { resolve(canvas.toDataURL("image/jpeg", 0.85)); }
-        catch (e) { resolve(dataUrl); }
+        /* 按原图类型选编码（10-29 修）：JPEG 没有 alpha，`toDataURL("image/jpeg")`
+           会把透明像素合成为黑色 —— 贴纸、带透明边的立绘一放大就变黑块，
+           而同一条消息里小于 1600px 的同款图却是正常的（走的是上面那条原样返回）。 */
+        try {
+          const src = String(dataUrl || "");
+          const keepAlpha = src.indexOf("data:image/png") === 0 ||
+            src.indexOf("data:image/webp") === 0 ||
+            src.indexOf("data:image/gif") === 0;
+          resolve(keepAlpha ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85));
+        } catch (e) { resolve(dataUrl); }
       };
       img.onerror = () => resolve(dataUrl);
       img.src = dataUrl;

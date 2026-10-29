@@ -661,8 +661,10 @@
     if (!cam.base || camRotating) return;
     const c = $("#camCanvas");
     const token = ++camRotToken;
+    /* 一张就够（10-29 修）：两次 camFlatten() 内容完全一样，1600 边的画布每张约 7.7MB，
+       一次旋转瞬时多占十几兆。apply 里只读 src、snapshot 只留引用，不会互相改。 */
     const keep = camFlatten();     /* 旋转前的画面（含笔画），留给「撤销」还原 */
-    const src = camFlatten();      /* 要旋转的那张：笔画一并烤进去，和改造前行为一致 */
+    const src = keep;              /* 要旋转的那张：笔画一并烤进去，和改造前行为一致 */
     cam.shapes = [];
     cam.cropRect = null;           /* 坐标全变了，裁剪框必须重来 */
     cam.drag = null;
@@ -727,7 +729,14 @@
     camSetBase(cam.original);
   }
 
+  /* 每次停流都递增（10-29 修）：getUserMedia 是异步的，连点「翻转」或关掉再开时，
+     先发的那次请求可能后返回 —— 以前拿到流就直接 cam.stream = stream，
+     被覆盖掉的那条流永远没人 stop，摄像头指示灯常亮、下次也打不开。
+     用令牌保证「只有最后一次请求的结果才准上屏」。 */
+  var camStreamToken = 0;
+
   function camStopStream() {
+    camStreamToken++;
     if (cam.loadTimer) { clearInterval(cam.loadTimer); cam.loadTimer = null; }
     if (cam.focusTimer) { clearTimeout(cam.focusTimer); cam.focusTimer = null; }
     if (cam.startTimer) { clearTimeout(cam.startTimer); cam.startTimer = null; }
@@ -766,8 +775,15 @@
     $("#camExposureWrap").hidden = true;
     const md = navigator.mediaDevices;
     if (!md || !md.getUserMedia) { camFallback("当前环境不支持自研相机"); return; }
+    const myToken = camStreamToken;
     try {
       const stream = await md.getUserMedia({ video: { facingMode: cam.facing }, audio: false });
+      /* 等权限期间又被 stop 过一次（换了镜头 / 关了相机）→ 这条流已经过期，
+         立刻放掉，绝不能接上去。 */
+      if (myToken !== camStreamToken) {
+        try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) { /* ignore */ }
+        return;
+      }
       /* 等权限的这段时间用户可能已经把相机关了：这时流不能接上，
          否则弹窗都没了、摄像头指示灯还亮着（track 泄漏）。
          ⚠️ 只能判 hidden：相机层是用 `hidden = false` 打开的，**没有** .modal 的 show 类

@@ -3038,6 +3038,23 @@
       close: () => { UI.closeModal(topOpenModalId()); return true; }
     },
     {
+      /* 自绘滚轮（.wp-mask，不是 .modal，以前漏了 → 返回键会关错层） */
+      z: 465, name: "滚轮选择器",
+      test: () => !!(window.WheelPicker && typeof window.WheelPicker.close === "function" &&
+        document.querySelector(".wp-mask:not([hidden]):not(.closing)")),
+      close: () => { window.WheelPicker.close(); return true; }
+    },
+    {
+      /* 角色资料页必须排在「手机页」**之前**（10-29 修）。
+         资料页唯一的入口是在手机聊天里点头像，此刻 DL.phone.isOpen() 仍然为真；
+         而本表是「从上往下取第一个命中」的，排在手机页后面就会先退掉那张被压在
+         底下、根本看不见的手机列表 —— 用户按一次返回会觉得「没反应」。
+         这和上面那条「弹窗必须排在所有整页层之前」是同一个道理。 */
+      z: 430, name: "角色资料页",
+      test: () => { const p = window.DL && DL.profile; return !!(p && typeof p.isOpen === "function" && p.isOpen()); },
+      close: () => { window.DL.profile.back(); return true; }
+    },
+    {
       /* 手机层自己逐级退（浮层 → 通话 → 动态 → 动作条/多选 → 列表），
          只有它说「退到头了」才关手机。 */
       z: 500, name: "手机页",
@@ -3050,23 +3067,11 @@
       }
     },
     {
-      /* 自绘滚轮（.wp-mask，不是 .modal，以前漏了 → 返回键会关错层） */
-      z: 465, name: "滚轮选择器",
-      test: () => !!(window.WheelPicker && typeof window.WheelPicker.close === "function" &&
-        document.querySelector(".wp-mask:not([hidden]):not(.closing)")),
-      close: () => { window.WheelPicker.close(); return true; }
-    },
-    {
       /* 设置子页：先退回设置首页，别一脚踩到底。设置页本身是整页浮层，
          不插这条会被下面「关掉当前弹窗」直接关回主界面。 */
       z: 460, name: "设置子页",
       test: () => { const b = document.getElementById("settingsBody"); return !!(b && b.classList.contains("sg")); },
       close: () => { const b = document.getElementById("settingsBack"); if (b) { b.click(); return true; } return false; }
-    },
-    {
-      z: 430, name: "角色资料页",
-      test: () => { const p = window.DL && DL.profile; return !!(p && typeof p.isOpen === "function" && p.isOpen()); },
-      close: () => { window.DL.profile.back(); return true; }
     },
     {
       z: 425, name: "事件簿整页",

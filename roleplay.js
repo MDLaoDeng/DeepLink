@@ -1934,6 +1934,38 @@
     try { fillSessionFormInner(s); } catch (e) { console.warn("[Sekulum] fillSessionForm 出错", e); }
   }
 
+  /* 关系网只读行（10-29）：s.rel 里那四个 0~100 的数值以前只有提示词在用，
+     界面上一个地方都看不到 —— 用户既不知道它存在，也没法判断它有没有跟着剧情走。
+     这里在「当前关系」下面挂一行只读文字，跟着每次填表刷新。 */
+  function renderRelLine(s) {
+    try {
+      const box = $("#setSessionRelation");
+      if (!box || !box.parentNode) return;
+      const rel = (s && s.rel && typeof s.rel === "object") ? s.rel : {};
+      const ids = Object.keys(rel);
+      let chars = [];
+      try { chars = Store.getCharacters() || []; } catch (e) { chars = []; }
+      const nameOf = (id) => {
+        for (let i = 0; i < chars.length; i++) if (chars[i] && chars[i].id === id) return chars[i].name || "";
+        return "";
+      };
+      const line = ids.map((id) => {
+        const r = rel[id] || {};
+        return nameOf(id) + " 信任" + (r.trust || 0) + " 好感" + (r.favor || 0) +
+          " 熟悉" + (r.familiar || 0) + " 依赖" + (r.depend || 0) +
+          (r.kind ? "（" + r.kind + "）" : "");
+      }).join("；");
+      let el = box.parentNode.querySelector(".rel-line");
+      if (!el) {
+        el = document.createElement("small");
+        el.className = "rel-line";
+        box.parentNode.appendChild(el);
+      }
+      el.textContent = line ? ("关系网：" + line + "（每天跟着剧情小幅变化）")
+        : "关系网：还没有（建群或用一段时间后自动生成）";
+    } catch (e) { /* 只读行出错不影响设置页 */ }
+  }
+
   function fillSessionFormInner(s) {
     setVal("#setSessionTitle", s ? (s.title || "") : "");
     setVal("#setSessionAlias", s ? (s.alias || "") : "");
@@ -1954,6 +1986,7 @@
       setVal("#setSessionFormat", s.adoptFormat || "");
       setVal("#setSessionTtsVoice", s.ttsVoice || "");
       setVal("#setSessionRelation", s.relation || "");
+      renderRelLine(s);
       setVal("#setSessionShared", s.shared || "");
       setVal("#setSessionCognition", s.cognition || "");
       /* 记下「打开弹窗时」这四个字段的值。保存时只回写用户真改过的 ——

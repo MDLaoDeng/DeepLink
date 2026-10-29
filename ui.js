@@ -720,7 +720,9 @@
          统一问 Store.imageURL()，它两种都认（搬进文件的会同步读一次并缓存）。 */
       const imgUrl = a.kind === "image" ? window.Store.imageURL(a) : "";
       if (imgUrl) {
-        return '<div class="att"><img src="' + imgUrl + '" alt="' + escapeHtml(a.name) + '"><span class="a-name">' +
+        /* 地址也要转义（10-29 修）：别的字段都过了 escapeHtml，只有 src 直接拼，
+           一旦 dataURL / 图片引用里带上引号就能把属性断开（自闭环的注入面）。 */
+        return '<div class="att"><img src="' + escapeHtml(imgUrl) + '" alt="' + escapeHtml(a.name) + '"><span class="a-name">' +
           escapeHtml(a.name) + '</span><button class="a-save" type="button" data-save-img="" aria-label="保存">保存</button></div>';
       }
       if (a.kind === "image") {

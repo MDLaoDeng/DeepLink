@@ -86,6 +86,10 @@
     var timer = null;
     el.addEventListener("scroll", function () {
       var i = clampIdx(c, Math.round(el.scrollTop / ITEM_H));
+      /* c.idx 必须在这里就写（10-29 修）：value() 只读 c.idx，而它以前只在
+         settle()（停手 140ms 后）和点击选项时才更新 —— 连续拖动时 timer 被反复重置，
+         「停手后马上点确定」拿到的还是**滚动前**的旧值（提醒面板的日期时间直接受影响）。 */
+      c.idx = i;
       mark(c, i);
       if (timer) clearTimeout(timer);
       timer = setTimeout(function () { timer = null; settle(c); }, SETTLE_MS);

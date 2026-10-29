@@ -685,7 +685,10 @@
   /* 把所有视图的过场类清干净；keepUnder 里的保持可见（当背景），其余藏起来 */
   function viewSettle(keepUnder) {
     var keep = keepUnder || [];
-    [$("#phoneListView"), $("#phoneChatView"), $("#phoneMomentsView")].forEach(function (el) {
+    /* #phoneMeView 以前漏在这个数组外（10-29 修）：它在 DOM 里排在动态页之后、
+       又是不透明底色的绝对定位层，于是「我的 → 点底栏动态」时状态切了、底栏高亮也变了，
+       屏幕上还停在「我的」。 */
+    [$("#phoneListView"), $("#phoneChatView"), $("#phoneMomentsView"), $("#phoneMeView")].forEach(function (el) {
       if (!el) return;
       el.classList.remove("ph-in-right", "ph-in-left", "ph-out-left", "ph-out-right");
       if (keep.indexOf(el) < 0) el.hidden = true;
@@ -743,10 +746,30 @@
     playEnter(el);
   }
   /* 直接进某条会话的手机聊天（会话页顶栏按钮走这条） */
+  /* 能不能在手机里打开某条会话（10-29 新增统一判定）。
+     ⚠️ 列表侧（renderList）早就在过滤，但「会话页顶栏手机按钮」这条入口绕过了它 ——
+     现实群/助手线因此能在手机里聊，消息只写进 phone.msgs，主聊天和成员线都读不到，
+     正是本文件 1052 行注释里警告的那个黑洞。
+     用户 10-29 拍板：入口**保留**，但只放单角色线进来（现实群与助手线挡住）。 */
+  function phoneEntryOk(s) {
+    if (!s) return false;
+    /* 群：只放「手机群」进来（现实群的消息在 messages 里，手机读写的是 phone.msgs）。
+       注意手机群本身没有 characterId，所以群要单独判，不能一起套「必须挂角色」。 */
+    if (s.isGroup) return !!s.phoneGroup;
+    /* 单线：必须挂角色。没挂角色的 = 助手线（听澜），手机里没有它的位置。 */
+    return !!s.characterId;
+  }
+
   function openPhoneFor(sid) {
     syncModules();
     var s = sessionById(sid || (session() ? session().id : ""));
-    if (!s) { openPhone(); return; }
+    if (!s || !phoneEntryOk(s)) {
+      /* 挡下来的不是「报错」，而是安静地回到手机列表 —— 用户点的是「打开手机」，
+         不是「打开这条线」，所以给他手机本身，别弹一句莫名其妙的拒绝。 */
+      openPhone();
+      if (s) setTimeout(function () { toast("这条会话不在手机里（只有角色单线能在手机里聊）", true); }, 260);
+      return;
+    }
     var el = $("#phoneModal");
     if (!el) return;
     if (ps.closeTimer) { clearTimeout(ps.closeTimer); ps.closeTimer = null; }
@@ -763,7 +786,7 @@
     setTimeout(function () { ps.enterAnim = false; }, 700);
   }
   function closePhone() {
-    hangUp(true);
+    hangUp(false);            /* 同上：关手机不是「丢弃这通电话」 */
     closeSheet();
     showAddSheet(false);
     var el = $("#phoneModal");
@@ -1228,6 +1251,9 @@
   function openChat(sid) {
     var s = sessionById(sid);
     if (!s) { toast("这条对话已经不在了", true); goList(); return; }
+    /* 第二道闸（10-29）：任何入口（列表、通知、外部调用）进聊天页都过一遍，
+       免得以后新增入口又漏掉 —— 这次就是漏在 openPhoneFor 上。 */
+    if (!phoneEntryOk(s)) { toast("这条会话不在手机里", true); goList(); return; }
     ps.sid = sid;
     ps.view = "chat";
     /* 多选态与「查看更早」的条数都是上一条线残留的：不复位的话，
@@ -2359,7 +2385,12 @@
       /* 记忆互通（10-22 用户要求）：读他绑定的那条线 —— 手机单聊和现实扮演用的是同一条线，
          所以这里读到的是「他本人在那条线上经历过的全部」。必须标明只有本人知道，
          否则模型会把 A 的私聊内容当成全群共有的。 */
-      var line = boundLineOf(s, m.id);
+      /* boundLineOf 走的是 chat.js 的 lineOfMember，它返回的是**会话 id 字符串**，
+         不是会话对象（只有兜底分支才返回对象）。以前直接把返回值丢给
+         Memory.lineDossier，里面读 line.relation / line.memory 全是 undefined ——
+         手机群里每位成员「绑的那条线」一条记忆都进不了提示词，绑线形同虚设。 */
+      var lid = boundLineOf(s, m.id);
+      var line = !lid ? null : ((typeof lid === "string") ? sessionById(lid) : lid);
       if (line) {
         /* 与主群同一个入口（10-23）：关系 / 共同经历 / 场景 / 认知 / 摘要 /
            最近原话 / TA 的思绪 / 图库里的样子，一次读全。 */
@@ -4102,7 +4133,7 @@
       showAddSheet(false);
       if (window.DL && DL.openGroupModal) DL.openGroupModal("phone");
     });
-    on("#phoneBack", "click", function () { hangUp(true); goList(); });
+    on("#phoneBack", "click", function () { hangUp(false); goList(); });
     on("#phoneMomentsBack", "click", closeMoments);
     on("#phoneMomentsClose", "click", closePhone);
     /* 发布按钮的绑定在上面「7.2 动态页右上角相机」那条 —— 这里不能再绑一次，
@@ -4233,13 +4264,18 @@
     back: function () {
       var el = $("#phoneModal");
       if (!el || el.hidden) return false;
+      /* 0) 发布三选一（10-29 补）：它挂在 body 上、position:fixed 全屏，
+         以前 back() 完全不认它 —— 按返回只把手机退一级，遮罩还盖着整个应用。 */
+      if (phonePostMenu) { closePostMenu(); return true; }
       /* 1) 两个浮层都压在聊天页上面，先收 */
       var sheet = $("#phoneSheet");
       if (sheet && !sheet.hidden) { closeSheet(); return true; }
       var addSheet = $("#phoneAddSheet");
       if (addSheet && !addSheet.hidden) { show(addSheet, false); return true; }
       /* 2) 通话中 → 挂断 */
-      if (callState) { hangUp(true); return true; }
+      /* 按返回挂断也要留通话记录（10-29 修）：transcript 只存在内存里，
+         传 true 就等于整通电话一句话不剩 —— 用户习惯按返回退出。 */
+      if (callState) { hangUp(false); return true; }
       /* 3) 动态 / 我的 → 回「聊天」tab（微信里就是这样，不会直接退出手机） */
       if (ps.view === "moments" || ps.view === "me") { goList(); return true; }
       /* 4) 聊天页：功能条 → 多选 → 列表 */
@@ -4254,10 +4290,11 @@
       return false;
     },
     close: function () {
+      closePostMenu();          /* 10-29：关手机时把发布遮罩一起收掉，别留一张全屏膜 */
       if (callState) { hangUp(false); return; }
       /* 动态 / 我的：先退回聊天 tab */
       if (ps.view === "moments" || ps.view === "me") { goList(); return; }
-      if (ps.view === "chat") { hangUp(true); goList(); return; }
+      if (ps.view === "chat") { hangUp(false); goList(); return; }
       var el = $("#phoneModal");
       if (el && !el.hidden) closePhone();
     }
