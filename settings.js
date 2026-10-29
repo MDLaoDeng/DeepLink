@@ -783,18 +783,18 @@
     rows.sort(function (a, b) { return b.size - a.size; });
     rows.forEach(function (r) {
       const line = document.createElement("div");
-      line.className = "st-row";
+      line.className = "stg-row";
       const nm = document.createElement("span");
-      nm.className = "st-name";
+      nm.className = "stg-name";
       nm.textContent = r.name;
       const bar = document.createElement("span");
-      bar.className = "st-bar";
+      bar.className = "stg-bar";
       const fill = document.createElement("i");
-      fill.className = "st-fill";
+      fill.className = "stg-fill";
       fill.style.width = (total ? Math.max(3, Math.round(r.size / total * 100)) : 0) + "%";
       bar.appendChild(fill);
       const val = document.createElement("span");
-      val.className = "st-val";
+      val.className = "stg-val";
       val.textContent = fmt(r.size) + (r.extra ? "，" + r.extra : "");
       line.appendChild(nm); line.appendChild(bar); line.appendChild(val);
       box.appendChild(line);
@@ -3712,7 +3712,7 @@
     setTimeout(function () {
       el.classList.remove("closing");
       setHidden("#reasonDrawer", true);
-    }, 200);
+    }, UI.exitMs(200));
   }
   function renderReasonDrawer() {
     var box = document.getElementById("reasonList");

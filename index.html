@@ -11,11 +11,15 @@
 </head>
 <body data-theme="graphite" data-mode="dark">
 
-<div id="splash" class="splash" aria-hidden="true" data-anim="1">
+<!-- 启动页：这里的默认值必须等于 settings 的默认值（anim=0 / 你好，世界）。
+     以前写的是 data-anim="1" + Sek/ulum，而设置默认是 0 号 —— 冷启动时先按 1 号画出来，
+     等 app.js 的 applySplashSettings 跑完才跳成终端风，用户看见的是"错版跳一下"。
+     首帧就该是最终样子：脚本只负责覆盖用户改过的配置。 -->
+<div id="splash" class="splash" aria-hidden="true" data-anim="0">
   <div class="splash-stage" id="splashStage"></div>
   <div class="splash-mark">
-    <span class="w1" id="splashW1">Sek</span>
-    <span class="w2" id="splashW2">ulum</span>
+    <span class="w1" id="splashW1">你好，世界</span>
+    <span class="w2" id="splashW2"></span>
     <span class="splash-line"></span>
   </div>
   <div class="splash-credit" id="splashCredit">菠萝味柠檬汁/DS共同制作</div>
@@ -383,7 +387,7 @@
         <button class="sg-item" data-sg="storage" type="button"><span class="sg-ic" data-icon="cog-outline"></span><span class="sg-tx"><b>储存占用</b><i>各类型数据的占比</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
         <button class="sg-item" data-sg="about" type="button"><span class="sg-ic" data-icon="information-outline"></span><span class="sg-tx"><b>关于应用</b><i>版本与使用指南</i></span><span class="sg-go" data-icon="chevron-right"></span></button>
       </div>
-      <div class="settings-section">
+      <div class="settings-section" data-group="basic">
         <h3 class="sec-head">主模型<button class="btn ghost mini" type="button" data-reset="main">重置本区</button></h3>
         <p class="hint" id="providerNowLine">当前主模型：—</p>
         <div id="msetMain" class="mset-list" data-mkind="main"></div>
@@ -407,7 +411,7 @@
         <p class="hint"><b>不开（默认）</b>：主模型只当纯文字模型用，图片一律先由「视觉模型」转成文字描述再喂给它；听觉 / 朗读 / 画图也各走各的模型。<b>开启</b>：主模型能看图，图片直接交给它，视觉区那套配置不再参与（看图一律走主模型）。无论主模型是不是多模态，不开这个开关行为都一样——所以只有你确定主模型看得懂图时才勾。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="basic">
         <h3>头像</h3>
         <div class="field">
           <span>我的头像（全局默认）</span>
@@ -443,7 +447,7 @@
         </div>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="basic">
         <h3 class="sec-head">生成参数<button class="btn ghost mini" type="button" data-reset="gen">重置本区</button></h3>
         <label class="range-field">
           <span>Temperature <b id="setTempVal">1.00</b></span>
@@ -492,7 +496,7 @@
       </div>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3 class="sec-head">听觉模型 · 语音转文字<button class="btn ghost mini" type="button" data-reset="asr">重置本区</button></h3>
         <label class="check-field"><input type="checkbox" id="setAsrEnabled"><span>启用语音输入</span></label>
         <div id="msetAsr" class="mset-list" data-mkind="asr"></div>
@@ -503,7 +507,7 @@
         <p class="hint">接口地址 / API Key 留空则沿用主模型那套配置；模型名留空则直接嫁接到主模型（仅当主模型自己就具备转写能力时才这么用）。本区最多 6 套配置。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3 class="sec-head">语音合成 · 朗读<button class="btn ghost mini" type="button" data-reset="tts">重置本区</button></h3>
         <label class="check-field"><input type="checkbox" id="setTtsEnabled"><span>启用朗读按钮</span></label>
         <div id="msetTts" class="mset-list" data-mkind="tts"></div>
@@ -515,7 +519,7 @@
         <p class="hint">接口地址 / API Key 留空则沿用主模型那套配置；模型名留空则直接嫁接到主模型（仅当主模型自己就具备合成能力时才这么用）。本区最多 6 套配置。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3 class="sec-head">文生图<button class="btn ghost mini" type="button" data-reset="img">重置本区</button></h3>
         <label class="check-field"><input type="checkbox" id="setImgEnabled"><span>启用画图开关</span></label>
         <div id="msetImg" class="mset-list" data-mkind="img"></div>
@@ -587,7 +591,7 @@
         <p class="hint">和视频那一区同一套思路：通用字段够覆盖「提交任务 → 轮询 → 取地址」，形状不一样就填模板。<b>全部留空 = 不启用。</b></p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3 class="sec-head">视觉模型 · 看图<button class="btn ghost mini" type="button" data-reset="vision">重置本区</button></h3>
         <p class="hint">给图片写描述（图片转文字）用的模型。<b>只有主模型区那个「模型兼容」开关没勾时才用得上这里</b>——那时图片不直接发给主模型，而是先在这里转成文字描述。<br><b>主模型本身就能看图？</b>去上面主模型区把「模型兼容」勾上，本区整段留空即可。</p>
         <label class="check-field"><input type="checkbox" id="setVisionEnabled"><span>启用独立视觉模型</span></label>
@@ -598,7 +602,7 @@
         <p class="hint">主模型不是多模态（看不了图）时，在这一区填一个能看图的模型，比如硅基流动的 Qwen/Qwen2.5-VL-72B-Instruct，或阿里百炼的 qwen-vl-max。本区最多 6 套配置。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3 class="sec-head">图片<button class="btn ghost mini" type="button" data-reset="imgstore">重置本区</button></h3>
         <p class="hint">自己发的图、AI 画的图都会自动生成一段文字描述；原图只保留若干轮（默认 10），到期后删掉原图、只留描述——省空间也省 token。不想要就把下面关掉。</p>
         <label class="check-field"><input type="checkbox" id="setImgToText"><span>图片转文字存储（关闭则原图不删）</span></label>
@@ -606,7 +610,7 @@
         <label class="check-field"><input type="checkbox" id="setNoImage"><span>无图模式（聊天、附件里的图片都不显示；头像照常）</span></label>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3 class="sec-head">角色扮演 · 记忆压缩<button class="btn ghost mini" type="button" data-reset="memory">重置本区</button></h3>
         <label class="check-field"><input type="checkbox" id="setRoleplayEnabled"><span>启用角色扮演模式（侧栏出现角色切换）</span></label>
         <label class="check-field"><input type="checkbox" id="setGroupWarn" checked><span>群里改 / 删消息前先弹强提醒（5 秒后才能确认）</span></label>
@@ -623,7 +627,7 @@
         <div class="row-actions"><button id="openUsageBtn" class="btn" type="button"><span data-icon="chart-box-outline"></span>用量统计</button></div>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3 class="sec-head">功能开关 · 日更<button class="btn ghost mini" type="button" data-reset="feats">重置本区</button></h3>
         <label class="check-field"><input type="checkbox" id="setDailyUpdate"><span>日更：场景 / 关系 每天各更新一次（默认开；共同经历不随聊天变）</span></label>
         <label class="check-field"><input type="checkbox" id="setToolUse"><span>让角色按需读取这条线自己的资料（工具调用：记忆摘要 / 思绪 / 图库 / 旧对话检索。默认开；模型不支持时会自动退回普通回答，每次多读一次就要多一轮请求）</span></label>
@@ -644,13 +648,13 @@
         <p class="hint">离线原因：你离开应用时挑一条，世界生成 / 角色主动找你时会按它来写。会话里那份只能在这里选，不能改。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="basic">
         <h3 class="sec-head">采用格式（全局默认）<button class="btn ghost mini" type="button" data-reset="format">重置本区</button></h3>
         <label class="field"><span>角色回复采用的格式（留空则不限制）</span><textarea id="setAdoptFormat" rows="4" placeholder="例：每条回复先一句动作描写（用括号），再是对白；不要旁白式自我介绍。"></textarea></label>
         <p class="hint">会话可在「对话设置 → 采用格式」里单独覆盖；留空则跟随这里。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="basic">
         <h3>自定义聊天背景（全局默认）</h3>
         <div class="avatar-field">
           <div class="avatar-preview bg-preview" id="setBgPreview"></div>
@@ -666,7 +670,7 @@
         <p class="hint">大图走外置文件存储，不塞进本地存储。会话可在「对话设置」里单独换背景；全局默认对所有会话生效。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="basic">
         <h3>手机背景（手机聊天页单独用）</h3>
         <div class="avatar-field">
           <div class="avatar-preview bg-preview" id="setPhoneBgPreview"></div>
@@ -680,7 +684,7 @@
         <p class="hint">只影响手机聊天页，与上面的聊天背景互不干扰；留空则手机页用默认底色。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3 class="sec-head">用量花费<button class="btn ghost mini" type="button" data-reset="usageprice">重置本区</button></h3>
         <label class="field"><span>估算方式</span>
           <select id="setUsagePriceMode">
@@ -696,7 +700,7 @@
         <p class="hint">默认单价只是量级参考，请按你实际用的模型价目改。改完点右上角「保存」。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3>live2D 视频通话</h3>
         <label class="check-field"><input type="checkbox" id="setLive2dEnabled"><span>在手机「视频通话」里用 live2D 动态形象（关掉或没配好时，退回首帧静态图通话）</span></label>
         <label class="field"><span>模型 JSON 路径（相对本应用根目录）</span><input id="setLive2dModel" type="text" placeholder="live2d/model/shizuku.model.json"></label>
@@ -710,13 +714,13 @@
         <p class="hint">默认自带一个官方免费示例模型（Shizuku）。换模型：把 Cubism 2.1 的 .model.json + .moc + 贴图 放进 live2d/model/ 下，改这里路径即可。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3>角色记忆总览</h3>
         <p class="hint">每个角色「主线 + 各条支线」的记忆都在这里，点标题展开，不用一个个角色切过去看。</p>
         <div id="setMemoryList" class="memory-list"></div>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="basic">
         <h3>启动动画</h3>
         <label class="field"><span>动画</span><select id="setSplashAnim">
           <option value="0">极简 · 黑灰底，逐字打出来（默认）</option>
@@ -735,13 +739,13 @@
         <p class="hint">上面那个「先看一眼」只播动效本身（文字按你填的来），图片和头像不在预览里显示——真启动时它们由后台加载。改完<b>下次启动</b>生效。图片要是加载失败，会在后台自动重试，重试期间启动页不会提前退出。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3>后台与通知</h3>
         <label class="check-field"><input type="checkbox" id="setBgKeep"><span>后台常驻（生成中切到后台也不被系统掐断；生成完成时发一条状态栏通知）</span></label>
         <p class="hint">开启后会申请「电池不优化」与通知权限；这两项要由系统授予，拒绝也不影响 App 其它功能。通知只在 App 处于后台、且生成结束时才发，点通知可回到那条对话。</p>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="advanced">
         <h3>应用加密</h3>
         <label class="check-field"><input type="checkbox" id="setLockEnabled"><span>开启应用加密（每次打开 App 先输口令）</span></label>
         <p class="hint" id="setLockNote">说清楚：它是一道「口令门」，不是加密。挡的是「捡到手机随手翻」——聊天记录本身仍是明文存在本机（真正加密的只有角色记忆那一层）。忘记口令时可以让 AI 现场出题考你，也可以事先抄下一串一次性恢复码。</p>
@@ -752,7 +756,7 @@
         <div id="setLockState" class="hint"></div>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="persona">
         <h3>我的人设</h3>
         <p class="hint">这里存的是「<b>你</b>」的设定，最多 10 套、随时切换，只存本机。角色卡里填了的<b>以角色卡为准</b>，没填的用这里的补上（所以换角色不用重写一遍你）。</p>
         <label class="field"><span>当前使用（<b id="personaCount">0</b> / 10 套）</span><select id="personaPick"></select></label>
@@ -801,7 +805,7 @@
         </div>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" data-group="storage">
         <h3>存储</h3>
         <div id="storageSum" class="storage-sum">正在统计…</div>
         <div id="storageBars" class="storage-bars"></div>
@@ -980,7 +984,7 @@
         <div id="sessionDiaryList" class="hint"></div>
         <p class="hint">要关系剖析不在这里：去侧栏「助手」跟听澜说一句要一份就行（10-21 用户口径，按钮已撤）。</p>
       </div>
-      <div class="settings-section">
+      <div class="settings-section" data-group="basic">
         <h3>头像</h3>
         <p class="hint">留空则跟随「设置」里的全局头像。</p>
         <div class="field">
@@ -1034,7 +1038,7 @@
         <label class="check-field"><input type="checkbox" id="setSessionBgFollow" checked><span>跟随全局背景（取消勾选则用本对话单独设置；模糊 / 亮度沿用全局）</span></label>
         <p class="hint">本对话单独设置后，只影响这条对话。</p>
       </div>
-      <div class="settings-section">
+      <div class="settings-section" data-group="basic">
         <h3>生成参数</h3>
         <label class="check-field"><input type="checkbox" id="setSessionFollow" checked><span>跟随全局生成参数</span></label>
         <label class="range-field">
@@ -1870,7 +1874,7 @@
 </div>
 
 <!-- 离线原因：抽屉式管理（设置 → 高级功能里打开。可无限添加；会话里只能选不能改） -->
-<div id="reasonDrawer" class="drawer" hidden>
+<div id="reasonDrawer" class="drawer" role="dialog" aria-modal="true" aria-label="离线原因" hidden>
   <div class="drawer-mask" id="reasonMask"></div>
   <div class="drawer-panel">
     <div class="drawer-head">
@@ -2018,7 +2022,7 @@
 
 <!-- 剧情卡的全屏查看：铺满屏幕，左上角返回键退出。
      这里显示的正文就是**灌给 AI 的那一份**，一个字都不截。 -->
-<div id="worldView" class="world-view">
+<div id="worldView" class="world-view" role="dialog" aria-modal="true" aria-label="剧情全文">
   <div class="wv-head">
     <button id="worldViewBack" class="icon-btn wv-back" type="button" aria-label="返回"><span data-icon="arrow-left"></span></button>
     <div class="wv-title">选择的剧情</div>
@@ -2243,7 +2247,7 @@
 <!-- ── 手机（类微信）：和角色用手机聊天 / 转账 / 位置 / 图片 / 语音 / 伪电话 ──
      故意【不用 .modal】：它是独立全屏的一层（和相机层同一套路），返回键由 app.js
      直接问 window.DL.phone，才能在「通话中 → 聊天 → 关闭」之间逐级退。 -->
-<div id="phoneModal" class="phone-layer" hidden>
+<div id="phoneModal" class="phone-layer" role="dialog" aria-modal="true" aria-label="手机" hidden>
   <div class="phone-shell">
     <div class="phone-bar">
       <span id="phoneClock" class="phone-clock">--:--</span>

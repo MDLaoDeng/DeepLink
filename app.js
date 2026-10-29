@@ -654,13 +654,28 @@
     }
   }
 
+  /* 关加号菜单要带退场（10-29）：它有 poUp 进场（从底部升起），关的时候却是硬切。
+     函数定义放在 bindStudio 之前 —— 那块在 IIFE 靠前执行，只能用 getElementById。 */
+  var plusCloseTimer = 0;
+  function closePlusMenu() {
+    var m = document.getElementById("plusMenu");
+    if (!m || m.hidden || m.classList.contains("closing")) return;
+    m.classList.add("closing");
+    if (plusCloseTimer) clearTimeout(plusCloseTimer);
+    plusCloseTimer = setTimeout(function () {
+      plusCloseTimer = 0;
+      m.classList.remove("closing");
+      m.hidden = true;
+    }, (window.UI && UI.exitMs) ? UI.exitMs(160) : 160);
+  }
+
   /* 加号菜单的三个入口。
      ⚠️ 这里只能用原生 getElementById：本块在 IIFE 靠前的位置执行，
      那时 app.js 自己的 $ 还是 const 未初始化（TDZ），用它绑定会直接抛错、
      按钮全部失效。 */
   (function bindStudio() {
     const gid = function (id) { return document.getElementById(id); };
-    const hidePlus = function () { const m = gid("plusMenu"); if (m) m.hidden = true; };
+    const hidePlus = function () { closePlusMenu(); };
     const pv = gid("plusVideo"), pm = gid("plusMusic"), pd = gid("plusDoc");
     if (pv) pv.addEventListener("click", function () { hidePlus(); openStudio("video"); });
     if (pm) pm.addEventListener("click", function () { hidePlus(); openStudio("music"); });
@@ -1042,20 +1057,25 @@
   var poAnchor = null;
   function popoverClose() {
     const pm = $("#plusMenu"), hm = $("#headMenu");
-    if (pm) pm.hidden = true;
+    /* 加号菜单走退场（160ms 后 hidden）；顶栏菜单本来就没有进场动画，
+       保持瞬开瞬关（进出对称），只把 hidden 补上。 */
+    if (pm && !pm.hidden) closePlusMenu();
     if (hm) hm.hidden = true;
     poAnchor = null;
   }
   function popoverToggle(sel, anchor, above) {
     const panel = $(sel);
     if (!panel || !anchor) return;
-    const wasOpen = !panel.hidden;
+    /* 正在退场也当成「已关」：否则 160ms 内连点会被吞掉，看着像点不动 */
+    const wasOpen = !panel.hidden && !panel.classList.contains("closing");
     popoverClose();
     if (wasOpen) return;
     poAnchor = anchor;
     /* 加号菜单是底部抽屉（10-24 用户要求：像微信一样从下方弹起），
        不参与气泡定位 —— 定位交给 CSS，这里只清掉可能残留的内联坐标。 */
     if (sel === "#plusMenu") {
+      if (plusCloseTimer) { clearTimeout(plusCloseTimer); plusCloseTimer = 0; }
+      panel.classList.remove("closing");
       panel.style.left = "";
       panel.style.top = "";
       panel.hidden = false;
@@ -3033,7 +3053,7 @@
       /* 自绘滚轮（.wp-mask，不是 .modal，以前漏了 → 返回键会关错层） */
       z: 465, name: "滚轮选择器",
       test: () => !!(window.WheelPicker && typeof window.WheelPicker.close === "function" &&
-        document.querySelector(".wp-mask:not([hidden])")),
+        document.querySelector(".wp-mask:not([hidden]):not(.closing)")),
       close: () => { window.WheelPicker.close(); return true; }
     },
     {
@@ -3056,23 +3076,24 @@
     {
       /* 剧情全屏页：走它自己的返回按钮 —— 收起动画、滚动位置记忆都在那个回调里 */
       z: 420, name: "剧情全屏",
-      test: () => { const v = document.getElementById("worldView"); return !!(v && v.classList.contains("show")); },
+      test: () => { const v = document.getElementById("worldView"); return !!(v && v.classList.contains("show") && !v.classList.contains("closing")); },
       close: () => { const b = document.getElementById("worldViewBack"); if (b) { b.click(); return true; } return false; }
     },
     {
       z: 420, name: "表情导入",
-      test: () => { const v = document.getElementById("stickerImport"); return !!(v && !v.hidden); },
+      test: () => { const v = document.getElementById("stickerImport"); return !!(v && !v.hidden && !v.classList.contains("closing")); },
       close: () => { const b = document.getElementById("siCancel"); if (b) { b.click(); return true; } return false; }
     },
     {
       z: 95, name: "离线原因抽屉",
-      test: () => { const v = document.getElementById("reasonDrawer"); return !!(v && !v.hidden); },
+      test: () => { const v = document.getElementById("reasonDrawer"); return !!(v && !v.hidden && !v.classList.contains("closing")); },
       close: () => { const b = document.getElementById("reasonClose"); if (b) { b.click(); return true; } return false; }
     },
     {
-      /* 加号菜单 / 顶栏时钟（.popover，不是 .modal） */
+      /* 加号菜单 / 顶栏时钟（.popover，不是 .modal）。
+         正在退场的（.closing）算「已关」：否则按一次开始淡出，再按一次又被这一层吃掉。 */
       z: 80, name: "浮窗",
-      test: () => !!document.querySelector(".popover:not([hidden])"),
+      test: () => !!document.querySelector(".popover:not([hidden]):not(.closing)"),
       close: () => { popoverClose(); return true; }
     },
     {

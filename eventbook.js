@@ -78,16 +78,29 @@
   function openEventBook() {
     var p = document.getElementById("eventBookPage");
     if (!p) return;
+    if (ebCloseTimer) { clearTimeout(ebCloseTimer); ebCloseTimer = 0; }
+    p.classList.remove("closing");
     p.hidden = false;
     renderEventBook();
   }
+  /* 收起带退场（10-29）：进场是 eb-in（从右轻推），退场照同一方向退回去。
+     原来 hidden 一置就硬切，全项目最后两处「进有出无」之一。 */
+  var ebCloseTimer = 0;
   function closeEventBook() {
     var p = document.getElementById("eventBookPage");
-    if (p) p.hidden = true;
+    if (!p || p.hidden || p.classList.contains("closing")) return;
+    p.classList.add("closing");
+    if (ebCloseTimer) clearTimeout(ebCloseTimer);
+    ebCloseTimer = setTimeout(function () {
+      ebCloseTimer = 0;
+      p.classList.remove("closing");
+      p.hidden = true;
+    }, (window.UI && UI.exitMs) ? UI.exitMs(160) : 160);
   }
   function eventBookOpen() {
     var p = document.getElementById("eventBookPage");
-    return !!(p && !p.hidden);
+    /* 退场中当成「已关」：否则按一次返回开始淡出、再按一次又被这里吃掉 */
+    return !!(p && !p.hidden && !p.classList.contains("closing"));
   }
 
   /* 渲染：世界观 → 世界线 → 日期。倒序（最近的在上面），总量封顶 200 条 */

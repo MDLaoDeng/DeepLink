@@ -1100,6 +1100,16 @@
   }
 
   /* ── 提示条 / 对话框 ───────────────────────────── */
+  /* 「减少动态效果」下退场动画被压到 0.01ms，但 JS 里「播完再 hidden」的定时器
+     还在等 170~200ms —— 动画早演完了，人还得对着残留界面干等。
+     所有带退场的关闭动作一律走 exitMs()，别再写死数字。 */
+  function reduceMotion() {
+    try {
+      return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    } catch (e) { return false; }
+  }
+  function exitMs(ms) { return reduceMotion() ? 0 : ms; }
+
   function toast(text, isError) {
     const box = $("#toasts");
     /* 最多同时挂 3 条（10-27）：启动阶段的几条提示 + 一次生成失败 + 一次自动压缩失败，
@@ -1149,6 +1159,10 @@
   function openModal(id) {
     const m = document.getElementById(id);
     if (!m) return;
+    /* 读屏器语义（10-29）：以前只有 aria-hidden，弹窗和背景在无障碍树里是同一层。
+       在这里统一补 role / aria-modal，几十个 .modal 不用逐个改 HTML。 */
+    if (!m.getAttribute("role")) m.setAttribute("role", "dialog");
+    m.setAttribute("aria-modal", "true");
     m.classList.add("show");
     m.setAttribute("aria-hidden", "false");
     try { raiseAboveTop(m); } catch (e) { /* 抬层失败也不能拦住弹窗打开 */ }
@@ -1161,6 +1175,7 @@
     if (!m) return;
     m.classList.remove("show");
     m.setAttribute("aria-hidden", "true");
+    m.setAttribute("aria-modal", "false");
     m.style.zIndex = "";        /* 收掉自动抬的那层，下次按当场的层级重新量 */
     /* 确认框被外部（返回键）关掉时按「取消」结算，避免 promise 悬挂 + 旧回调残留 */
     if (id === "dialogModal" && dialogSettle) {
@@ -1614,6 +1629,7 @@
   window.UI = {
     $, escapeHtml, renderMarkdown, grayParens, msgEl, createStreamView, iconSvg, applyIcons, actionBtn, msgActionsEl, ACTIONS, setAvatarResolver, setSpeakerResolver, forceRepaint, themeDiagnostics, stickerize,
     toast, openModal, closeModal, confirmDialog, confirmDanger, askDialog,
+    exitMs, reduceMotion,
     pickBind, pickRefreshAll,
     applyTheme, buildModeSwitch, buildThemeGrid, sessionListEl,
     isNearBottom, scrollToBottom, copyText,

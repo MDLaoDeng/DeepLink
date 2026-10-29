@@ -366,6 +366,10 @@
     if (layer) return layer;
     layer = el("div", "profile-layer");
     layer.id = "profileLayer";
+    /* 无障碍语义（10-29）：整屏层在无障碍树里要标成对话框，否则读屏器会把
+       它和背后被挡住的主界面当成同一层来念。 */
+    layer.setAttribute("role", "dialog");
+    layer.setAttribute("aria-modal", "true");
     layer.hidden = true;
     document.body.appendChild(layer);
     return layer;
@@ -1452,6 +1456,19 @@
     return true;
   }
   var closeTimer = 0;
+  /* 关闭回调（10-29）：手机页「我的」卡和钱包页以前用 setTimeout(600) 猜时间刷新 ——
+     刷的是躲在整页层背后那张看不见的卡；用户改完两分钟再返回，看到的还是旧数据。
+     现在由这里在「真的关了」那一刻通知订阅方。 */
+  var closeHooks = [];
+  function onClose(fn) {
+    if (typeof fn !== "function") return;
+    if (closeHooks.indexOf(fn) < 0) closeHooks.push(fn);
+  }
+  function fireClose() {
+    for (var i = 0; i < closeHooks.length; i++) {
+      try { closeHooks[i](); } catch (e) { /* 订阅方出错不能拦住关层 */ }
+    }
+  }
   /* 退场：先播 170ms 动画再摘内容（时长与 app.css 的 .pf-out 对齐）。
      原先直接 hidden = true，按返回键是一帧硬切，和项目里其它浮层不对称。 */
   function close() {
@@ -1469,7 +1486,8 @@
       closeTimer = 0;
       L.classList.remove("pf-out");
       L.hidden = true; L.innerHTML = "";
-    }, 170);
+      fireClose();
+    }, UI.exitMs(170));
   }
   /* 退场途中又被打开：撤掉动画与待执行的卸载，否则「关了又开」会被 170ms 后的定时器清空 */
   function cancelClose() {
@@ -1497,7 +1515,7 @@
 
   window.DL = window.DL || {};
   window.DL.profile = {
-    open: open, close: close, isOpen: isOpen, back: back,
+    open: open, close: close, isOpen: isOpen, back: back, onClose: onClose,
     openDetail: openDetail, openMoments: openMoments,
     ensureSocial: ensureSocial, showName: showName, charById: charById,
     commonGroups: commonGroups,

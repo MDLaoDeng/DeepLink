@@ -359,8 +359,15 @@
     /* 必须在清空 DOM 之前判：清空后 scrollHeight 归零，位置判断全部失真 */
     const stick = sidNow !== lastMsgsSid || UI.isNearBottom();
     lastMsgsSid = sidNow;
+    /* 重建期间掐掉入场动画（10-29）：本函数是「整列清空 → 重新追加」，
+       节点重新插入会让每一条的 fade-slide 再播一遍 —— 20 条一起向上飘 8px。
+       删一条消息、保存设置、切角色都会走到这里，看着像整屏抖了一下。
+       手机页早有 prevCount 闸门，主聊天靠这个类（CSS 见 .messages.rebuilding）。
+       双 rAF 之后再摘：单帧摘会让动画从半路恢复，反而更难看。 */
+    box.classList.add("rebuilding");
+    const relAnim = () => requestAnimationFrame(() => requestAnimationFrame(() => box.classList.remove("rebuilding")));
     box.innerHTML = "";
-    if (!s) { state.msgWin = null; return; }
+    if (!s) { state.msgWin = null; relAnim(); return; }
     /* ⚠️ 这里**不**自动插开场白：开场白改成「点按钮才落库」（6.2.5 口径），
        渲染时插进去就等于绕过那个按钮，还会把「发送开场白」按钮瞬间藏掉。 */
     const total = s.messages.length;
@@ -388,6 +395,7 @@
     syncQuickBtn();     /* 快捷回复按钮的置灰状态跟着当前这条会话的记忆走 */
     /* 贴着底才跟；翻上去看旧消息时什么都不动 */
     if (stick) UI.scrollToBottom();
+    relAnim();
   }
 
   /* 群聊里把「重新说」收到只剩最后一条（10-18 用户要求）。
@@ -3372,17 +3380,29 @@
   function openEmojiPanel() {
     var p = $("#emojiPanel");
     if (!p) return;
+    /* 上一次的退场还没播完就重新打开：撤掉退场与待执行的隐藏 */
+    if (emojiCloseTimer) { clearTimeout(emojiCloseTimer); emojiCloseTimer = 0; }
+    p.classList.remove("closing");
     p.hidden = false;
     var btn = $("#emojiBtn");
     if (btn) btn.classList.add("on");
     showEmojiTab(emojiTab);
   }
+  var emojiCloseTimer = 0;
   function closeEmojiPanel() {
     var p = $("#emojiPanel");
-    if (p) p.hidden = true;
     var btn = $("#emojiBtn");
     if (btn) btn.classList.remove("on");
     stickerEditId = "";
+    if (!p || p.hidden || p.classList.contains("closing")) return;
+    /* 有进场（emoji-in）就得有退场，否则关掉是硬切（10-29 补） */
+    p.classList.add("closing");
+    if (emojiCloseTimer) clearTimeout(emojiCloseTimer);
+    emojiCloseTimer = setTimeout(function () {
+      emojiCloseTimer = 0;
+      p.classList.remove("closing");
+      p.hidden = true;
+    }, UI.exitMs(140));
   }
   function toggleEmojiPanel() {
     /* m2：补绑。绑定已经从 renderMessages 挪到启动时只调一次，
@@ -3492,7 +3512,7 @@
     setTimeout(function () {
       sheet.classList.remove("closing");
       sheet.hidden = true;
-    }, 180);
+    }, UI.exitMs(180));
   }
 
   function renderSiGrid() {
@@ -3709,7 +3729,7 @@
     setTimeout(() => {
       box.classList.remove("show", "closing");
       worldViewKey = "";
-    }, 200);
+    }, UI.exitMs(200));
   }
 
   function bindWorldView() {

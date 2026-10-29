@@ -8,6 +8,11 @@
 [hidden] { display: none !important; }
 /* 点击后残留的 UA 焦点轮廓（安卓上会显示成暖色方框），统一去掉；输入框另有自绘聚焦态 */
 button:focus, a:focus, select:focus, summary:focus, details:focus, input:focus, textarea:focus { outline: none; }
+/* 但「去掉」不能连键盘一起抹掉（7.1 只剩这一处漏网）：
+   蓝牙键盘 / 读屏器用户按 Tab 时，全站没有任何焦点指示，等于在黑暗里走。
+   用 :focus-visible 补回来 —— 触屏点击不会触发，所以安卓上那个暖色方框仍然不出现。 */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; }
 
 /* 图标（内联 SVG，尺寸跟随字号） */
 .ic {
@@ -543,6 +548,11 @@ body {
 }
 
 .msg { display: flex; max-width: 100%; animation: fade-slide .34s both; }
+/* 整列重建时掐掉入场（10-29 修）：renderMessages 是「清空 → 重新追加」，
+   节点重新插入会让 fade-slide 重播一遍 —— 20 条一起向上飘 8px。
+   删一条消息、保存设置、切角色都会触发，看着像整屏抖了一下。
+   手机页早有 prevCount 闸门，主聊天靠这个类（JS 双 rAF 后摘掉）。 */
+.messages.rebuilding .msg { animation: none !important; }
 .msg > *:not(:last-child) { margin-right: 10px; }
 /* 我的消息是 row-reverse（头像在右），外边距要加在左侧才落在头像与气泡之间 */
 .msg.user > *:not(:last-child) { margin-right: 0; margin-left: 10px; }
@@ -553,7 +563,7 @@ body {
 
 .avatar {
   width: 30px; height: 30px; border-radius: var(--r-md); flex: none; overflow: hidden;
-  display: flex; align-items: center; justify-content: center; font-size: 15px;
+  display: flex; align-items: center; justify-content: center; font-size: var(--fs-body);
   /* 无框：靠背景色区分即可（见「能无框就无框」那条口径） */
   background-color: var(--panel-2); border: 0.5px solid transparent;
 }
@@ -723,7 +733,7 @@ body {
 .cam-tools { display: flex; flex-wrap: wrap; padding: calc(8px + env(safe-area-inset-top)) 6px 2px; }
 .cam-tool {
   display: flex; flex-direction: column; align-items: center;
-  color: #ddd; font-size: 11px; border: 0; background: transparent;
+  color: #ddd; font-size: var(--fs-caption); border: 0; background: transparent;
   padding: 6px 9px; border-radius: var(--r-md);
 }
 .cam-tool .ic { font-size: 20px; margin-bottom: 3px; }
@@ -756,14 +766,14 @@ body {
 }
 .code-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 5px 12px; font-size: 11px; color: var(--text-mute);
+  padding: 5px 12px; font-size: var(--fs-caption); color: var(--text-mute);
   background-color: var(--panel-2);
   border-bottom: 0.5px solid var(--border);
 }
 .code-head .copy-btn {
   display: inline-flex; align-items: center;
   border: 0; background: none; color: var(--text-dim); cursor: pointer;
-  font-size: 11px; padding: 2px 6px; border-radius: var(--r-sm); transition: background-color .2s, color .2s;
+  font-size: var(--fs-caption); padding: 2px 6px; border-radius: var(--r-sm); transition: background-color .2s, color .2s;
 }
 .code-head .copy-btn > *:not(:last-child) { margin-right: 4px; }
 .code-head .copy-btn:active { background-color: var(--panel-2); color: var(--accent); }
@@ -895,10 +905,13 @@ body {
 .icon-btn:disabled { opacity: .4; }
 /* 夜间 10 套主题的 --danger 都是浅粉 #E7798C，配白字对比度只有约 2.8:1
    （图标能看清的最低要求是 3:1）——「停止生成 / 多选删除 / 挂断 / 录音中」在夜里都偏淡。
-   这里在夜间统一压深一档：#C2415A 配白字约 5:1；日间主题不受影响。 */
+   这里在夜间统一压深一档：#C2415A 配白字约 5:1；日间主题不受影响。
+   ⚠️ 新增「红底 + 白字」的组件必须往这张表里加一行，否则就是下一个 2.8:1 ——
+   .ph-nf-badge（新的朋友计数）就是这么漏掉的。 */
 body[data-mode="dark"] .icon-btn.danger,
 body[data-mode="dark"] .mic-btn.recording,
-body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
+body[data-mode="dark"] .phone-call-btn.danger,
+body[data-mode="dark"] .ph-nf-badge { background-color: #C2415A; }
 
 /* ── 快捷回复（10-14）─────────────────────────────────────────────
    按钮**无边框**：输入框右侧已经有一个明显的主按钮（发送），
@@ -1000,7 +1013,7 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 .wv-body {
   flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
   padding: 16px 16px calc(28px + env(safe-area-inset-bottom));
-  font-size: 15px; line-height: 1.85; color: var(--text);
+  font-size: var(--fs-body); line-height: 1.85; color: var(--text);
   white-space: pre-wrap; word-break: break-word;
 }
 
@@ -1089,7 +1102,9 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 #passModal, #albumModal { z-index: 400; }
 .modal-sheet {
   width: 100%; max-height: 88vh; display: flex; flex-direction: column;
-  background-color: var(--panel); border-top-left-radius: 22px; border-top-right-radius: 22px;
+  background-color: var(--panel);
+  /* 圆角统一走 --r-lg（20）：原来这里是 22，手机弹层 18、表情导入 16 —— 三个底部弹层三种圆度 */
+  border-top-left-radius: var(--r-lg); border-top-right-radius: var(--r-lg);
   border-top: 1px solid var(--border);
   /* 进：从下方浮起 + 轻微放大 + 淡入；出：反向。曲线用「先冲过头再回弹」那味儿的缓出。 */
   transform: translateY(18px) scale(.985);
@@ -1128,9 +1143,10 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
   flex: none; padding: 14px 20px calc(14px + env(safe-area-inset-bottom));
   border-top: 0.5px solid var(--border);
 }
-#introModal.intro-full .intro-h { font-size: 24px; line-height: 1.35; margin-bottom: 14px; }
+/* 字号只在文件末尾那条定义（22px）：这里原来写 24px，被下面 22px 整块覆盖，
+   改这里不会有任何效果 —— 和 10-27 的 splash-word 是同一个坑。 */
+#introModal.intro-full .intro-h { line-height: 1.35; margin-bottom: 14px; }
 #introModal.intro-full .intro-p { font-size: var(--fs-body); line-height: 1.85; }
-#introModal.intro-full .intro-img { max-width: 132px; margin-bottom: 22px; }
 
 /* ── 设置 = 整页而非浮窗（10-17 用户要求）────────────────────────
    仍然走 .modal 的 show/hide 机制（UI.openModal/closeModal 不用改），
@@ -1309,7 +1325,10 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
   flex: 1; padding: 8px 6px; border: 0; border-radius: var(--r-sm);
   background: transparent; color: var(--text-dim); font: inherit; font-size: var(--fs-caption); cursor: pointer;
 }
-.ai-tab.on { background-color: var(--accent); color: #fff; }
+/* ⚠️ 实心块上的字一律 var(--accent-ink)，不能写死 #fff：
+   夜间 10 套主题的 --accent 是浅色（如 #8FAEEC）、配套的墨色是深色（#24191F），
+   写白字实测只有 1.82~2.30:1 —— 形状看得见、字看不见。日间 accent-ink 本来就是白，零变化。 */
+.ai-tab.on { background-color: var(--accent); color: var(--accent-ink); }
 .ai-scope { display: flex; flex-direction: column; margin-bottom: 4px; }
 
 /* 世界观库（10-26）：面板默认折叠；展开后一次正好完整露出 5 套，多的在里面滚。
@@ -1385,6 +1404,14 @@ body[data-mode="dark"] .phone-call-btn.danger { background-color: #C2415A; }
 .topbar .icon-btn {
   width: 34px; height: 34px; border-radius: var(--r-md); font-size: 15px;
   border: 0; background-color: transparent; color: var(--text);
+  position: relative;
+}
+/* 顶栏 7 个元素挤一行，视觉做不了 44（会把标题挤没，10-26 踩过）。
+   折中：视觉仍 34，用伪元素把热区撑到 40 —— 相邻按钮间距 6，中心距正好 40，
+   刚好铺满不重叠。要真到 44 得重排顶栏，那是另一件事。 */
+.topbar .icon-btn::after {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 40px; height: 40px; transform: translate(-50%, -50%);
 }
 .topbar .icon-btn:active { background-color: var(--panel-2); }
 /* 「对话设置」按钮上顺带显示故事时间（只放时:分，顶栏没地方放日期） */
@@ -1598,7 +1625,7 @@ body.tts-on .act-btn.read-act { display: inline-flex; }
 .reason-add-btn {
   flex: none; margin-left: 6px;
   padding: 8px 15px; border: 0; border-radius: var(--r-lg);
-  background-color: var(--accent); color: #fff;
+  background-color: var(--accent); color: var(--accent-ink);
   font-size: var(--fs-caption); font-weight: 600; cursor: pointer;
 }
 .reason-add-btn:active { opacity: .82; }
@@ -1606,14 +1633,16 @@ body.tts-on .act-btn.read-act { display: inline-flex; }
    （Chrome 83 的 flex 不能用 gap，元素间距一律走 margin） */
 .storage-sum { font-size: var(--fs-body); color: var(--text); margin-bottom: 10px; }
 .storage-bars { margin-bottom: 12px; }
-.st-row { display: flex; align-items: center; margin-bottom: 7px; }
-.st-name { flex: none; width: 96px; font-size: var(--fs-body); color: var(--text-dim); }
-.st-bar {
+/* 存储条改用 stg-* 前缀（10-29）：原来和「消息状态条」共用 .st-row / .st-name / .st-bar，
+   后定义的那组会全局覆盖这组，只能靠一段作用域补丁往回压。同名的两件事就该两个名字。 */
+.stg-row { display: flex; align-items: center; margin-bottom: 7px; }
+.stg-name { flex: none; width: 96px; font-size: var(--fs-body); color: var(--text-dim); }
+.stg-bar {
   flex: 1; min-width: 0; height: 8px; margin: 0 9px;
   border-radius: var(--r-sm); background-color: var(--panel-2); overflow: hidden;
 }
-.st-fill { display: block; height: 100%; border-radius: var(--r-sm); background-color: var(--accent); }
-.st-val { flex: none; font-size: var(--fs-caption); color: var(--text-mute); }
+.stg-fill { display: block; height: 100%; border-radius: var(--r-sm); background-color: var(--accent); }
+.stg-val { flex: none; font-size: var(--fs-caption); color: var(--text-mute); }
 /* live2D 测试结果是多行文本（协议 / 贴图 / XHR 各一行），要按行显示 */
 #live2dTestOut { white-space: pre-line; }
 .check-field {
@@ -1782,7 +1811,10 @@ body.tts-on .act-btn.read-act { display: inline-flex; }
   /* 460 = 压过所有层（锁屏 420 / 相机 120 / 设置子页 90 / 设置页 88）。
      以前是 80 —— 在设置页里点「清理页面缓存」，提示条被 88 层的设置页整个盖住，
      表现成「点了没有任何反馈」（真机反馈）。提示条本来就该永远在最上面。 */
-  z-index: 460; display: flex; flex-direction: column; align-items: center; pointer-events: none; padding: 0 14px;
+  /* 470 = 永远最高，只有滚轮选择器（520）比它高。
+     原来和 #plusMenu 同为 460，靠 DOM 顺序分胜负 —— 任何一次结构调整都会让
+     「清理缓存成功」这类提示被加号菜单盖住，和 10-27 修过的「点了没反馈」同一个病。 */
+  z-index: 470; display: flex; flex-direction: column; align-items: center; pointer-events: none; padding: 0 14px;
 }
 /* ── 提示条 ───────────────────────────────────────── */
 .toasts > *:not(:last-child) { margin-bottom: 8px; }
@@ -1806,6 +1838,9 @@ body.tts-on .act-btn.read-act { display: inline-flex; }
   .scrim { display: none; }
   #menuBtn { display: none; }
   .messages { padding: 24px 20px; }
+  /* 桌面宽屏给正文一个行宽上限：1400 宽的窗口里，气泡能拉到 1100px（约 110 个汉字），
+     读起来会串行。760 约等于 72 个汉字，正好是舒服的上限；手机端不受影响。 */
+  .messages > .msg { width: 100%; max-width: 760px; margin-left: auto; margin-right: auto; }
   .composer { padding-left: 20px; padding-right: 20px; }
   .modal { align-items: center; justify-content: center; }
   .modal-sheet { max-width: 540px; border-radius: var(--r-lg); }
@@ -2088,7 +2123,6 @@ body.no-image .gen-img-wrap img { display: none !important; }
 /* ── 首次引导 / 功能树 ───────────────────────── */
 .intro-pages { padding: 6px 2px 2px; min-height: 300px; }
 .intro-page { animation: fade-slide .3s both; }
-.intro-img { display: block; width: 84px; height: 84px; border-radius: var(--r-lg); object-fit: cover; margin: 4px auto 12px; }
 .intro-h { font-size: 17px; font-weight: 700; margin: 0 0 10px; text-align: center; }
 .intro-p { margin: 0 0 8px; font-size: var(--fs-body); line-height: 1.75; color: var(--text-dim); }
 .intro-dots { display: flex; justify-content: center; padding: 12px 0 2px; }
@@ -2298,7 +2332,9 @@ html.kb-open .phone-layer {
 }
 @-webkit-keyframes ph-item-in { from { opacity: 0; -webkit-transform: translateX(10px); } to { opacity: 1; -webkit-transform: none; } }
 @keyframes ph-item-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
-@media (min-width: 700px) {
+/* 桌面：手机页居中成一台"机"。断点与侧栏那条保持一致（都是 760）——
+   以前这里是 700，700~760 之间侧栏已常驻、手机壳却还铺满整屏，两种形态打架。 */
+@media (min-width: 760px) {
   .phone-layer { align-items: center; background-color: var(--scrim); }
   .phone-shell { height: min(880px, 94vh); border-radius: var(--r-lg); border: 0.5px solid var(--border); box-shadow: var(--shadow); }
 }
@@ -2494,10 +2530,13 @@ html.kb-open .phone-layer {
   font-size: var(--fs-caption); color: var(--text-mute); padding: 4px 0;
 }
 
-/* 转账卡（微信转账样式） */
+/* 转账卡（微信转账样式）
+   底色写死橙：这张卡要一眼认出是转账，不跟主题走。
+   但字不能写白 —— 白字压 #f5a623 只有 2.03:1（明暗两套一样糟，20px 粗体也救不了）。
+   改近黑 #2B1B00 = 8.23:1，卡片识别度不变。 */
 .ph-transfer {
   width: 210px; border-radius: var(--r-md); overflow: hidden;
-  background-color: #f5a623; color: #fff;
+  background-color: #f5a623; color: #2B1B00;
 }
 .ph-transfer-top { display: flex; align-items: center; padding: 13px 14px; }
 .ph-transfer-ic {
@@ -2505,7 +2544,7 @@ html.kb-open .phone-layer {
   display: flex; align-items: center; justify-content: center;
   background-color: rgba(255,255,255,.25); margin-right: 11px;
 }
-.ph-transfer-ic .ic { font-size: 20px; color: #fff; }
+.ph-transfer-ic .ic { font-size: 20px; color: #2B1B00; }
 .ph-transfer-main { flex: 1; min-width: 0; }
 .ph-transfer-amt { font-size: 20px; font-weight: 700; line-height: 1.25; }
 .ph-transfer-note { font-size: var(--fs-caption); opacity: .92; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -2600,7 +2639,8 @@ body.no-image .ph-image img { display: none; }
 }
 .phone-sheet-card {
   width: 100%; padding: 16px 18px calc(16px + env(safe-area-inset-bottom));
-  background-color: var(--panel); border-top-left-radius: 18px; border-top-right-radius: 18px;
+  background-color: var(--panel);
+  border-top-left-radius: var(--r-lg); border-top-right-radius: var(--r-lg);
   border-top: 0.5px solid var(--border);
   /* 「这条线」有十几个字段，内容一多卡片就顶出屏幕 —— 标题和关闭按钮全被推到可视区之外
      （真机截图里整块内容从屏幕最上沿开始、上面还缺一截）。这里限住高度，
@@ -2731,8 +2771,6 @@ body.no-image .ph-image img { display: none; }
 
 /* ── 6.0.0：手机动态（朋友圈）──────────────────────────────── */
 .phone-moments { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px 20px; -webkit-overflow-scrolling: touch; }
-/* 置顶「动态」入口已在 10-17 去掉（挪进右上角「+」浮窗），这条样式留着但不再命中 */
-.phone-moments-entry .ph-av { background-color: var(--accent); color: var(--accent-ink); }
 .ph-moment {
   padding: 12px 0 14px; border-bottom: 0.5px solid var(--border);
 }
@@ -2809,12 +2847,7 @@ body.no-image .ph-moment-img img { display: none; }
 .st-bar { flex: 1; height: 8px; margin: 0 9px; border-radius: var(--r-sm); background-color: var(--border); overflow: hidden; }
 .st-fill { display: block; height: 100%; border-radius: var(--r-sm); background-color: var(--accent); }
 .st-val { flex: none; width: 30px; text-align: right; }
-/* 上面这组 .st-* 是「消息状态条」的样式，与设置页「储存占用」（1344 起的同名类）
-   撞了名，后定义的全局生效 → 储存条被改成 56px、色值变亮、底槽几乎看不见。
-   这里把储存条的作用域收回（选择器特异性也要压过 .st-row:not(:last-child)）。 */
-.storage-bars .st-name { width: 96px; color: var(--text-dim); }
-.storage-bars .st-bar { background-color: var(--panel-2); }
-.storage-bars .st-row, .storage-bars .st-row:not(:last-child) { margin-bottom: 7px; }
+/* 存储条已经改名为 stg-*（见 1629 行），这里不再需要作用域补丁。 */
 
 /* ── 6.0.0：live2D 视频通话 ───────────────────────────────────
    画面层在最底（z-index:0），名字/时长/气泡/按钮叠在上层。
@@ -2921,7 +2954,7 @@ body.no-image .ph-moment-img img { display: none; }
   overflow-wrap: break-word; word-break: break-word;
 }
 .msg.offline .offline-text::before {
-  content: "线下 · "; font-style: normal; font-size: var(--fs-caption); letter-spacing: .04em; opacity: .8;
+  content: "线下　"; font-style: normal; font-size: var(--fs-caption); letter-spacing: .04em; opacity: .8;
 }
 
 /* ── 滚轮式日期 / 时间选择（10-18 用户要求，替代系统原生控件）────── */
@@ -2933,7 +2966,7 @@ body.no-image .ph-moment-img img { display: none; }
 .wp-mask[hidden] { display: none; }
 .wp-sheet {
   width: 100%; background-color: var(--panel);
-  border-top-left-radius: 20px; border-top-right-radius: 20px;
+  border-top-left-radius: var(--r-lg); border-top-right-radius: var(--r-lg);
   padding-bottom: env(safe-area-inset-bottom);
   animation: wpUp .26s cubic-bezier(.22, 1, .36, 1);
 }
@@ -2968,7 +3001,7 @@ body.no-image .ph-moment-img img { display: none; }
 }
 .wp-col::-webkit-scrollbar { width: 0; height: 0; }
 .wp-item {
-  text-align: center; font-size: 15px; color: var(--text-mute);
+  text-align: center; font-size: var(--fs-body); color: var(--text-mute);
   transition: color .12s ease;
 }
 .wp-item.on { color: var(--text); font-weight: 600; }
@@ -3139,7 +3172,8 @@ body.no-image .ph-moment-img img { display: none; }
 .si-mask { position: absolute; left: 0; right: 0; top: 0; bottom: 0; background-color: var(--scrim); }
 .si-card {
   position: relative; max-height: 76vh; display: flex; flex-direction: column;
-  background-color: var(--panel); border-top-left-radius: 16px; border-top-right-radius: 16px;
+  background-color: var(--panel);
+  border-top-left-radius: var(--r-lg); border-top-right-radius: var(--r-lg);
   padding: 14px 14px calc(12px + env(safe-area-inset-bottom));
   animation: si-in .22s cubic-bezier(.22, 1, .36, 1);
 }
@@ -3246,7 +3280,12 @@ body.no-image .ph-moment-img img { display: none; }
 }
 .studio-ask-q .ask-item { font-size: var(--fs-caption); line-height: 1.7; color: var(--text); }
 .studio-ask-q .ask-item + .ask-item { margin-top: 4px; }
-.studio-ask-q .ask-item::before { content: "· "; color: var(--accent); font-weight: 700; }
+/* 前置标记不用中点字符（UI-A4 口径）：画一枚 4px 主题色小圆点，
+   既不占文案宽度，也不会在等宽字体下变成半个字。 */
+.studio-ask-q .ask-item::before {
+  content: ""; display: inline-block; width: 4px; height: 4px; margin-right: 6px;
+  border-radius: 50%; background-color: var(--accent); vertical-align: 3px;
+}
 .studio-ask textarea { width: 100%; margin-top: 9px; min-height: 56px; }
 
 /* 滑杆行：左边滑杆右边实时数值 */
@@ -3397,7 +3436,7 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 .album-scope:first-child { border-radius: 10px 0 0 10px; }
 .album-scope:last-child { border-radius: 0 10px 10px 0; }
 .album-scope + .album-scope { border-left: 0; }
-.album-scope.on { background-color: var(--accent); color: #fff; border-color: var(--accent); }
+.album-scope.on { background-color: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .album-tabs { display: flex; margin-bottom: 8px; }
 .album-tab {
   flex: 1; padding: 8px 6px; border: 0.5px solid var(--border); background-color: transparent;
@@ -3429,7 +3468,7 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 .album-cell.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
 .album-cell .album-tick {
   position: absolute; right: 4px; top: 4px; width: 20px; height: 20px; border-radius: 50%;
-  background-color: var(--accent); color: #fff; font-size: var(--fs-caption); line-height: 20px; text-align: center;
+  background-color: var(--accent); color: var(--accent-ink); font-size: var(--fs-caption); line-height: 20px; text-align: center;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -3764,7 +3803,11 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   /* z=4：要压在三个视图（1~3）上面，但必须低于底部弹层（.phone-sheet z=5）——
      否则发动态那种弹层会被底栏切掉一条，底下还露出半个图标。 */
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
-  height: 54px; padding-bottom: env(safe-area-inset-bottom);
+  /* 高度必须把安全区加进去（全局 border-box，height 含 padding）：
+     原来写死 54px，带手势条的机器上内容区只剩 20px，22px 的图标直接被压扁。
+     下面「让出底栏高度」那三条也要用同一个表达式，改一处漏一处就会盖住内容。 */
+  height: calc(54px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   display: flex; align-items: stretch;
   background-color: var(--panel); border-top: 0.5px solid var(--border);
 }
@@ -3783,7 +3826,7 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 /* 让出底栏高度：只对三个主视图生效 */
 .phone-shell.tabs-on #phoneListView.phone-view,
 .phone-shell.tabs-on #phoneMomentsView.phone-view,
-.phone-shell.tabs-on #phoneMeView.phone-view { bottom: 54px; }
+.phone-shell.tabs-on #phoneMeView.phone-view { bottom: calc(54px + env(safe-area-inset-bottom, 0px)); }
 /* 「我的」视图也走绝对定位铺满那一套 */
 #phoneMeView.phone-view {
   position: absolute !important;
@@ -3948,7 +3991,8 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
    getElementById 只会拿到第一个，真启动页那边的文字就改不动了。 */
 .splash-preview {
   position: relative;
-  height: 220px;
+  /* 180 是最终值：原来这里写 220，被文件末尾的同名规则覆盖过（死声明）。 */
+  height: 180px;
   margin: 10px 0 6px;
   border-radius: var(--r-lg);
   overflow: hidden;
@@ -4069,5 +4113,32 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   padding: 10px 12px;      /* 和 .field input 一样的纵向高度 */
   border-radius: var(--r-md);
 }
-.splash-preview { height: 180px; }
+
+/* ── 退场动画补遗（10-29）──────────────────────────────────────
+   下面六处原来只有进场、关掉时一帧硬切（抽屉 / 表情导入 / 剧情全屏早在 10-27 就补过）。
+   统一约定：JS 加 .closing 播退场 → 动画结束或定时器兜底 → 再切 hidden。
+   ⚠️ 以后新增浮层，写了进场就必须配一条退场，否则就是这六处的前身。 */
+#plusMenu.closing { animation: poDown .16s cubic-bezier(.4, 0, .6, 1) forwards; }
+@keyframes poDown { from { transform: translateY(0); opacity: 1; } to { transform: translateY(100%); opacity: .6; } }
+
+.emoji-panel.closing { animation: emoji-out .14s ease-in forwards; }
+@keyframes emoji-out { from { transform: none; opacity: 1; } to { transform: translateY(10px); opacity: 0; } }
+
+.wp-mask.closing { animation: wpFade .16s ease-in forwards; }
+.wp-mask.closing .wp-sheet { animation: wpDown .18s ease-in forwards; }
+@keyframes wpFade { to { opacity: 0; } }
+@keyframes wpDown { to { transform: translateY(100%); } }
+
+.ph-pick-mask.closing { animation: ph-pick-out .16s ease-in forwards; }
+.ph-pick-mask.closing .ph-pick-card { animation: ph-pick-down .18s ease-in forwards; }
+@keyframes ph-pick-out { to { opacity: 0; } }
+@keyframes ph-pick-down { to { transform: translateY(100%); } }
+
+.eb-page.closing { animation: eb-out .16s ease-in forwards; }
+@keyframes eb-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(14px); } }
+
+.ph-bubmenu { animation: bub-in .12s ease-out; }
+.ph-bubmenu.closing { animation: bub-out .1s ease-in forwards; }
+@keyframes bub-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes bub-out { to { opacity: 0; transform: scale(.96); } }
 

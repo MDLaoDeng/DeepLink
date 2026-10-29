@@ -219,6 +219,9 @@
 
     root.querySelector('[data-wp="title"]').textContent = mode === "datetime" ? "选择时间" : "选择日期";
     box.classList.toggle("wide", mode === "datetime");
+    /* 上一次退场没播完又打开：撤掉退场与待执行的隐藏 */
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = 0; }
+    root.classList.remove("closing");
     root.hidden = false;
 
     /* 隐藏状态下设 scrollTop 不生效，等一帧再定位 */
@@ -231,7 +234,19 @@
     });
   }
 
-  function hide() { if (root) root.hidden = true; }
+  /* 收起带退场（10-29）：上滑进场（wpUp）配下滑收起，遮罩同步淡出。
+     原来 hidden 一置就是硬切，进有出无。 */
+  var hideTimer = 0;
+  function hide() {
+    if (!root || root.hidden || root.classList.contains("closing")) return;
+    root.classList.add("closing");
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(function () {
+      hideTimer = 0;
+      root.classList.remove("closing");
+      root.hidden = true;
+    }, (window.UI && UI.exitMs) ? UI.exitMs(180) : 180);
+  }
 
   window.WheelPicker = { open: open, close: hide };
 })();

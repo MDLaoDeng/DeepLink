@@ -652,7 +652,14 @@
   }
 
   /* ── 打开 / 关闭 ─────────────────────────────────── */
-  function isOpen() { var el = $("#phoneModal"); return !!(el && !el.hidden); }
+  function isOpen() {
+    var el = $("#phoneModal");
+    if (!el || el.hidden) return false;
+    /* 退场动画（180ms）期间算「已经关了」：否则这 180ms 里按返回会再关一次，
+       退场重播、定时器重置，看着像卡住不动。 */
+    var sh = el.querySelector(".phone-shell");
+    return !(sh && sh.classList.contains("phone-leave"));
+  }
   /* 手机页的独立背景由 app.js 的 applyPhoneBackground 统管（值存在设置的 phoneBg* 里） */
   function applyPhoneBg() {
     try { if (D.applyPhoneBackground) D.applyPhoneBackground(); } catch (e) { /* 背景出错不影响进手机 */ }
@@ -772,7 +779,7 @@
           ps.closeTimer = null;
           el.hidden = true;
           if (shell) { shell.classList.remove("phone-leave"); }
-        }, 180);
+        }, UI.exitMs(180));
       } else {
         el.hidden = true;
       }
@@ -867,8 +874,25 @@
   /* ── 「我的」页 ──────────────────────────────────
      用户口径：只留一张资料微缩卡 + 一个「服务」入口，别把设置里那堆都搬过来。
      卡右边的箭头进详细资料（下一批做，先给个明确提示，不做成死按钮）。 */
+  /* 资料页 / 钱包关掉后刷新「我的」卡（10-29 修）：
+     以前是在「打开」之后 setTimeout(600) 刷一次 —— 刷的是躲在整页层背后那张看不见的卡；
+     用户改完名字两分钟再返回，看到的还是旧数据。
+     现在由资料页在真正关闭时通知（DL.profile.onClose），一次注册长期有效。 */
+  function hookProfileClose() {
+    if (hookProfileClose.done) return true;
+    if (!(window.DL && DL.profile && typeof DL.profile.onClose === "function")) return false;
+    hookProfileClose.done = true;
+    DL.profile.onClose(function () {
+      if (ps.view === "me") {
+        try { renderMe(); } catch (e) { /* 刷不出来也不能影响关层 */ }
+      }
+    });
+    return true;
+  }
+
   function openMe() {
     ps.view = "me";
+    hookProfileClose();
     switchView($("#phoneMeView"), 0);
     renderMe();
     syncTabs("me");
@@ -931,7 +955,8 @@
     /* 号是懒生成的：真进了资料页才补，卡片上先显示有没有 */
     var sid = String(st.mySid || "").trim();
     var nm2 = String(st.myNickname || "").trim();
-    sub.textContent = (nm2 ? nm2 + "  " : "") + (sid ? ("Sekulum " + sid) : "还没生成 Sekulum 号");
+    /* 两段信息之间用全角空格：以前是两个半角空格，在中文字体里挤成一条缝 */
+    sub.textContent = (nm2 ? nm2 + "　" : "") + (sid ? ("Sekulum " + sid) : "还没生成 Sekulum 号");
     info.appendChild(sub);
     card.appendChild(info);
 
@@ -941,9 +966,8 @@
     card.appendChild(ar);
     card.addEventListener("click", function () {
       if (window.DL && DL.profile && DL.profile.openMineDetail) {
+        /* 刷新交给 hookProfileClose 里的 onClose，不再猜 600ms */
         DL.profile.openMineDetail();
-        /* 回来时资料可能改过，重新画一遍这张卡 */
-        setTimeout(function () { if (ps.view === "me") renderMe(); }, 600);
       }
     });
     box.appendChild(card);
@@ -960,7 +984,6 @@
     box.appendChild(meRow("cash", "账户", "¥" + balTx, function () {
       if (window.DL && DL.profile && DL.profile.openWallet) {
         DL.profile.openWallet();
-        setTimeout(function () { if (ps.view === "me") renderMe(); }, 600);
       }
     }));
     box.appendChild(meRow("creation", "我的动态", "", function () {
@@ -1369,13 +1392,29 @@
 
   /* 气泡旁的浮层菜单（10-20 用户口径：不要那个大弹窗，改成贴着我长按的那条气泡）。
      定位用 getBoundingClientRect + fixed；上方放不下就翻到下方。 */
+  /* 收起带退场（10-29）：这个菜单原来进出都没有动画，硬弹硬收。
+     现在进 120ms 缩放淡入、出 100ms 收回（见 app.css 的 bub-in / bub-out）。
+     它同时是「点空白处关闭」的捕获监听器 —— 监听要立刻摘，动画可以慢慢播。 */
   function closeBubbleMenu() {
-    var el = document.querySelector(".ph-bubmenu");
-    if (el) el.parentNode.removeChild(el);
     document.removeEventListener("click", closeBubbleMenu, true);
+    var list = document.querySelectorAll(".ph-bubmenu");
+    for (var i = 0; i < list.length; i++) {
+      (function (el) {
+        if (el.classList.contains("closing")) return;
+        el.classList.add("closing");
+        setTimeout(function () {
+          if (el.parentNode) el.parentNode.removeChild(el);
+        }, (window.UI && UI.exitMs) ? UI.exitMs(100) : 100);
+      })(list[i]);
+    }
   }
   function showBubbleMenu(anchor, items) {
-    closeBubbleMenu();
+    /* 旧菜单（可能还在退场里）直接摘掉，免得叠两个 */
+    document.removeEventListener("click", closeBubbleMenu, true);
+    var olds = document.querySelectorAll(".ph-bubmenu");
+    for (var oi = 0; oi < olds.length; oi++) {
+      if (olds[oi].parentNode) olds[oi].parentNode.removeChild(olds[oi]);
+    }
     if (!anchor || !items || !items.length) return;
     var box = document.createElement("div");
     box.className = "ph-bubmenu";
@@ -3839,6 +3878,13 @@
      相机按钮点开给三条路，拍摄和相册都是自研的（项目自带相机 / 自研相册），
      不走系统选择器。三条路的终点是同一个发布页，都要能加文字、能选线。 */
   function openPostMenu() {
+    /* 上一次还没退场完就再点：把残留节点直接摘掉，别叠两层 */
+    if (postMenuTimer) { clearTimeout(postMenuTimer); postMenuTimer = 0; }
+    var olds = document.querySelectorAll(".ph-pick-mask");
+    for (var oi = 0; oi < olds.length; oi++) {
+      if (olds[oi].parentNode) olds[oi].parentNode.removeChild(olds[oi]);
+    }
+    phonePostMenu = null;
     var mask = document.createElement("div");
     mask.className = "ph-pick-mask";
     var card = document.createElement("div");
@@ -3890,10 +3936,21 @@
   }
 
   var phonePostMenu = null;
+  var postMenuTimer = 0;
+  /* 收起带退场（10-29）：遮罩淡出 + 卡片下滑，180ms 后再摘节点。
+     原来直接 removeChild，进有出无。
+     ⚠️ phonePostMenu 立刻置空，别等动画结束 —— 返回键和 isOpen 都靠它判「还开着没」，
+     留着它会让退场那 180ms 里再按一次返回被吞掉。 */
   function closePostMenu() {
-    if (!phonePostMenu) return;
-    if (phonePostMenu.parentNode) phonePostMenu.parentNode.removeChild(phonePostMenu);
+    var m = phonePostMenu;
     phonePostMenu = null;
+    if (!m || m.classList.contains("closing")) return;
+    m.classList.add("closing");
+    if (postMenuTimer) clearTimeout(postMenuTimer);
+    postMenuTimer = setTimeout(function () {
+      postMenuTimer = 0;
+      if (m.parentNode) m.parentNode.removeChild(m);
+    }, UI.exitMs(180));
   }
 
   /* 拍一张 → 直接进发布页带着这张图 */
