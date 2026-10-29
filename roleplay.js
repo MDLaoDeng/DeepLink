@@ -1501,10 +1501,17 @@
     s.cognition = $v("#setSessionCognition");
     UI.toast("正在更新认知…");
     try {
+      /* 记下改之前的样子（10-30）：updateCognition 空输出时什么都不写，但 usage 照样有值，
+         以前不判断就提示「认知已更新」—— 用户以为成功了，其实档案一个字没动。
+         这里比一次实际内容，没变就如实说没变。 */
+      const before = String(s.cognition || "");
       const usage = await Memory.updateCognition(s, saveSession, state.settings, extra);
       await Store.memReady();
       if (usage) recordUsage(null, usage, s.characterId, "daily");
-      fillSessionForm(session());
+      const now = session() || {};
+      const after = String(now.cognition || "");
+      fillSessionForm(now);
+      if (after === before) { UI.toast("模型这次没返回内容，认知档案保持原样", true); return; }
       UI.toast("认知已更新");
     } catch (e) {
       UI.toast("更新认知失败：" + (e.message || e), true);
@@ -2381,7 +2388,8 @@
         "当前关系：" + (s.relation || "（未记录）"),
         "共同经历：" + (s.shared || "（未记录）"),
         "对用户的认知：" + (s.cognition || "（未记录）"),
-        "记忆摘要：" + (Memory.memoryText ? Memory.memoryText(s.memory) : "（空）"),
+        /* 预算版（10-30）：关系剖析/世界生成本来就是长输入，再叠全量记忆很容易撞长度上限 */
+        "记忆摘要：" + (Memory.memoryForPrompt ? Memory.memoryForPrompt(s.memory) : ((Memory.memoryText ? Memory.memoryText(s.memory) : "（空）"))),
         "最近的对话：\n" + (all || "（还没聊过）")
       ].join("\n");
       const sys = "你是关系分析师。根据给出的对话与记忆，写一份简洁的关系剖析报告，包含：" +
@@ -2479,7 +2487,7 @@
       "当前关系：" + (s.relation || "（未记录）"),
       "当前场景：" + (s.scene || "（未记录）"),
       "共同经历：" + (s.shared || "（未记录）"),
-      "记忆摘要：" + (Memory.memoryText ? Memory.memoryText(s.memory) : "（空）"),
+      "记忆摘要：" + (Memory.memoryForPrompt ? Memory.memoryForPrompt(s.memory) : ((Memory.memoryText ? Memory.memoryText(s.memory) : "（空）"))),
       /* 跨线回读（10-27）：别的线最近 7 天提到过这个角色的事，作为「已知事实」。
          范围：故事时间最近 7 天 + mentions 含他 + 最多 20 条。
          作用只有一个 —— 别让两边对同一件事写出两个版本（他那天在加班 vs 在喝酒）。 */

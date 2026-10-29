@@ -68,7 +68,14 @@
   let audioBtn = null;
 
   /* ── 图片：轮数到期后删原图、只留文字描述 ─────────── */
-  function userTurns(s) { return ((s && s.messages) || []).filter((m) => m.role === "user").length; }
+  /* 「多少轮」要把手机里说的话也算进来（10-30 修）。
+     以前只数 messages：手机上聊了二十轮、主聊天没动过，手机里那些图永远到不了期 ——
+     描述生成了、原图和文件却一直留着，图片外置的意义就丢了一半。 */
+  function userTurns(s) {
+    const a = ((s && s.messages) || []).filter((m) => m.role === "user").length;
+    const b = ((s && s.phone && s.phone.msgs) || []).filter((m) => m && m.role === "user").length;
+    return a + b;
+  }
 
   function sweepImageExpiry(s) {
     if (!s || !state.settings.imgToText) return false;
@@ -76,7 +83,8 @@
     if (n < 1) return false;
     const total = userTurns(s);
     let changed = false;
-    (s.messages || []).forEach((m) => {
+    const scan = (arr) => (arr || []).forEach((m) => {
+      if (!m) return;
       if (typeof m.atTurn !== "number") return;
       if (total - m.atTurn < n) return;
       /* ⚠️ 只有「拿到了文字描述」才敢删原图：需求是「删原图、只留文字描述」，
@@ -90,6 +98,9 @@
         });
       }
     });
+    /* 主聊天与手机两边一起扫（10-30）：手机里的图同样是外置文件，不能永远留着。 */
+    scan(s.messages);
+    scan(s.phone && s.phone.msgs);
     return changed;
   }
 
@@ -106,10 +117,10 @@
         m.attachments.forEach((a, j) => {
           if (a.kind !== "image" || a.desc) return;
           const u = Store.imageURL(a);          /* 内联或文件引用都能拿到地址 */
-          if (u) jobs.push({ i: i, j: j, url: u, img: false });
+          if (u) jobs.push({ i: i, j: j, url: u, img: false, ts: m.ts });
         });
       } else if (m.role === "assistant" && m.image && !m.imageDesc) {
-        jobs.push({ i: i, j: -1, url: m.image, img: true });
+        jobs.push({ i: i, j: -1, url: m.image, img: true, ts: m.ts });
       }
     });
     for (const job of jobs) {
@@ -121,8 +132,14 @@
         if (out.text && out.text.trim()) {
           /* 先把描述落库、再记账：记账若抛错（跨模块未就绪）会被下面的 catch 吞掉，
              那时描述还没写进去就白丢了。记账也补 typeof 守卫（本文件其它调用点都有）。 */
+          /* 用 ts 认身份（10-30）：描述是网络调用、几秒才回，这期间用户删过消息/回溯过，
+             按下标写就会写到**别的消息**上。本文件其它地方（regen / 搜索）都用 ts 定位。 */
           mutateSession(sid, (msgs) => {
-            const mm = msgs[job.i];
+            let at = typeof job.ts === "number"
+              ? msgs.findIndex((m) => m && m.ts === job.ts)
+              : job.i;
+            if (at < 0) at = job.i;
+            const mm = msgs[at];
             if (!mm) return;
             if (job.img) mm.imageDesc = out.text.trim();
             else if (mm.attachments && mm.attachments[job.j]) mm.attachments[job.j].desc = out.text.trim();
@@ -1143,7 +1160,9 @@
       } catch (e) { /* 提示拼不出来不影响对话 */ }
       if (state.settings.assistantCompress) {
         await ensureMemoryReady();
-        const mt = Memory.memoryText(s && s.memory);
+        /* 走预算版（10-30）：助手线是用得最久的一条线，memoryText 全量注入会随月压缩
+           一路涨，而 MEM_INJECT 那套裁剪以前只有主对话（角色线）在用。 */
+        const mt = (Memory.memoryForPrompt || Memory.memoryText)(s && s.memory);
         if (mt) systemText += "\n\n【记忆摘要】\n" + mt;
         coveredUntil = (s && s.memory && s.memory.coveredUntil) || 0;
       }
@@ -1240,11 +1259,16 @@
           msgs.push({ role: "user", content: text || "[空消息]" });
         }
       } else if (m.role === "assistant") {
-        const c = (activeVariant(m) || {}).content;
-        if (c) {
+        const c = (activeVariant(m) || {}).content || "";
+        /* 出过的图会按轮数过期（image 被删、只留 imageDesc），那段描述必须喂回去（10-30）。
+           以前只取正文：图过期后这条回复在上下文里变成一句空气，模型完全不知道
+           「我给你画过一张…」，而用户发的图那条分支是会带 desc 的 —— 两边不一致。 */
+        const imgNote = m.imageDesc ? ("【图片（原图已过期，以下是文字描述）】\n" + m.imageDesc) : "";
+        const body = [c, imgNote].filter(Boolean).join("\n");
+        if (body) {
           /* 群聊：把「谁说的」带回上下文，模型才接得住话 */
           const sp = m.speakerName ? m.speakerName + "：" : "";
-          msgs.push({ role: "assistant", content: sp + c });
+          msgs.push({ role: "assistant", content: sp + body });
         }
       }
     }
@@ -1829,7 +1853,8 @@
       attachments: state.attachments.slice()
     };
     if (userMsg.attachments.some((a) => Store.hasImage(a))) {
-      userMsg.atTurn = s.messages.filter((m) => m.role === "user").length + 1;
+      /* 与 sweepImageExpiry 的 total 用同一个尺子：手机里的用户消息也算轮数（10-30） */
+      userMsg.atTurn = userTurns(s) + 1;
     }
     if (userMsg.attachments.some((a) => a.kind === "image") && !state.settings.imgExpireNotified) {
       state.settings = Store.saveSettings({ imgExpireNotified: true });
@@ -1911,13 +1936,20 @@
 
   function mutateMessages(fn) { mutateSession(state.sessionId, fn); }
 
+  /* 落盘失败要说一声（10-30）。Store.saveSessions() 在「疑似误清 / 读失败 / 配额满」
+     时会 return false，界面已经改了、盘上没改 —— 不提示的话，用户看到「已删除 N 条」，
+     重开应用又全回来了，只会以为是玄学。同文件的 rollbackTo 一直在检查，这里漏了。 */
+  function saveWarn(ok) {
+    if (ok === false) UI.toast("改动没写进本机存储（空间可能不够），请先导出备份再清缓存", true);
+  }
+
   function mutateSession(sid, fn) {
     const list = Store.getSessions();
     const i = list.findIndex((x) => x.id === sid);
     if (i < 0) return;
     fn(list[i].messages);
     list[i].updatedAt = Date.now();
-    Store.saveSessions(list);
+    saveWarn(Store.saveSessions(list));
   }
 
   function mutateInsert(index, msg) {

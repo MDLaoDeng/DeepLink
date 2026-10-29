@@ -213,7 +213,10 @@
       var about = (opts && opts.about) || t.about || ["self"];
       var who = whoOf(s).filter(function (w) { return about.indexOf(w.id) >= 0; })
         .map(function (w) { return w.label; });
-      var what = String((opts && opts.scene) || "").trim();
+      /* 没显式给当天剧情时，回落到「当前场景」（10-30 修）。
+         以前 opts.scene 没传就真的是空 —— 而此时 m.scene 里明明有东西。
+         结果每轮触发的日更思考全靠模型凭空编，跟当天发生了什么无关。 */
+      var what = String((opts && opts.scene) || m.scene || "").trim();
       var body = [
         "角色：" + m.name,
         "性格：" + (m.persona || "（未填）"),
@@ -353,13 +356,18 @@
       if (!settings || !settings.apiKey) return "";
 
       var src = pending.map(function (x) { return x.d + "：" + x.t; }).join("\n");
+      /* 旧结论要一起喂进去（10-30 修）。碎念压完就被 trimDays 删掉，
+         而 t.digest 是被**整段替换**的 —— 不合并的话，前几批的结论两头都没了。 */
+      var prevDigest = String(t.digest || "").trim();
       var m = metaOf(s);
       var usage = null;
       var text = "";
       try {
         var r = await A.summarize(settings, [
           { role: "system", content: DIGEST_SYS },
-          { role: "user", content: "角色：" + m.name + "\n性格：" + (m.persona || "（未填）") + "\n下面是这些天的想法：\n" + src }
+          { role: "user", content: "角色：" + m.name + "\n性格：" + (m.persona || "（未填）") +
+            "\n下面是这些天的想法：\n" + src +
+            (prevDigest ? ("\n\n【已有结论（并入它，仍然成立的部分不要丢）】\n" + prevDigest) : "") }
         ], { maxTokens: 600 });
         text = String((r && r.text) || "").trim();
         usage = (r && r.usage) || null;

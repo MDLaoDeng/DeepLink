@@ -472,7 +472,9 @@
       withImg.forEach(function (m) {
         var t = el("div", "pf-thumb");
         var i2 = el("img");
-        i2.src = m.imgs[0]; i2.alt = "";
+        /* 过 picUrl（10-30）：动态的图是外置成附件对象的（imgRef / dataUrl 都可能），
+           直接塞进 src 会得到 [object Object] 破图。同文件别的行都过了 picUrl，这里漏了。 */
+        i2.src = picUrl(m.imgs[0]); i2.alt = "";
         t.appendChild(i2);
         thumbs.appendChild(t);
       });
@@ -488,15 +490,20 @@
 
     wrap.appendChild(el("div", "pf-gap"));
 
-    /* 发消息 / 音视频 */
+    /* 发消息 / 音视频
+       ⚠️ openPhoneFor 收的是**会话 id**，不是角色 id（10-30 修）。
+       以前这里传 ch.id：sessionById 永远匹配不上，点「发消息」只会退回手机列表，
+       看着像没反应；而「语音通话」还会照样弹一句「进手机页点电话即可拨号」，
+       等于把一个失效的入口说得像成功了一半。 */
     var act1 = el("button", "pf-act");
     act1.type = "button";
     act1.innerHTML = icon("message-text-outline") + "<span>发消息</span>";
     act1.addEventListener("click", function () {
       close();
+      var sid = lineIdFor(ch.id);
       var d2 = D();
-      if (d2.openPhoneFor) { d2.openPhoneFor(ch.id); return; }
-      if (d2.phone && d2.phone.openLine) d2.phone.openLine(ch.id);
+      if (sid && d2.openPhoneFor) { d2.openPhoneFor(sid); return; }
+      if (U().toast) U().toast("还没有和 TA 的对话，先在侧栏新建一条", true);
     });
     wrap.appendChild(act1);
 
@@ -505,8 +512,10 @@
     act2.innerHTML = icon("phone-outline") + "<span>语音通话</span>";
     act2.addEventListener("click", function () {
       close();
+      var sid = lineIdFor(ch.id);
       var d3 = D();
-      if (d3.openPhoneFor) d3.openPhoneFor(ch.id);
+      if (!sid) { if (U().toast) U().toast("还没有和 TA 的对话，先在侧栏新建一条", true); return; }
+      if (d3.openPhoneFor) d3.openPhoneFor(sid);
       if (U().toast) U().toast("进手机页后点「电话」即可拨号");
     });
     wrap.appendChild(act2);
@@ -697,7 +706,7 @@
     }
     var so = ch && ch.social;
     if (so && so.cover) return picUrl(so.cover);
-    if (so && so.photos && so.photos[0]) return so.photos[0];   /* 老数据：图库第一张兜底 */
+    if (so && so.photos && so.photos[0]) return picUrl(so.photos[0]);   /* 老数据：图库第一张兜底 */
     return "";
   }
 
@@ -1362,6 +1371,19 @@
   }
 
   /* ── 渲染与开关 ─────────────────────────────────── */
+  /* 角色 id → 该角色的一个会话 id（优先主线，其次最近更新的那条）。
+     资料页的「发消息 / 语音通话」要拿它去 openPhoneFor；一条线都没有就返回空串。 */
+  function lineIdFor(chId) {
+    try {
+      var list = S().getSessions() || [];
+      var mine = list.filter(function (x) { return x && !x.isGroup && x.characterId === chId; });
+      if (!mine.length) return "";
+      for (var i = 0; i < mine.length; i++) if (mine[i].mainLine) return mine[i].id;
+      mine.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+      return mine[0].id || "";
+    } catch (e) { return ""; }
+  }
+
   function render() {
     var L = ensureLayer();
     if (!L || L.hidden) return;

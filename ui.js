@@ -1184,6 +1184,11 @@
       const f = dialogSettle; dialogSettle = null;
       try { f(false); } catch (e) { /* ignore */ }
     }
+    /* 口令框同理（10-30）：它由 settings.js 提供结算钩子。不结算的后果更重 ——
+       下一次点「确定」会把上一轮放弃的导出 / 关闭加密动作顶上去执行。 */
+    if (id === "passModal" && typeof window.__dlSettlePass === "function") {
+      try { window.__dlSettlePass(); } catch (e) { /* ignore */ }
+    }
   }
 
   /* 当前挂着的确认框「结算函数」。返回键会直接 closeModal 关掉 dialogModal 而不结算，

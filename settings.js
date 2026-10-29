@@ -302,17 +302,21 @@
 
   async function payloadJson() {
     const kind = $v("#exportScope");
+    /* 先问口令、再干活（10-30 修）：内联图片要逐张走原生桥读文件 + 转 base64，
+       几百张图要好几秒。以前是先全读完才弹口令框 —— 用户看到的是「点了没反应」，
+       而且中途取消的话这些开销全白做。 */
+    const noImg = checkedOf("#exportNoImg");
+    const pass0 = await askPass("给导出文件设个口令", "导出的内容会用这个口令加密，口令不会存进 App；以后导入时要输同一个。忘了就永久解不开。", true);
+    if (pass0 === null) return null;
     const data = buildExportData(kind, checkedOf("#exportKeys"));
     if (data == null) { UI.toast("没有可导出的内容", true); return null; }
-    const noImg = checkedOf("#exportNoImg");
     if (kind === "full") inlineExportImages(data.sessions, noImg);
     else if (kind === "session") inlineExportImages([data], noImg);
     /* 10-29 修：导出「仅某个角色（含它的所有对话）」以前漏了这条 ——
        只内联了图库索引，消息里的图仍只带本机路径 imgRef，换台手机导入后
        这些图全变「图片（原图已过期）」。 */
     else if (kind === "character") inlineExportImages(data.sessions, noImg);
-    const pass = await askPass("给导出文件设个口令", "导出的内容会用这个口令加密，口令不会存进 App；以后导入时要输同一个。忘了就永久解不开。", true);
-    if (pass === null) return null;
+    const pass = pass0;
     let enc;
     try { enc = await Store.sealWithPass(JSON.stringify(data), pass); }
     catch (e) { UI.toast("加密失败：" + (e.message || e), true); return null; }
@@ -832,8 +836,15 @@
     });
   }
 
+  /* 当前挂着的口令框结算函数。返回键走 app.js 的「任意弹窗」层直接 closeModal，
+     不会经过下面的 onCancel —— 以前那样就：promise 永久悬挂、监听器留到下一次，
+     下次点「确定」会把上一轮已经放弃的动作（导出 / 关闭加密 / 导入）用新口令顶替执行。
+     照 ui.js 的 dialogSettle 那套加一个外部兜底结算（10-30 修）。 */
+  let passSettle = null;
+
   function askPass(title, note, needConfirm) {
     return new Promise((resolve) => {
+      if (passSettle) { const f0 = passSettle; passSettle = null; try { f0(null); } catch (e) { /* ignore */ } }
       setText("#passTitle", title || "口令");
       setText("#passNote", note || "");
       setDisplay("#passConfirmWrap", needConfirm ? "" : "none");
@@ -841,7 +852,11 @@
       setVal("#passConfirm", "");
       const ok = $("#passOk"), cancel = $("#passCancel");
       if (!ok || !cancel) { resolve(null); return; }
+      let settled = false;
       function cleanup(result) {
+        if (settled) return;              /* 幂等：外部钩子与按钮可能都来一次 */
+        settled = true;
+        passSettle = null;
         ok.removeEventListener("click", onOk);
         cancel.removeEventListener("click", onCancel);
         UI.closeModal("passModal");
@@ -856,6 +871,14 @@
       function onCancel() { cleanup(null); }
       ok.addEventListener("click", onOk);
       cancel.addEventListener("click", onCancel);
+      passSettle = cleanup;
+      /* 给 ui.js 的 closeModal 一个外部结算钩子：返回键 / 遮罩关掉弹窗时，
+         走的是 closeModal，不会经过 onCancel。没有这个钩子，promise 就永远挂着。 */
+      window.__dlSettlePass = function () {
+        const f = passSettle;
+        passSettle = null;
+        if (f) { try { f(null); } catch (e) { /* ignore */ } }
+      };
       UI.openModal("passModal");
       setTimeout(() => { const el = $("#passInput"); if (el) el.focus(); }, 80);
     });
@@ -1264,7 +1287,10 @@
        否则「恢复默认设置」会把用户辛苦填的几套平台配置一次性清空。 */
     "modelSets", "modelSetIndex",
     "avatarUser", "avatarAi", "theme", "mode", "onboarded", "lastActiveDate", "dataVersion",
-    "cryptWarned", "imgExpireNotified", "activeCharacterId", "searchEnabled", "thinkingEnabled", "bgKeep",
+    "cryptWarned", "imgExpireNotified", "activeCharacterId", "bgKeep",
+    /* searchEnabled / thinkingEnabled 以前也在保留名单里，于是「恢复默认设置」永远
+       没法把它们复位成默认的「开」—— 用户手动关掉后只能自己去顶栏再点两下（10-30 修）。
+       它们是纯 UI 开关，不是密钥/身份类数据，没有保留的理由。 */
     /* 应用加密这一整组也必须保留：否则「恢复默认设置」会把口令悄悄清掉，
        等于把已经上好的锁又自己打开了 —— 那是最不能接受的一种「意外」。 */
     "lockEnabled", "lockSalt", "lockHash", "lockCodeHash", "lockCodeUsed", "lockFail", "lockUntil"];

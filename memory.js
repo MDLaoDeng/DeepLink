@@ -383,9 +383,13 @@
     if (!s || !ch) return null;
     if (s.relInited) return null;
     const others = charListFor().filter((c) => c && c.id !== ch.id);
-    s.relInited = true;
+    /* 「建过没有」这个闸门只在**真的建成了**之后才置真（10-30 修）。
+       以前一进门就置 true，于是：① 卡库里只有 1 个角色时首次日更把闸门关死，
+       之后再加角色也永远不会建关系网；② 没配 Key 时同样关死，配好 Key 也不回来。
+       现在的顺序是：先看有没有别人、有没有 Key，都过了才置位。 */
     if (!others.length) return null;          /* 只有一个角色，没有「别人」可记 */
     if (!settings || !settings.apiKey) return null;
+    s.relInited = true;
     const rel = relOf(s);
     const brief = others.map((c) => {
       const f = c.fields || {};

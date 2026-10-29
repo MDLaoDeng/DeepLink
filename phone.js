@@ -62,7 +62,9 @@
     busy: false,        /* 生成中 */
     abort: null,
     recActive: false,   /* 录音中 */
-    sending: false,     /* 手机发送闸门（防并行） */
+    /* 注：这里原有一个 sending 闸门，但从来没有被置真过（sendText 在调 genReply
+       之前没有任何 await，而 genReply 一进门就同步置 busy），等于死字段。
+       10-30 删掉，并发只靠 busy —— 免得后来人以为这里还有一道保护。 */
     /* 用 null 而不是 ""：没有角色卡的会话（助手）分组键就是空串，
        若这里也用 ""，`expandChar === charId` 恒为真 → 助手那组一进列表就是展开态，
        点它又把 expandChar 设回 ""，等于没变化 → 永远收不起来（真机反馈）。 */
@@ -814,7 +816,7 @@
       ps.recActive = false;
       try { if (window.Media && Media.recorder && Media.recorder.recording) Media.recorder.cancel(); } catch (e) { /* ignore */ }
     }
-    ps.busy = false; ps.sending = false;
+    ps.busy = false;
     ps.busySid = "";
     if (ps.abort) { try { ps.abort.abort(); } catch (e) { /* ignore */ } }
     ps.abort = null;
@@ -1301,7 +1303,7 @@
         /* 必须走手机自己的生成链：DL.startOpening 内部是 continueLast() → session()，
            取的是主聊天当前线，从手机点下去会写进别的会话，手机页毫无变化。
            genReply(sid) 全程按 sid 写回，不会串线。 */
-        if (ps.busy || ps.sending || !ps.sid) return;
+        if (ps.busy || !ps.sid) return;
         var s0 = sessionById(ps.sid);
         if (!s0) return;
         var ms0 = (phoneOf(s0) || {}).msgs || [];
@@ -2428,10 +2430,12 @@
       "不要自己插表情标记 —— 表情会在你写完之后单独挑，正文里只写话。\n" + PH_STYLE_RULE;
     return t;
   }
-  /* 把「名字：内容」拆成 [{id,name,text}]；不足两人就说不上是群聊发言，返回 null */
+  /* 把「名字：内容」拆成 [{id,name,text}]。
+     只有「成员不足 2 人」时才算不是群聊（返回 null）—— 那说明这个群建坏了。
+     模型只让一个人说话是常态，所以后面按 >=1 段收（10-30 修）。 */
   function splitPhoneSpeakers(text, s) {
     var members = phoneGroupMembers(s);
-    if (members.length < 2) return null;
+    if (!members.length) return null;
     var byName = {};
     members.forEach(function (m) { byName[m.name] = m; });
     var lines = String(text || "").split(/\r?\n/);
@@ -2452,7 +2456,7 @@
     if (cur) segs.push(cur);
     segs.forEach(function (x) { x.text = String(x.text || "").trim(); });
     var kept = segs.filter(function (x) { return x.text; });
-    return kept.length >= 2 ? kept : null;
+    return kept.length ? kept : null;
   }
 
   /* ── 手机里「一条消息」的拆分 ──────────────────────────────────
@@ -2642,7 +2646,7 @@
 
   async function genReply(sid) {
     syncModules();
-    if (ps.busy || ps.sending) return;
+    if (ps.busy) return;
     var s = sessionById(sid);
     if (!s) return;
     var ch = characterFor(s);
@@ -2714,8 +2718,13 @@
           });
         });
       } else {
-        /* 单聊：把一大段拆成「像真人连发的几条短消息」 */
-        splitPhoneReply(finalText).forEach(function (part) { queue.push({ text: part }); });
+        /* 单个成员说话 / 模型没按「名字：」写：仍然挂上说话人（10-30）。
+           以前群聊落到这条分支就等于没有署名，气泡上不显示是谁，表情那条也丢 speaker。 */
+        var solo = (s && s.isGroup) ? phoneGroupMembers(s)[0] : null;
+        splitPhoneReply(finalText).forEach(function (part) {
+          queue.push(solo ? { text: part, speaker: solo.id, speakerName: solo.name } : { text: part });
+        });
+        if (solo) lastWho = solo;
       }
       /* 第二段：带着刚写好的正文和他的性格，从可用表情里挑一个（也可以一个都不挑）。
          挑表情是另一次请求，abort 管不到它 —— 所以重新转圈，并在回来之后验一次归属。 */
@@ -2885,7 +2894,7 @@
     /* 忙闲要带归属。ps.busy 是全局的、手机只有一个 typing 指示条和一个 abort，
        所以不开并发；但「别的线在生成」必须说清楚 —— 以前直接 return，
        用户看到的是「消息没发出去也没提示」，像是卡死了。 */
-    if (ps.busy || ps.sending) {
+    if (ps.busy) {
       if (ps.busySid && ps.busySid !== ps.sid) {
         var bs = sessionById(ps.busySid);
         var bn = (bs && (bs.title || (characterFor(bs) || {}).name)) || "另一条会话";
@@ -3044,7 +3053,11 @@
     var att = { kind: "image", dataUrl: got.dataUrl, name: got.name, mime: "image/jpeg" };
     /* 立刻外置（有原生文件接口时）：别把大图塞进 localStorage */
     try { if (Store.hoistImage) Store.hoistImage(att); } catch (e) { /* ignore */ }
+    /* 手机里的图也要能被「按轮数过期」扫到（10-30）：没有 atTurn 就永远不删原图、
+       外置文件也一直躺着。轮数口径与 chat.js 的 userTurns 一致（主聊天 + 手机）。 */
     var msg = { role: "user", kind: "image", attachments: [att], desc: "" };
+    msg.atTurn = ((s.messages || []).filter(function (x) { return x && x.role === "user"; }).length +
+      ((s.phone && s.phone.msgs) || []).filter(function (x) { return x && x.role === "user"; }).length) + 1;
     pushMsg(sid, msg);
     renderChat(); scrollPhoneBottom();
     /* 先让角色「看图」：多模态描述一次（走视觉模型 / 主模型），再据此回复 */
@@ -3338,7 +3351,17 @@
     try {
       eng.chunks = [];
       eng.rec = eng.mime ? new MediaRecorder(eng.stream, { mimeType: eng.mime }) : new MediaRecorder(eng.stream);
-    } catch (e) { eng.rec = null; return; }
+    } catch (e) {
+      /* 机型和 Media.pickMime() 给的 mime 不一定对得上，先不带 mime 再试一次（10-30） */
+      try { eng.rec = new MediaRecorder(eng.stream); }
+      catch (e2) {
+        eng.rec = null;
+        /* 退无可退：以前这里是静默 return，整通电话变成「只听不记」，界面上还写着
+           「通话中 · 你直接说就好」，用户只会以为角色不理人。 */
+        try { setText("#phoneCallState", "这台设备录不了音，这通电话没法转文字"); } catch (e3) { /* ignore */ }
+        return;
+      }
+    }
     eng.rec.ondataavailable = function (ev) { if (ev.data && ev.data.size) eng.chunks.push(ev.data); };
     try { eng.rec.start(); } catch (e) { eng.rec = null; return; }
     eng.spokeMs = 0; eng.silMs = 0; eng.segMs = 0; eng.speaking = false;
@@ -3388,8 +3411,10 @@
     eng.segMs += TICK;
     if (rms > TH_VOICE) { eng.speaking = true; eng.spokeMs += TICK; eng.silMs = 0; }
     else if (eng.speaking) { eng.silMs += TICK; }
-    if (eng.speaking) setText("#phoneCallState", "听着呢…");
-    else if (!eng.busy) setText("#phoneCallState", "通话中 · 你直接说就好");
+    /* 只在文案真的要变时才写 DOM（10-30）：这里每 100ms 跑一次，整通电话
+       不停地 setText 是纯浪费（真机上表现为通话界面一阵一阵地卡）。 */
+    var say = eng.speaking ? "听着呢…" : (eng.busy ? "" : "通话中 · 你直接说就好");
+    if (say && eng.stateTxt !== say) { eng.stateTxt = say; setText("#phoneCallState", say); }
     var spokeEnough = eng.spokeMs >= MIN_SPEAK_MS;
     if ((eng.speaking && spokeEnough && eng.silMs >= SIL_MS) || eng.segMs >= MAX_SEG_MS) {
       if (eng.rec && eng.rec.state !== "inactive") {
@@ -3583,10 +3608,25 @@
       if (momentBusy) return;
       if (!(window.Api && Api.summarize)) return;
       if (!(window.DL && DL.profile && DL.profile.addCharMoment)) return;
-      /* 今天已经发够 2 条就不再问模型 */
-      var d0 = new Date(); d0.setHours(0, 0, 0, 0);
+      /* 今天已经发够 2 条就不再问模型。
+         「今天」按**故事时间**算（10-30 修）：全应用（列表时间、时间分隔、备忘录）
+         都走 storyMs / Memory.storyAt，只有这里用现实日界 —— 开了时间系统后
+         故事里的一天可能跨现实两天，用户看到的日期和限额对不上。 */
+      var dayStart;
+      try {
+        var nowStory = (window.Memory && Memory.storyAt) ? Memory.storyAt(s, Date.now()) : Date.now();
+        var sd = new Date(nowStory);
+        sd.setHours(0, 0, 0, 0);
+        dayStart = sd.getTime();
+      } catch (e) {
+        var d0 = new Date(); d0.setHours(0, 0, 0, 0); dayStart = d0.getTime();
+      }
       var mine = (Store.getMoments() || []).filter(function (m) {
-        return m && m.who === ch.id && (m.ts || 0) >= d0.getTime();
+        if (!m || m.who !== ch.id) return false;
+        var ms = m.ts || 0;
+        /* 动态的 ts 是现实毫秒，要换算到故事时间轴上再比 */
+        try { if (window.Memory && Memory.storyAt) ms = Memory.storyAt(s, ms); } catch (e) { /* 用现实时间兜底 */ }
+        return ms >= dayStart;
       });
       if (mine.length >= 2) return;
       momentBusy = true;
