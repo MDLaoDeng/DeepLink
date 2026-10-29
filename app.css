@@ -3992,14 +3992,13 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 }
 #introModal.intro-full .modal-sheet { background-color: transparent !important; }
 
-/* 图标：内联 SVG 线稿，颜色走 currentColor，所以换色只改这一行 */
+/* 图标：直接是 favicon.png（和应用图标同一个文件），圆角和关于页那边一致。
+   图标自带深底，压在 #141414 的引导页上会是一块略深的方块 —— 就这样，像枚徽标。 */
 .intro-mark {
   display: block;
-  /* viewBox 已经是 84x52 的长方形，这里按宽度定、高度自己算
-     —— 写死成正方形会把书压扁或者又缩回去 */
-  width: 132px; height: auto;
+  width: 96px; height: 96px;
   margin: 4px auto 22px;
-  color: rgba(255, 255, 255, .84);
+  border-radius: var(--r-lg);
 }
 #introModal.intro-full .intro-h {
   color: #fff;
@@ -4072,10 +4071,3 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 }
 .splash-preview { height: 180px; }
 
-/* 关于页图标：和引导页/应用图标同一套线稿，走 currentColor（浅色主题下深、深色主题下浅） */
-.about-hero-mark {
-  display: block;
-  width: 104px; height: auto;
-  margin: 0 auto 10px;
-  color: var(--text-dim);
-}
