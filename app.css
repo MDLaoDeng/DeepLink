@@ -42,7 +42,11 @@ body {
 /* ── 入场动画（白底字标）──────────────────────────── */
 .splash {
   position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 200;
-  background-color: #000000;
+  /* 黑灰，不是纯黑（10-29 用户口径）。
+     #141414 就是 0 号套系一直在用的那个值 —— 以前 1~5 号走的是这里的纯黑兜底，
+     等于六套里五套是纯黑、一套是黑灰。现在统一成黑灰，换套系不会突然变纯黑一块。
+     写死不用变量：启动页要在主题注入之前就能画出来。 */
+  background-color: #141414;
   /* 列方向：上面是启动动画舞台（图片/头像），下面是文字块 */
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   overflow: hidden;
@@ -3983,7 +3987,7 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
    接在一起会「啪」地闪一下。现在整页纯黑，文字转浅，只留一条细线。
    ⚠️ 原规则写的是 !important，这里全部也得带，否则压不住。 */
 #introModal.intro-full {
-  background-color: #000 !important;
+  background-color: #141414 !important;   /* 和启动页同一个黑灰（#141414），接在一起不会跳 */
   color: rgba(255, 255, 255, .92);
 }
 #introModal.intro-full .modal-sheet { background-color: transparent !important; }
