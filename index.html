@@ -730,7 +730,7 @@
         <label class="field"><span>底部小字（留空＝默认署名）</span><input id="setSplashSub" type="text" placeholder="菠萝味柠檬汁/DS共同制作"></label>
         <label class="field"><span>启动图片（可留空；填 avatars/xxx.png 或图片地址）</span><input id="setSplashImage" type="text" placeholder="avatars/shenyan.png"></label>
         <label class="field"><span>或选一个角色头像</span><select id="setSplashAvatar"></select></label>
-        <button class="btn ghost" id="splashPreviewBtn" type="button">先看一眼（播 3 秒）</button>
+        <button class="btn ghost splash-prev-btn" id="splashPreviewBtn" type="button">预览这段动画（播 3 秒）</button>
         <div id="splashPreview" class="splash-preview" hidden></div>
         <p class="hint">上面那个「先看一眼」只播动效本身（文字按你填的来），图片和头像不在预览里显示——真启动时它们由后台加载。改完<b>下次启动</b>生效。图片要是加载失败，会在后台自动重试，重试期间启动页不会提前退出。</p>
       </div>
@@ -1283,7 +1283,16 @@
     </div>
     <div class="modal-body">
       <div class="about-hero">
-        <img class="about-hero-img" src="about.png" alt="Sekulum">
+        <!-- 和应用图标、引导页同一套线稿。以前这里是 about.png（旧的 DL 字母位图），
+             引导页换了之后两边会各长一个样，所以一并换掉。 -->
+        <svg class="about-hero-mark" viewBox="10 26 76 58" aria-hidden="true">
+          <g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 32c8-4 20-4 28 0v32c-8-4-20-4-28 0z"/>
+            <path d="M48 32c8-4 20-4 28 0v32c-8-4-20-4-28 0z"/>
+            <path d="M15 35v26M81 35v26"/>
+            <path d="M57 47v24l5-5.2 4 9 5-2.3-4-8.7 7.2.5z"/>
+          </g>
+        </svg>
         <div class="about-name">Sekulum</div>
       </div>
       <div class="about-menu">
@@ -1769,7 +1778,19 @@
     <div class="modal-body">
       <div class="intro-pages">
         <div class="intro-page">
-          <img class="intro-img" src="about.png" alt="Sekulum">
+          <!-- 图标用内联 SVG，不用位图：① 天然透明底，压在全黑引导页上不会多出一块方底；
+               ② 线条走 currentColor，和正文一个颜色，换色不用改图；
+               ③ 84px 下依然锐利（位图那个 DL 字母 logo 已经退役）。
+               造型沿用应用图标：一本对开书 + 右下角鼠标箭头。
+               viewBox 已经按内容边界收紧了（6 20 84 52），否则四周留白会把书缩得很小。 -->
+          <svg class="intro-mark" viewBox="10 26 76 58" aria-hidden="true">
+            <g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 32c8-4 20-4 28 0v32c-8-4-20-4-28 0z"/>
+              <path d="M48 32c8-4 20-4 28 0v32c-8-4-20-4-28 0z"/>
+              <path d="M15 35v26M81 35v26"/>
+              <path d="M57 47v24l5-5.2 4 9 5-2.3-4-8.7 7.2.5z"/>
+            </g>
+          </svg>
           <div class="intro-h">欢迎来到 Sekulum，亲爱的创世主</div>
           <p class="intro-p">从这里开始，你是这个世界的造物者 ——<br>定角色、铺时间、看他们自己往下走。</p>
         </div>

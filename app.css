@@ -3977,3 +3977,101 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   animation: dl-send-spin .7s linear infinite;
 }
 @keyframes dl-send-spin { to { transform: rotate(360deg); } }
+
+/* ── 引导页：黑灰底，和启动动画同一个画风（10-29 用户口径）──────────
+   原来铺的是主题面板色（--panel），浅色主题下是一大块米白，和启动动画的黑底
+   接在一起会「啪」地闪一下。现在整页纯黑，文字转浅，只留一条细线。
+   ⚠️ 原规则写的是 !important，这里全部也得带，否则压不住。 */
+#introModal.intro-full {
+  background-color: #000 !important;
+  color: rgba(255, 255, 255, .92);
+}
+#introModal.intro-full .modal-sheet { background-color: transparent !important; }
+
+/* 图标：内联 SVG 线稿，颜色走 currentColor，所以换色只改这一行 */
+.intro-mark {
+  display: block;
+  /* viewBox 已经是 84x52 的长方形，这里按宽度定、高度自己算
+     —— 写死成正方形会把书压扁或者又缩回去 */
+  width: 132px; height: auto;
+  margin: 4px auto 22px;
+  color: rgba(255, 255, 255, .84);
+}
+#introModal.intro-full .intro-h {
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+#introModal.intro-full .intro-p { color: rgba(255, 255, 255, .64); }
+/* 正文里的加粗：黑底上要提亮，否则比周围还暗 */
+#introModal.intro-full .intro-p b,
+#introModal.intro-full .intro-p strong {
+  color: rgba(255, 255, 255, .92);
+  font-weight: 600;
+}
+/* 外链：默认是浏览器蓝（#0000EE），纯黑底上几乎看不见 —— 引导页里那几条链接
+   以前全靠这个默认色，等于「看不见但能点」。改成淡青。 */
+#introModal.intro-full a {
+  color: #8FD8D0;
+  text-decoration: none;
+  border-bottom: 0.5px dotted rgba(143, 216, 208, .45);
+}
+/* 功能树：原来是一块主题面板色的卡片，黑底上会翻成一块亮斑 */
+#introModal.intro-full .feat-tree {
+  background-color: rgba(255, 255, 255, .04);
+  border: 0.5px solid rgba(255, 255, 255, .08);
+  color: rgba(255, 255, 255, .66);
+}
+#introModal.intro-full .intro-actions { border-top-color: rgba(255, 255, 255, .1); }
+#introModal.intro-full .intro-dot { background-color: rgba(255, 255, 255, .18); }
+#introModal.intro-full .intro-dot.on { background-color: rgba(255, 255, 255, .85); }
+/* 按钮：ghost 在纯黑上没有对比，改浅描边；primary 直接用白底黑字
+   —— 不跟主题的 accent（浅色主题下那支是深蓝，压在黑底上发闷），
+   也和启动动画的「黑底白字」是一套。 */
+#introModal.intro-full .btn.ghost {
+  color: rgba(255, 255, 255, .78);
+  background-color: transparent;
+  border: 0.5px solid rgba(255, 255, 255, .18);
+}
+#introModal.intro-full .btn.ghost:active { background-color: rgba(255, 255, 255, .08); }
+#introModal.intro-full .btn.primary {
+  background-color: #fff;
+  color: #000;
+  border: 0;
+  font-weight: 600;
+}
+#introModal.intro-full .btn.primary:active { background-color: rgba(255, 255, 255, .82); }
+
+/* 引导页版式微调（10-29）
+   ① 标题 24px 在 430 宽下会折成「欢迎来到 Sekulum，亲爱的创世 / 主」——最后一个字单独一行，
+      很难看。压到 22px 刚好一行放下（再窄的屏幕让它自己折，至少不是孤字）。
+   ② 原来整块内容 justify-content: center，图标上方空出小半屏，看着"压不住"。
+      改成从上方 12vh 起排，重心落在视觉中线偏上，下面留白给按钮。 */
+#introModal.intro-full .modal-body {
+  /* 居中，但下方多留一点空 —— 内容整体落在视觉中线偏上。
+     纯 flex-start 会让首页那种短内容全挤在上半屏、下半屏空一大块；
+     纯 center 又会被长页（API Key 那页）顶到贴边。居中 + padding-bottom 两头都照顾到。 */
+  justify-content: center;
+  padding-top: 6vh;
+  padding-bottom: 10vh;
+}
+#introModal.intro-full .intro-h { font-size: 22px; }
+
+/* 启动动画预览：按钮和预览框都按设置页的控件规格来
+   —— 上面那排输入框是「整宽 + panel-2 底 + r-md 圆角」，
+   按钮如果只有内容宽，就成了这一列里唯一一条短块，看着像没做完。 */
+.splash-prev-btn {
+  width: 100%;
+  margin: 2px 0 10px;
+  padding: 10px 12px;      /* 和 .field input 一样的纵向高度 */
+  border-radius: var(--r-md);
+}
+.splash-preview { height: 180px; }
+
+/* 关于页图标：和引导页/应用图标同一套线稿，走 currentColor（浅色主题下深、深色主题下浅） */
+.about-hero-mark {
+  display: block;
+  width: 104px; height: auto;
+  margin: 0 auto 10px;
+  color: var(--text-dim);
+}
