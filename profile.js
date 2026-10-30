@@ -892,7 +892,14 @@
     cancel.type = "button";
     var ok = el("button", "btn", "保存");
     ok.type = "button";
-    function close() { if (mask.parentNode) mask.parentNode.removeChild(mask); }
+    /* 退场动画（10-30）：以前直接 remove，遮罩「啪」一下没。走 140ms 再摘。 */
+    var closing = false;
+    function close() {
+      if (!mask.parentNode || closing) return;
+      closing = true;
+      mask.classList.add("pf-edit-out");
+      setTimeout(function () { if (mask.parentNode) mask.parentNode.removeChild(mask); }, 140);
+    }
     cancel.addEventListener("click", close);
     ok.addEventListener("click", function () {
       var extraIds = [];
@@ -918,6 +925,15 @@
     mask.appendChild(card);
     mask.addEventListener("click", function (e) { if (e.target === mask) close(); });
     document.body.appendChild(mask);
+  }
+
+  /* 返回键用：关掉当前最上层的选择面板（动态的可见范围 / 改动态文字都用同一个遮罩） */
+  function closeEditMask() {
+    var m = document.querySelector(".pf-edit:not(.pf-edit-out)");
+    if (!m) return false;
+    m.classList.add("pf-edit-out");
+    setTimeout(function () { if (m.parentNode) m.parentNode.removeChild(m); }, 140);
+    return true;
   }
 
   function momentRow(m) {
@@ -1822,7 +1838,7 @@
     openDetail: openDetail, openMoments: openMoments,
     ensureSocial: ensureSocial, showName: showName, charById: charById,
     commonGroups: commonGroups,
-    momentsOf: momentsOf, addCharMoment: addCharMoment,
+    momentsOf: momentsOf, addCharMoment: addCharMoment, closeEditMask: closeEditMask,
     requestFriend: requestFriend, pendingReqs: pendingReqs,
     acceptReq: acceptReq, rejectReq: rejectReq,
     openRequests: openRequests, maybeGroupFriending: maybeGroupFriending,

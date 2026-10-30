@@ -3072,6 +3072,15 @@
       close: () => { window.WheelPicker.close(); return true; }
     },
     {
+      /* 动态的可见范围 / 改文字那种选择面板（.pf-edit，z 440）。
+         它盖在资料页上，所以必须排在资料页之前 —— 否则按返回会先把底下的资料页关掉，
+         面板还挂在上面。 */
+      z: 440, name: "资料页的选择面板",
+      test: () => !!(window.DL && DL.profile && typeof DL.profile.closeEditMask === "function" &&
+        document.querySelector(".pf-edit:not(.pf-edit-out)")),
+      close: () => { window.DL.profile.closeEditMask(); return true; }
+    },
+    {
       /* 角色资料页必须排在「手机页」**之前**（10-29 修）。
          资料页唯一的入口是在手机聊天里点头像，此刻 DL.phone.isOpen() 仍然为真；
          而本表是「从上往下取第一个命中」的，排在手机页后面就会先退掉那张被压在

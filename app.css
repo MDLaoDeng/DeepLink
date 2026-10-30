@@ -1999,6 +1999,13 @@ body.selecting .msg-actions { display: none; }
 .t-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .t-sub { flex: none; margin-left: 6px; font-size: var(--fs-caption); color: var(--text-mute); }
 .tree-row .s-badge { margin-left: 6px; }
+/* 折叠动画（10-30）：展开滑一下，收起时先播退场再重渲染 */
+/* 只有「刚展开」的那一支才播动画：树是整块重建的，无条件加 animation 会让
+   每发一条消息都重播一遍（10-30）。 */
+.tree-kids.opening { animation: tree-in 160ms cubic-bezier(.22, 1, .36, 1); }
+.tree-kids.closing { animation: tree-out 130ms ease-in forwards; pointer-events: none; }
+@keyframes tree-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes tree-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-4px); } }
 .tree-empty { padding: 6px 10px; font-size: var(--fs-caption); color: var(--text-mute); }
 .tree-empty.small { padding-left: 42px; }
 .tree-add {
@@ -3198,8 +3205,8 @@ body.no-image .ph-moment-img img { display: none; }
 .pf-fh-name, .pf-fv-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pf-fh-count { flex: none; margin-left: 8px; font-size: var(--fs-caption); font-weight: 400; color: var(--text-mute); }
 .pf-fh-arrow { flex: none; margin-left: 8px; font-size: 11px; color: var(--text-mute); }
-.pf-forest-kids { padding-left: 4px; }
-.pf-forest-vk { padding-left: 12px; }
+.pf-forest-kids { padding-left: 4px; animation: tree-in 160ms cubic-bezier(.22, 1, .36, 1); }
+.pf-forest-vk { padding-left: 12px; animation: tree-in 160ms cubic-bezier(.22, 1, .36, 1); }
 .pf-lines .check-field { padding-left: 22px; }
 .pf-lines .check-field .s-badge { margin-left: auto; }
 .pf-lines-h {
@@ -3637,6 +3644,11 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 .phone-sheet:not([hidden]) .phone-sheet-card {
   animation: ph-sheet-up var(--dur-3) cubic-bezier(.22, .8, .24, 1) both;
 }
+/* 收起（10-30）：点「取消 / 确定」之后先滑下去再 hidden */
+.phone-sheet.closing { animation: ph-sheet-fade-out 160ms ease-in forwards; }
+.phone-sheet.closing .phone-sheet-card { animation: ph-sheet-down 160ms cubic-bezier(.4, 0, .7, .4) forwards; }
+@keyframes ph-sheet-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes ph-sheet-down { from { transform: none; } to { transform: translateY(100%); } }
 @keyframes ph-sheet-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes ph-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
 

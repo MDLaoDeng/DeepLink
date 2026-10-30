@@ -471,6 +471,16 @@
     return b;
   }
 
+  /* 收起时先让子节点播完 130ms 的退场动画再重渲染（10-30）。
+     树是整块重建的，直接重渲染等于「啪」一下消失；这里只是把重渲染延后一帧多一点。 */
+  function treeFoldOut(node, done) {
+    var kids = null;
+    if (node) kids = node.querySelector(".tree-kids");
+    if (!kids) { done(); return; }
+    kids.classList.add("closing");
+    setTimeout(done, 130);
+  }
+
   function renderCharTree() {
     const bar = $("#charBar");
     if (!bar) return;
@@ -541,12 +551,15 @@
       const wrap = document.createElement("div");
       wrap.className = "tree-node lv1";
       wrap.appendChild(head(ch, 1, !!open1[ch.id], () => {
-        open1[ch.id] = !open1[ch.id];
-        renderCharTree();
+        var willClose = !!open1[ch.id];
+        open1[ch.id] = !willClose;
+        if (willClose) treeFoldOut(wrap, renderCharTree);
+        else { state.treeAnim = ch.id; renderCharTree(); }
       }));
       if (open1[ch.id]) {
         const kids = document.createElement("div");
-        kids.className = "tree-kids";
+        kids.className = "tree-kids" + (state.treeAnim === ch.id ? " opening" : "");
+        if (state.treeAnim === ch.id) state.treeAnim = "";
         vers.forEach((v) => {
           const isOrig = (v === ch);
           /* 副本的行名：原名 + 「-」 + 世界观名；没填世界观就用副本名去掉原名后的部分 */
@@ -564,14 +577,17 @@
           vw.className = "tree-node lv2" + (isActive ? " active" : "");
           vw.appendChild(head(v, 2, !!open2[v.id], () => {
             /* 点这一版本：切到它（新建对话就落在它名下），同时展开/收起它的线 */
+            var willClose = !!open2[v.id];
             state.settings = Store.saveSettings({ activeCharacterId: v.id });
-            open2[v.id] = !open2[v.id];
+            open2[v.id] = !willClose;
             open1[ch.id] = true;
-            renderAll();
+            if (willClose) treeFoldOut(vw, renderAll);
+            else { state.treeAnim = v.id; renderAll(); }
           }));
           if (open2[v.id]) {
             const ls = document.createElement("div");
-            ls.className = "tree-kids";
+            ls.className = "tree-kids" + (state.treeAnim === v.id ? " opening" : "");
+            if (state.treeAnim === v.id) state.treeAnim = "";
             if (!own.length) {
               const none = document.createElement("div");
               none.className = "tree-empty small";
@@ -610,11 +626,21 @@
       gs.className = "t-sub";
       gs.textContent = groups.length + "";
       gh.appendChild(gs);
-      gh.addEventListener("click", () => { open1.__groups = !open1.__groups; renderCharTree(); });
+      gh.addEventListener("click", () => {
+        var willClose = !!open1.__groups;
+        open1.__groups = !willClose;
+        if (willClose) {
+          var gk0 = bar.querySelector(".tree-kids.group-kids");
+          if (gk0) { gk0.classList.add("closing"); setTimeout(renderCharTree, 130); return; }
+        }
+        state.treeAnim = "__groups";
+        renderCharTree();
+      });
       bar.appendChild(gh);
       if (open1.__groups) {
         const gk = document.createElement("div");
-        gk.className = "tree-kids";
+        gk.className = "tree-kids group-kids" + (state.treeAnim === "__groups" ? " opening" : "");
+        if (state.treeAnim === "__groups") state.treeAnim = "";
         groups
           .slice()
           .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0))

@@ -3004,6 +3004,9 @@
 
   /* ── 底部弹层（转账 / 位置 / 线选择共用）──────────── */
   function openSheet(title, bodyEl, onOk) {
+    if (sheetTimer) { clearTimeout(sheetTimer); sheetTimer = 0; }
+    var elx = $("#phoneSheet");
+    if (elx) elx.classList.remove("closing");
     setText("#phoneSheetTitle", title);
     var body = $("#phoneSheetBody");
     if (!body) return;
@@ -3015,8 +3018,23 @@
     ps.sheetOk = onOk || null;
     show($("#phoneSheet"), true);
   }
+  /* 底部弹层的退场动画（10-30）：进入本来就有（遮罩淡入 + 卡片上滑），退出是直接 hidden。
+     这里补 160ms 的收起，并留一个 timer 让 openSheet 能取消 —— 否则「关掉 A 弹层、
+     立刻打开 B 弹层」时，A 那个 timer 到点会把刚打开的 B 一起藏掉。 */
+  var sheetTimer = 0;
   function closeSheet() {
-    show($("#phoneSheet"), false);
+    var el = $("#phoneSheet");
+    if (el && !el.hidden) {
+      el.classList.add("closing");
+      if (sheetTimer) clearTimeout(sheetTimer);
+      sheetTimer = setTimeout(function () {
+        sheetTimer = 0;
+        el.classList.remove("closing");
+        el.hidden = true;
+      }, 160);
+    } else if (el) {
+      el.hidden = true;
+    }
     var body = $("#phoneSheetBody");
     if (body) body.innerHTML = "";
     ps.sheetOk = null;
