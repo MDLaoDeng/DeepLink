@@ -1419,9 +1419,15 @@ body[data-mode="dark"] .ph-nf-badge { background-color: #C2415A; }
 /* 顶栏热区 44px（10-30）：视觉仍是 34，用一层透明伪元素把可点范围撑到 44，
    这样既不动排版、也不会把顶栏顶高。 */
 .topbar .icon-btn { position: relative; }
+/* 热区：纵向撑到 44（顶栏 padding 有 10，撑出去也不会出框），
+   横向只各外扩 4px —— 顶栏相邻元素间距正好 8，这样每个按钮的横向可点区是 42
+   且相邻两块**刚好贴边不重叠**；再宽就会互相压住、最外侧还会顶到标题上。
+   ⚠️ 别再写成 width/height + 负 margin 来居中：之前那版被间距归一脚本把
+   -22px 改成了 -24px，框就整个歪了 2px —— 居中一律用 transform。 */
 .topbar .icon-btn::after {
-  content: ""; position: absolute; left: 50%; top: 50%;
-  width: 44px; height: 44px; margin: -24px 0 0 -24px; border-radius: var(--r-md);
+  content: ""; position: absolute; left: -4px; right: -4px;
+  top: 50%; height: 44px; transform: translateY(-50%);
+  border-radius: var(--r-md);
 }
 .topbar .icon-btn {
   width: 34px; height: 34px; border-radius: var(--r-md); font-size: 15px;
