@@ -3678,7 +3678,9 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
   animation: ph-sheet-up var(--dur-3) cubic-bezier(.22, .8, .24, 1) both;
 }
 /* 收起（10-30）：点「取消 / 确定」之后先滑下去再 hidden */
-.phone-sheet.closing { animation: ph-sheet-fade-out 160ms ease-in forwards; }
+/* 收起中的这 160ms 里按钮还在，能吃第二下 —— 双击「确定」会把有副作用的回调
+   再跑一次（建联系人 / 转账）。直接让整个弹层不再接收点击。 */
+.phone-sheet.closing { animation: ph-sheet-fade-out 160ms ease-in forwards; pointer-events: none; }
 .phone-sheet.closing .phone-sheet-card { animation: ph-sheet-down 160ms cubic-bezier(.4, 0, .7, .4) forwards; }
 @keyframes ph-sheet-fade-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes ph-sheet-down { from { transform: none; } to { transform: translateY(100%); } }

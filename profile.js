@@ -877,6 +877,15 @@
     card.appendChild(el("div", "pf-lines-h", "发布线"));
     var wrapMain = el("div", "pf-lines");
     var originBoxes = renderLineForest(wrapMain, "data-origin", function (x) { return x.id === origin; });
+    /* m.sid 指向的线可能已经删了：那样一个都不勾，用户会以为「没有发布线」。
+       回落到列出来的第一条，保证永远有一项是选中的。 */
+    if (origin && !originBoxes[origin]) {
+      var firstId = Object.keys(originBoxes)[0];
+      if (firstId) {
+        origin = firstId;
+        originBoxes[firstId].cb.checked = true;
+      }
+    }
     card.appendChild(wrapMain);
 
     card.appendChild(el("div", "pf-lines-h", "另外也能看到的线"));

@@ -520,6 +520,9 @@
     const open1 = state.treeOpen || (state.treeOpen = {});
     const open2 = state.treeVer || (state.treeVer = {});
 
+    /* 显示名放在局部 map 里，不挂到角色对象上：角色对象会被 saveChar 的
+       Object.assign 整体复制进存储，挂上去等于把 UI 字段写进角色卡（导出也会带出去）。 */
+    const treeLabels = {};
     const versionsOf = (ch) => [ch].concat(chars.filter((c) => c.altOf === ch.id));
     const linesOf = (cid) => sessions
       .filter((s) => !s.isGroup && (s.characterId || "") === cid)
@@ -548,12 +551,13 @@
       }
       const nm = document.createElement("span");
       nm.className = "t-name";
-      nm.textContent = ch._treeName;
+      nm.textContent = (treeLabels[ch.id] || {}).name || (ch.name || "角色");
       b.appendChild(nm);
-      if (ch._treeSub) {
+      const subTxt = (treeLabels[ch.id] || {}).sub || "";
+      if (subTxt) {
         const sub = document.createElement("span");
         sub.className = "t-sub";
-        sub.textContent = ch._treeSub;
+        sub.textContent = subTxt;
         b.appendChild(sub);
       }
       b.addEventListener("click", onToggle);
@@ -570,8 +574,7 @@
     originals.forEach((ch) => {
       const vers = versionsOf(ch);
       const lineCount = vers.reduce((n, v) => n + linesOf(v.id).length, 0);
-      ch._treeName = ch.name || "角色";
-      ch._treeSub = lineCount ? lineCount + " 条线" : "";
+      treeLabels[ch.id] = { name: ch.name || "角色", sub: lineCount ? lineCount + " 条线" : "" };
       const wrap = document.createElement("div");
       wrap.className = "tree-node lv1";
       wrap.appendChild(head(ch, 1, !!open1[ch.id], () => {
@@ -593,10 +596,12 @@
             const tail = w || String(v.name || "").replace(ch.name || "", "").replace(/^[·\-\s]+/, "");
             label = (ch.name || "角色") + "-" + (tail || "副本");
           }
-          v._treeName = isOrig ? ((ch.name || "角色") + "（原）") : label;
           const own = linesOf(v.id);
           const isActive = (v.id === aid);
-          v._treeSub = isActive ? "当前" : (own.length ? "" : "无对话");
+          treeLabels[v.id] = {
+            name: isOrig ? ((ch.name || "角色") + "（原）") : label,
+            sub: isActive ? "当前" : (own.length ? "" : "无对话")
+          };
           const vw = document.createElement("div");
           vw.className = "tree-node lv2" + (isActive ? " active" : "");
           vw.appendChild(head(v, 2, !!open2[v.id], () => {
@@ -1592,7 +1597,6 @@
           if (key === "birth") return;         /* 出生日期是三格，单独回填 */
           setVal("#cf_" + key, (ch.fields && ch.fields[key]) || "");
         });
-        syncCharFilled(ch);
         /* 出生日期拆进三格；0000-00-00 只在「年」那格显示 0（月日留空），一眼看出是无限年龄 */
         const bv = String((ch.fields && ch.fields.birth) || "");
         const bm = /^(\d{1,4})-(\d{1,2})-(\d{1,2})$/.exec(bv);
@@ -1600,6 +1604,9 @@
         setVal("#cf_birth_y", bm ? String(Number(bm[1])) : "");
         setVal("#cf_birth_m", (bm && !bInf) ? String(Number(bm[2])) : "");
         setVal("#cf_birth_d", (bm && !bInf) ? String(Number(bm[3])) : "");
+        /* 必须放在三格回填**之后**：出生日期是「三格合并判断」，早一步算就把已填的生日
+           当成空栏，顶部的「已填 N / 23」会少算一栏、「未填」标也会挂错（10-30 审查修）。 */
+        syncCharFilled(ch);
         syncAgeByBirthYear(bm ? String(Number(bm[1])) : "");
         syncAgeField(ch);
         avatarDraft.char = ch.avatar || "";
@@ -1615,6 +1622,12 @@
         const cf = Memory.ensureFilter(ch);
         setVal("#charFilterRule", cf.rule || "");
         setVal("#charFilterEvery", cf.every || 10);
+      } else {
+        /* 新建角色：表单是空的，也要先把「未填」标和计数铺出来，
+           否则要等用户打第一个字才出现（10-30 审查修）。 */
+        CHAR_FIELDS.forEach(([key]) => { if (key !== "birth") setVal("#cf_" + key, ""); });
+        setVal("#cf_birth_y", ""); setVal("#cf_birth_m", ""); setVal("#cf_birth_d", "");
+        syncCharFilled(null);
       }
       renderCharUsage(ch);
       renderCharReadyHint(ch);
