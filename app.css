@@ -1222,6 +1222,14 @@ body[data-mode="dark"] .ph-nf-badge { background-color: #C2415A; }
 .field-row .avatar-btns { flex-direction: column; align-items: stretch; width: 100%; }
 .field-row .avatar-btns .btn { width: 100%; margin: 8px 0 0; }
 /* 「跟随上层」这种继承态用一个小标记表达（10-30）：比在每栏后面写一句「留空则…」干净 */
+/* 角色卡：每栏空着的标一个「未填」，顶部给一行总数（10-30） */
+.cf-sum { margin: 0 0 10px; font-size: var(--fs-caption); color: var(--text-mute); }
+.cf-sum.warn { color: var(--text-dim); }
+.field > span .cf-mark {
+  display: none; margin-left: 6px; font-style: normal;
+  font-size: var(--fs-caption); color: var(--text-mute); opacity: .85;
+}
+.field.is-empty > span .cf-mark { display: inline; }
 .field > span .inh {
   margin-left: 8px; padding: 0 4px; border-radius: var(--r-sm);
   font-style: normal; font-size: var(--fs-caption);

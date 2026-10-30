@@ -123,11 +123,23 @@
     const box = $("#charForm");
     if (!box || box.dataset.built) return;
     box.dataset.built = "1";
+    /* 顶部一行「已填 N / 共 M」：23 栏填到一半时，用户没法一眼看出还差哪些（10-30 加） */
+    const sum = document.createElement("p");
+    sum.className = "cf-sum";
+    sum.id = "charFilledLine";
+    box.appendChild(sum);
+
     CHAR_FIELDS.forEach(([key, label, type]) => {
       const l = document.createElement("label");
       l.className = "field";
+      l.setAttribute("data-cf", key);
       const sp = document.createElement("span");
       sp.textContent = label;
+      const mk = document.createElement("i");
+      mk.className = "cf-mark";
+      /* 「我的」那几栏空着不是缺陷 —— 会去用全局人设，措辞上要区分开 */
+      mk.textContent = (MY_FIELDS.indexOf(key) >= 0) ? "未填 · 用全局" : "未填";
+      sp.appendChild(mk);
       l.appendChild(sp);
       if (type === "ymd") {
         /* 年 / 月 / 日 三格手填，中间两条竖线分隔（10-26 用户口径：滚轮太慢，比手填慢不少）。
@@ -480,6 +492,18 @@
     kids.classList.add("closing");
     setTimeout(done, 130);
   }
+
+  /* 打字就更新「未填」标与顶部计数（只在角色卡表单内，事件委托挂一次） */
+  (function bindCharFilled() {
+    try {
+      document.addEventListener("input", function (ev) {
+        const t = ev && ev.target;
+        if (!t || !t.id) return;
+        if (t.id.indexOf("cf_") !== 0 && t.id !== "charName") return;
+        syncCharFilled(null);
+      });
+    } catch (e) { /* 没有 input 事件就算了 */ }
+  })();
 
   function renderCharTree() {
     const bar = $("#charBar");
@@ -1508,6 +1532,45 @@
     if (n > 0 && window.DL && DL.renderEventBook) { /* 事件簿开着的话顺手刷一下 */ }
   }
 
+  /* 逐栏标「未填」，并算一个「已填多少」的总数（10-30 用户要求：哪些填了、哪些还空着）。
+     只读当前表单里的值，不碰数据；birth 按三格合并看。 */
+  function syncCharFilled(ch) {
+    try {
+      const box = $("#charForm");
+      if (!box) return;
+      let filled = 0;
+      CHAR_FIELDS.forEach(([key]) => {
+        const lab = box.querySelector('[data-cf="' + key + '"]');
+        if (!lab) return;
+        let val = "";
+        if (key === "birth") {
+          val = [($("#cf_birth_y") || {}).value, ($("#cf_birth_m") || {}).value, ($("#cf_birth_d") || {}).value]
+            .map((x) => String(x || "").trim()).join("");
+        } else {
+          const inp = $("#cf_" + key);
+          val = inp ? String(inp.value || "").trim() : "";
+        }
+        const empty = !val;
+        lab.classList.toggle("is-empty", empty);
+        if (!empty) filled += 1;
+      });
+      const line = $("#charFilledLine");
+      if (line) {
+        const total = CHAR_FIELDS.length;
+        const req = CHAR_REQUIRED.filter((k) => {
+          const lab = box.querySelector('[data-cf="' + k + '"]');
+          return lab && !lab.classList.contains("is-empty");
+        }).length;
+        line.textContent = "已填 " + filled + " / " + total +
+          "　·　必填 " + req + " / " + CHAR_REQUIRED.length +
+          (req < CHAR_REQUIRED.length ? "（缺的会拦住发消息）" : "（齐了）");
+        line.classList.toggle("warn", req < CHAR_REQUIRED.length);
+      }
+      /* 只更新标记，不重排整张表 */
+      if (ch) box.dataset.cfId = ch.id || "";
+    } catch (e) { /* 标记出错不影响填表 */ }
+  }
+
   function fillCharacterForm(ch) {
     try {
       resetCharSplit();
@@ -1529,6 +1592,7 @@
           if (key === "birth") return;         /* 出生日期是三格，单独回填 */
           setVal("#cf_" + key, (ch.fields && ch.fields[key]) || "");
         });
+        syncCharFilled(ch);
         /* 出生日期拆进三格；0000-00-00 只在「年」那格显示 0（月日留空），一眼看出是无限年龄 */
         const bv = String((ch.fields && ch.fields.birth) || "");
         const bm = /^(\d{1,4})-(\d{1,2})-(\d{1,2})$/.exec(bv);
