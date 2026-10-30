@@ -3122,6 +3122,16 @@ body.no-image .ph-moment-img img { display: none; }
   --z-picker: 520;
 }
 
+/* 动态的「可见范围」那一行：看起来像文字，其实可点（10-30） */
+.pf-moment-vis {
+  margin-top: 6px; padding: 0; border: 0; background: none;
+  font-size: var(--fs-caption); color: var(--text-mute); text-align: left;
+  text-decoration: underline dotted; text-underline-offset: 3px;
+}
+/* 可见范围选择器里的线列表：多了要能滚 */
+.pf-lines { max-height: 46vh; overflow-y: auto; margin: 4px 0 2px; }
+.pf-lines .check-field { margin-bottom: 2px; }
+
 /* 切主题时的一帧：关掉所有过渡，避免 body 在 0.28s 里渐变、子元素瞬切（10-30） */
 .no-transition, .no-transition * { transition: none !important; }
 

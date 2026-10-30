@@ -240,6 +240,8 @@
         return !line || m.lines.indexOf(line) >= 0;
       }
       if (m.who !== chId) return false;
+      /* lines = 显式指定的可见线（10-30）：勾了就按白名单，没勾就还是「它自己那条线」 */
+      if (Array.isArray(m.lines) && m.lines.length) return !line || m.lines.indexOf(line) >= 0;
       return !m.sid || m.sid === line;
     }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
   }
@@ -249,7 +251,10 @@
     var line = (sid === undefined) ? lineId() : sid;
     return (S().getMoments() || []).filter(function (m) {
       if (!m) return false;
-      if (m.who) return !m.sid || m.sid === line;          /* 角色：只属于它那条线 */
+      if (m.who) {                                          /* 角色：默认只属于它那条线 */
+        if (Array.isArray(m.lines) && m.lines.length) return !line || m.lines.indexOf(line) >= 0;
+        return !m.sid || m.sid === line;
+      }
       if (!Array.isArray(m.lines) || !m.lines.length) return true;   /* 我发的：老数据全可见 */
       return !line || m.lines.indexOf(line) >= 0;
     }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
@@ -683,6 +688,64 @@
   }
 
   /* 一条动态（角色版与「我」的版式完全一样，用户要求统一） */
+  /* 一条动态的可见范围文案 */
+  function visTextOf(m) {
+    if (Array.isArray(m.lines) && m.lines.length) return "可见：" + m.lines.length + " 条线（点改）";
+    return "可见：只在它自己这条线（点改）";
+  }
+  /* 勾选「哪几条线能看到这条动态」。一条都不勾 = 回退到默认（只在它原本那条线）。 */
+  function editMomentLines(m) {
+    var mask = el("div", "pf-edit");
+    var card = el("div", "pf-edit-card");
+    card.appendChild(el("div", "pf-edit-t", "谁能看到这条动态"));
+    card.appendChild(el("div", "pf-edit-h", "勾上的线会在各自的动态流里看到它；一条都不勾就只在它原来那条线。"));
+    var wrap = el("div", "pf-lines");
+    var list = (S().getSessions() || []).filter(function (x) { return x && x.id; });
+    if (!list.length) wrap.appendChild(el("div", "pf-edit-h", "还没有任何对话"));
+    var picked = {};
+    (m.lines || []).forEach(function (id) { picked[id] = 1; });
+    list.forEach(function (x) {
+      var row = el("label", "check-field");
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !!picked[x.id];
+      cb.setAttribute("data-line", x.id);
+      var sp = document.createElement("span");
+      var ch2 = x.characterId ? charById(x.characterId) : null;
+      sp.textContent = (x.title || (ch2 && ch2.name) || "对话") + (x.isGroup ? "（群）" : "");
+      row.appendChild(cb); row.appendChild(sp);
+      wrap.appendChild(row);
+    });
+    card.appendChild(wrap);
+    var ops = el("div", "pf-edit-bar");
+    var cancel = el("button", "btn ghost", "取消");
+    cancel.type = "button";
+    var ok = el("button", "btn", "保存");
+    ok.type = "button";
+    function close() { if (mask.parentNode) mask.parentNode.removeChild(mask); }
+    cancel.addEventListener("click", close);
+    ok.addEventListener("click", function () {
+      var ids = [];
+      var boxes = wrap.querySelectorAll("input[data-line]");
+      for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) ids.push(boxes[i].getAttribute("data-line"));
+      var all = S().getMoments() || [];
+      for (var k = 0; k < all.length; k++) {
+        if (all[k] && all[k].id === m.id) {
+          all[k].lines = ids;      /* 空数组 = 回退到「只在它原本那条线」 */
+          break;
+        }
+      }
+      S().saveMoments(all);
+      close();
+      render();
+    });
+    ops.appendChild(cancel); ops.appendChild(ok);
+    card.appendChild(ops);
+    mask.appendChild(card);
+    mask.addEventListener("click", function (e) { if (e.target === mask) close(); });
+    document.body.appendChild(mask);
+  }
+
   function momentRow(m) {
     var it = el("div", "pf-moment");
     it.appendChild(el("div", "pf-moment-day", fmtDay(m.ts)));
@@ -700,6 +763,15 @@
       if (grid.children.length) right.appendChild(grid);
     }
     if (m.text) right.appendChild(el("div", "pf-moment-tx", m.text));
+    /* 可见范围（10-30）：以前角色动态只能被它自己那条线看到，界面上也没处改。
+       现在点这一行就能勾「哪几条线能看到」。 */
+    var vis = el("button", "pf-moment-vis", visTextOf(m));
+    vis.type = "button";
+    vis.addEventListener("click", function (e) {
+      e.stopPropagation();
+      editMomentLines(m);
+    });
+    right.appendChild(vis);
     it.appendChild(right);
     return it;
   }
