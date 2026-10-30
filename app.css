@@ -3128,9 +3128,16 @@ body.no-image .ph-moment-img img { display: none; }
   font-size: var(--fs-caption); color: var(--text-mute); text-align: left;
   text-decoration: underline dotted; text-underline-offset: 3px;
 }
-/* 可见范围选择器里的线列表：多了要能滚 */
-.pf-lines { max-height: 46vh; overflow-y: auto; margin: 4px 0 2px; }
+/* 可见范围选择器里的线列表：多了要能滚。
+   现在是「发布线 + 额外可见线」两段，每段各给 22vh，卡片整体再兜一个上限，
+   免得线多的账号把确定/取消挤到屏幕外。 */
+.pf-lines { max-height: 22vh; overflow-y: auto; margin: 2px 0 8px; }
 .pf-lines .check-field { margin-bottom: 2px; }
+.pf-edit-card { max-height: 82vh; overflow-y: auto; }
+.pf-lines-h {
+  font-size: var(--fs-caption); font-weight: 600; color: var(--text-dim);
+  margin: 2px 0 4px;
+}
 
 /* 切主题时的一帧：关掉所有过渡，避免 body 在 0.28s 里渐变、子元素瞬切（10-30） */
 .no-transition, .no-transition * { transition: none !important; }

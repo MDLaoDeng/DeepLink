@@ -229,20 +229,30 @@
        · 角色的动态只属于触发它的那条线（m.sid），别的线看不到；
        · 我发的动态是我发的，按 m.lines 决定哪几条线看得到；
        · 两者都只在当前线内可见。 */
+  /* 一条动态在「某条线」里看不看得到（10-30 统一口径，三处入口都走它）：
+     · 没有 sid 的老数据：有 lines 就按 lines，没有就全可见（别让升级后的人突然看不见）；
+     · sid === 当前线 → 发布线，永远看得到；
+     · 否则看 lines 里有没有这条线（「另外也能看到」的线）。 */
+  function visOk(m, line) {
+    if (!line) return true;
+    if (!m.sid) {
+      if (!Array.isArray(m.lines) || !m.lines.length) return true;
+      return m.lines.indexOf(line) >= 0;
+    }
+    if (m.sid === line) return true;
+    return Array.isArray(m.lines) && m.lines.indexOf(line) >= 0;
+  }
+
   function momentsOf(chId, sid) {
     var line = (sid === undefined) ? lineId() : sid;
     return (S().getMoments() || []).filter(function (m) {
       if (!m) return false;
       if (chId === "me") {
         if (m.who) return false;
-        /* 老数据没有 lines 的一律当「全部可见」，别让升级后的人突然看不见自己发过的东西 */
-        if (!Array.isArray(m.lines) || !m.lines.length) return true;
-        return !line || m.lines.indexOf(line) >= 0;
+        return visOk(m, line);
       }
       if (m.who !== chId) return false;
-      /* lines = 显式指定的可见线（10-30）：勾了就按白名单，没勾就还是「它自己那条线」 */
-      if (Array.isArray(m.lines) && m.lines.length) return !line || m.lines.indexOf(line) >= 0;
-      return !m.sid || m.sid === line;
+      return visOk(m, line);
     }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
   }
 
@@ -251,12 +261,7 @@
     var line = (sid === undefined) ? lineId() : sid;
     return (S().getMoments() || []).filter(function (m) {
       if (!m) return false;
-      if (m.who) {                                          /* 角色：默认只属于它那条线 */
-        if (Array.isArray(m.lines) && m.lines.length) return !line || m.lines.indexOf(line) >= 0;
-        return !m.sid || m.sid === line;
-      }
-      if (!Array.isArray(m.lines) || !m.lines.length) return true;   /* 我发的：老数据全可见 */
-      return !line || m.lines.indexOf(line) >= 0;
+      return visOk(m, line);
     }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
   }
   function addCharMoment(chId, text, imgs, sid) {
@@ -689,34 +694,90 @@
 
   /* 一条动态（角色版与「我」的版式完全一样，用户要求统一） */
   /* 一条动态的可见范围文案 */
+  /* 一条动态的可见范围文案。
+     分工是「发布线 + 额外可见线」（10-30 用户纠正过一次）：
+     · sid   = 这条动态是**从哪条线发出来的**（时间域，发布线永远看得到自己发的）；
+     · lines = **另外还允许哪几条线看到**（可以挑别的角色的线，也可以挑自己的另一条线）。
+     第一版把 lines 当成「全部可见白名单」，勾掉发布线等于发布线自己也看不见，是错的。 */
   function visTextOf(m) {
-    if (Array.isArray(m.lines) && m.lines.length) return "可见：" + m.lines.length + " 条线（点改）";
-    return "可见：只在它自己这条线（点改）";
+    var extra = (Array.isArray(m.lines) ? m.lines : []).filter(function (id) { return id && id !== m.sid; });
+    if (!m.sid) return extra.length ? ("可见：" + (extra.length + 1) + " 条线（点改）") : "可见：所有线（点改）";
+    return extra.length ? ("可见：发布线 + " + extra.length + " 条（点改）") : "可见：只有发布线（点改）";
   }
-  /* 勾选「哪几条线能看到这条动态」。一条都不勾 = 回退到默认（只在它原本那条线）。 */
+  /* 线的显示名：优先「角色名 · 对话名」，让用户分得清哪条是谁的 */
+  function lineLabel(x) {
+    var ch = x.characterId ? charById(x.characterId) : null;
+    var chName = ch ? (ch.name || "") : "";
+    var title = String(x.title || "").trim();
+    if (x.isGroup) return (title || "群聊") + "（群）";
+    if (chName && title && title !== chName) return chName + " · " + title;
+    return chName || title || "对话";
+  }
+  /* 改「从哪条线发、还能给哪几条线看」。 */
   function editMomentLines(m) {
     var mask = el("div", "pf-edit");
     var card = el("div", "pf-edit-card");
-    card.appendChild(el("div", "pf-edit-t", "谁能看到这条动态"));
-    card.appendChild(el("div", "pf-edit-h", "勾上的线会在各自的动态流里看到它；一条都不勾就只在它原来那条线。"));
-    var wrap = el("div", "pf-lines");
+    card.appendChild(el("div", "pf-edit-t", "这条动态的线"));
+    card.appendChild(el("div", "pf-edit-h",
+      "上面一行选它是从哪条线发出来的（发布线永远看得到）；下面的勾选是「另外还让哪几条线看到」，可以勾别的角色的线。"));
+
     var list = (S().getSessions() || []).filter(function (x) { return x && x.id; });
-    if (!list.length) wrap.appendChild(el("div", "pf-edit-h", "还没有任何对话"));
+    var origin = m.sid || lineId() || (list[0] ? list[0].id : "");
+
+    card.appendChild(el("div", "pf-lines-h", "发布线"));
+    var wrapMain = el("div", "pf-lines");
+    if (!list.length) wrapMain.appendChild(el("div", "pf-edit-h", "还没有任何对话"));
+    list.forEach(function (x) {
+      var row = el("label", "check-field");
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = (x.id === origin);
+      cb.setAttribute("data-origin", x.id);
+      var sp = document.createElement("span");
+      sp.textContent = lineLabel(x);
+      row.appendChild(cb); row.appendChild(sp);
+      wrapMain.appendChild(row);
+      cb.addEventListener("change", function () {
+        if (!cb.checked) { cb.checked = true; return; }   /* 单选：不允许把发布线取消掉 */
+        var all = wrapMain.querySelectorAll("input[data-origin]");
+        for (var i = 0; i < all.length; i++) if (all[i] !== cb) all[i].checked = false;
+        origin = x.id;
+        syncExtra();
+      });
+    });
+    card.appendChild(wrapMain);
+
+    card.appendChild(el("div", "pf-lines-h", "另外也能看到的线"));
+    var wrapExtra = el("div", "pf-lines");
+    var extraBoxes = {};
     var picked = {};
-    (m.lines || []).forEach(function (id) { picked[id] = 1; });
+    (Array.isArray(m.lines) ? m.lines : []).forEach(function (id) { picked[id] = 1; });
     list.forEach(function (x) {
       var row = el("label", "check-field");
       var cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = !!picked[x.id];
-      cb.setAttribute("data-line", x.id);
+      cb.setAttribute("data-extra", x.id);
       var sp = document.createElement("span");
-      var ch2 = x.characterId ? charById(x.characterId) : null;
-      sp.textContent = (x.title || (ch2 && ch2.name) || "对话") + (x.isGroup ? "（群）" : "");
+      sp.textContent = lineLabel(x);
       row.appendChild(cb); row.appendChild(sp);
-      wrap.appendChild(row);
+      wrapExtra.appendChild(row);
+      extraBoxes[x.id] = { row: row, cb: cb };
     });
-    card.appendChild(wrap);
+    card.appendChild(wrapExtra);
+
+    /* 发布线自己不出现在「另外也能看到」里：它本来就看得见，勾上只是重复 */
+    function syncExtra() {
+      for (var id in extraBoxes) {
+        if (!extraBoxes.hasOwnProperty(id)) continue;
+        var o = extraBoxes[id];
+        var isOrigin = (id === origin);
+        o.row.hidden = isOrigin;
+        if (isOrigin) o.cb.checked = false;
+      }
+    }
+    syncExtra();
+
     var ops = el("div", "pf-edit-bar");
     var cancel = el("button", "btn ghost", "取消");
     cancel.type = "button";
@@ -725,13 +786,17 @@
     function close() { if (mask.parentNode) mask.parentNode.removeChild(mask); }
     cancel.addEventListener("click", close);
     ok.addEventListener("click", function () {
-      var ids = [];
-      var boxes = wrap.querySelectorAll("input[data-line]");
-      for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) ids.push(boxes[i].getAttribute("data-line"));
+      var extraIds = [];
+      var boxes = wrapExtra.querySelectorAll("input[data-extra]");
+      for (var i = 0; i < boxes.length; i++) {
+        var id = boxes[i].getAttribute("data-extra");
+        if (boxes[i].checked && id !== origin) extraIds.push(id);
+      }
       var all = S().getMoments() || [];
       for (var k = 0; k < all.length; k++) {
         if (all[k] && all[k].id === m.id) {
-          all[k].lines = ids;      /* 空数组 = 回退到「只在它原本那条线」 */
+          all[k].sid = origin;        /* 发布线 */
+          all[k].lines = extraIds;    /* 额外可见线；空 = 只有发布线看得到 */
           break;
         }
       }
