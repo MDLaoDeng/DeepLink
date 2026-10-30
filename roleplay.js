@@ -443,75 +443,204 @@
     syncPeriodField();
   }
 
-  function renderCharBar() {
+  /* ── 角色树（10-30 用户要求：三层折叠）───────────────────────────
+     第一层：角色（原角色）
+     第二层：这个角色的各个版本 —— 「原名（原）」和「原名-世界观」（副本）
+     第三层：线（会话），行尾标「主线 / 支线」
+     以前是一排横向 chip + 下方只显示「当前角色」的会话列表：副本一多，chip 被挤爆，
+     别的角色的线在侧栏里根本看不到，只能先切角色再切线，来回两趟。 */
+  function treeLineRow(s, active) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tree-row lv3" + (active ? " on" : "");
+    const nm = document.createElement("span");
+    nm.className = "t-name";
+    nm.textContent = s.title || "新对话";
+    const bd = document.createElement("span");
+    bd.className = "s-badge" + (s.mainLine ? " main" : "");
+    bd.textContent = s.mainLine ? "主线" : "支线";
+    b.appendChild(nm); b.appendChild(bd);
+    b.addEventListener("click", () => {
+      exitSelect();
+      state.sessionId = s.id;
+      Store.setCurrentId(s.id);
+      if (s.characterId) state.settings = Store.saveSettings({ activeCharacterId: s.characterId });
+      if (window.DL && DL.closeSidebar) DL.closeSidebar();
+      renderAll();
+    });
+    return b;
+  }
+
+  function renderCharTree() {
     const bar = $("#charBar");
     if (!bar) return;
     if (!state.settings.roleplayEnabled) { bar.hidden = true; bar.innerHTML = ""; return; }
     bar.hidden = false;
     bar.innerHTML = "";
-    const chip = (id, name, avatar, active) => {
+    bar.classList.add("char-tree");
+
+    const TING = (window.DL && window.DL.tinglanId) || "c_tinglan";
+    const chars = Store.getCharacters().filter((c) => !c.phoneOnly && c.id !== TING);
+    const sessions = Store.getSessions().filter((s) => !s.phoneOnly);
+    const aid = state.settings.activeCharacterId || "";
+    const open1 = state.treeOpen || (state.treeOpen = {});
+    const open2 = state.treeVer || (state.treeVer = {});
+
+    const versionsOf = (ch) => [ch].concat(chars.filter((c) => c.altOf === ch.id));
+    const linesOf = (cid) => sessions
+      .filter((s) => !s.isGroup && (s.characterId || "") === cid)
+      .sort((a, b) => (b.mainLine ? 1 : 0) - (a.mainLine ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0));
+
+    const originals = chars.filter((c) => !c.altOf)
+      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0));
+
+    const head = (ch, depth, expanded, onToggle) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "char-chip" + (active ? " on" : "");
-      const av = document.createElement("span");
-      av.className = "c-av";
-      if (avatar) { const im = document.createElement("img"); im.src = (D.avatarUrl ? D.avatarUrl(avatar) : avatar); av.appendChild(im); }
-      else av.innerHTML = UI.iconSvg(id ? "account" : "creation");
+      b.className = "tree-row lv" + depth;
+      const arrow = document.createElement("span");
+      arrow.className = "t-arrow";
+      arrow.textContent = expanded ? "▾" : "▸";
+      b.appendChild(arrow);
+      if (depth === 1) {
+        const av = document.createElement("span");
+        av.className = "c-av";
+        if (ch.avatar) {
+          const im = document.createElement("img");
+          im.src = (D.avatarUrl ? D.avatarUrl(ch.avatar) : ch.avatar);
+          av.appendChild(im);
+        } else av.innerHTML = UI.iconSvg("account");
+        b.appendChild(av);
+      }
       const nm = document.createElement("span");
-      nm.className = "c-nm";
-      nm.textContent = name;
-      b.appendChild(av); b.appendChild(nm);
-      b.addEventListener("click", () => pickAgent(id));
+      nm.className = "t-name";
+      nm.textContent = ch._treeName;
+      b.appendChild(nm);
+      if (ch._treeSub) {
+        const sub = document.createElement("span");
+        sub.className = "t-sub";
+        sub.textContent = ch._treeSub;
+        b.appendChild(sub);
+      }
+      b.addEventListener("click", onToggle);
       return b;
     };
-    const aid = agentId();
-    /* 助手（对外叫听澜）不在这栏：它已经是侧栏第一栏那个入口本身了
-       （index.html 的 data-side="assistant"，文案「听澜」）。
-       这栏只放真正的角色卡 —— 以前在这里多摆一格同名的，看着像两个助手。 */
-    const TING = (window.DL && window.DL.tinglanId) || "c_tinglan";
-    const allChars = Store.getCharacters();
-    /* 纯手机角色不进这一栏：它们只活在手机里，入口在侧栏「手机角色」那一栏。
-       以前这里不过滤 → 点它会在主对话里打开那条 phoneOnly 的线，
-       等于把「只活在手机里」这条设计从后门破掉了。 */
-    /* 异世界副本（altOf 指向原角色）默认折叠（10-30）：每换一个世界观就复制一份角色，
-       玩一阵子列表里全是「沈砚·修仙」「沈砚·西幻」，原角色被挤到看不见。
-       默认只显示原角色，底部给一个入口把副本展开/收起。 */
-    const showAlt = !!state.showAltChars;
-    const pool = allChars.filter((c) => !c.phoneOnly && c.id !== TING);
-    const alts = pool.filter((c) => !!c.altOf);
-    pool.filter((c) => showAlt || !c.altOf)
-      .slice()
-      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
-      .forEach((c) => bar.appendChild(chip(c.id, c.name || "角色", c.avatar || "", aid === c.id)));
-    if (alts.length) {
-      const fold = document.createElement("button");
-      fold.type = "button";
-      fold.className = "char-chip";
-      fold.style.opacity = ".72";
-      const fv = document.createElement("span");
-      fv.className = "c-av";
-      fv.innerHTML = UI.iconSvg("account");
-      const fn = document.createElement("span");
-      fn.className = "c-nm";
-      /* 展开态的文案不带数字：小屏上「收起副本（2）」会被省略号裁掉，更难认 */
-      fn.textContent = showAlt ? "收起副本" : "异世界副本 " + alts.length;
-      fold.appendChild(fv); fold.appendChild(fn);
-      fold.addEventListener("click", () => { state.showAltChars = !showAlt; renderCharBar(); });
-      bar.appendChild(fold);
+
+    if (!originals.length) {
+      const empty = document.createElement("div");
+      empty.className = "tree-empty";
+      empty.textContent = "还没有角色　点下面「新角色」建一个";
+      bar.appendChild(empty);
     }
+
+    originals.forEach((ch) => {
+      const vers = versionsOf(ch);
+      const lineCount = vers.reduce((n, v) => n + linesOf(v.id).length, 0);
+      ch._treeName = ch.name || "角色";
+      ch._treeSub = lineCount ? lineCount + " 条线" : "";
+      const wrap = document.createElement("div");
+      wrap.className = "tree-node lv1";
+      wrap.appendChild(head(ch, 1, !!open1[ch.id], () => {
+        open1[ch.id] = !open1[ch.id];
+        renderCharTree();
+      }));
+      if (open1[ch.id]) {
+        const kids = document.createElement("div");
+        kids.className = "tree-kids";
+        vers.forEach((v) => {
+          const isOrig = (v === ch);
+          /* 副本的行名：原名 + 「-」 + 世界观名；没填世界观就用副本名去掉原名后的部分 */
+          let label = ch.name || "角色";
+          if (!isOrig) {
+            const w = String(v.altWorld || "").trim();
+            const tail = w || String(v.name || "").replace(ch.name || "", "").replace(/^[·\-\s]+/, "");
+            label = (ch.name || "角色") + "-" + (tail || "副本");
+          }
+          v._treeName = isOrig ? ((ch.name || "角色") + "（原）") : label;
+          const own = linesOf(v.id);
+          const isActive = (v.id === aid);
+          v._treeSub = isActive ? "当前" : (own.length ? "" : "无对话");
+          const vw = document.createElement("div");
+          vw.className = "tree-node lv2" + (isActive ? " active" : "");
+          vw.appendChild(head(v, 2, !!open2[v.id], () => {
+            /* 点这一版本：切到它（新建对话就落在它名下），同时展开/收起它的线 */
+            state.settings = Store.saveSettings({ activeCharacterId: v.id });
+            open2[v.id] = !open2[v.id];
+            open1[ch.id] = true;
+            renderAll();
+          }));
+          if (open2[v.id]) {
+            const ls = document.createElement("div");
+            ls.className = "tree-kids";
+            if (!own.length) {
+              const none = document.createElement("div");
+              none.className = "tree-empty small";
+              none.textContent = "还没有对话";
+              ls.appendChild(none);
+            }
+            own.forEach((s2) => ls.appendChild(treeLineRow(s2, s2.id === state.sessionId)));
+            vw.appendChild(ls);
+          }
+          kids.appendChild(vw);
+        });
+        wrap.appendChild(kids);
+      }
+      bar.appendChild(wrap);
+    });
+
+    /* 群聊单列一节：群的 characterId 是空串，挂在哪个角色下面都不对 */
+    const groups = sessions.filter((s) => s.isGroup);
+    if (groups.length) {
+      const gh = document.createElement("button");
+      gh.type = "button";
+      gh.className = "tree-row lv1 group-head";
+      const ar = document.createElement("span");
+      ar.className = "t-arrow";
+      ar.textContent = open1.__groups ? "▾" : "▸";
+      gh.appendChild(ar);
+      const gav = document.createElement("span");
+      gav.className = "c-av";
+      gav.innerHTML = UI.iconSvg("account-group");
+      gh.appendChild(gav);
+      const gn = document.createElement("span");
+      gn.className = "t-name";
+      gn.textContent = "群聊";
+      gh.appendChild(gn);
+      const gs = document.createElement("span");
+      gs.className = "t-sub";
+      gs.textContent = groups.length + "";
+      gh.appendChild(gs);
+      gh.addEventListener("click", () => { open1.__groups = !open1.__groups; renderCharTree(); });
+      bar.appendChild(gh);
+      if (open1.__groups) {
+        const gk = document.createElement("div");
+        gk.className = "tree-kids";
+        groups
+          .slice()
+          .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0))
+          .forEach((s2) => gk.appendChild(treeLineRow(s2, s2.id === state.sessionId)));
+        bar.appendChild(gk);
+      }
+    }
+
     const add = document.createElement("button");
     add.type = "button";
-    add.className = "char-chip add";
+    add.className = "tree-add";
     add.innerHTML = UI.iconSvg("plus") + "<span>新角色</span>";
     add.addEventListener("click", newCharacter);
     bar.appendChild(add);
   }
 
+  /* 旧名字保留：内部有十几处调 renderCharBar()，统一转给新的树渲染 */
+  function renderCharBar() { renderCharTree(); }
+
   function pickAgent(id) {
     state.settings = Store.saveSettings({ roleplayEnabled: true, activeCharacterId: id });
     exitSelect();
     const list = Store.getSessions().filter((s) => (s.characterId || "") === (id || ""));
-    state.sessionId = list[0] ? list[0].id : "";
+    const main = list.filter((s) => s.mainLine)[0];
+    list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    state.sessionId = (main || list[0]) ? (main || list[0]).id : "";
     if (!state.sessionId) { newSession(); return; }
     Store.setCurrentId(state.sessionId);
     renderAll();
@@ -2897,7 +3026,7 @@
   }
 
   var api = {
-    saveChar: saveChar, renderCharBar: renderCharBar, openRowMenu: openRowMenu,
+    saveChar: saveChar, renderCharBar: renderCharBar, renderCharTree: renderCharTree, openRowMenu: openRowMenu,
     sessionDiarySave: sessionDiarySave, sessionDiaryClear: sessionDiaryClear,
     runAssistantSummary: runAssistantSummary,
     generateWorld: generateWorld, applyWorld: applyWorld,

@@ -1960,6 +1960,53 @@ body.selecting .msg-actions { display: none; }
 /* ── 角色扮演 ──────────────────────────────────── */
 .char-bar { display: flex; flex-wrap: wrap; padding: 0 10px var(--sp-1); max-height: 28vh; overflow-y: auto; }
 .char-bar[hidden] { display: none; }
+
+/* 纯手机角色的世界观二选一（10-30）：自绘小胶囊，不用原生 radio */
+.ph-world-chips { display: flex; }
+.ph-world-chip {
+  padding: 6px 14px; margin-right: 8px; border: 0.5px solid var(--border);
+  border-radius: 999px; background-color: var(--panel-2); color: var(--text-dim);
+  font: inherit; font-size: var(--fs-body); cursor: pointer;
+}
+.ph-world-chip.on { background-color: var(--accent); color: var(--accent-ink); border-color: transparent; }
+/* ── 角色树（10-30 用户要求：三层折叠）─────────────────────────
+   角色 → 版本（原名（原）/ 原名-世界观）→ 线（会话名 + 主线/支线）
+   覆盖 .char-bar 的横向 chip 布局：整块竖排、自己滚。 */
+.char-bar.char-tree {
+  display: block; flex: 1 1 auto; min-height: 0; max-height: none;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 2px 6px 12px;
+}
+.tree-row {
+  display: flex; align-items: center; width: 100%; text-align: left;
+  padding: 7px 8px; border: 0; border-radius: var(--r-md); background: none;
+  color: var(--text); font: inherit; font-size: var(--fs-body); cursor: pointer;
+  transition: background-color var(--dur-1);
+}
+.tree-row:active { background-color: var(--panel-2); }
+.tree-row.lv1 { font-weight: 600; margin-top: 2px; }
+.tree-row.lv2 { padding-left: 20px; color: var(--text-dim); }
+.tree-row.lv3 { padding-left: 38px; color: var(--text-dim); }
+.tree-row.lv3.on { background-color: var(--panel-2); color: var(--text); }
+.tree-node.lv2.active > .tree-row .t-name { color: var(--accent); }
+.t-arrow { width: 14px; flex: none; color: var(--text-mute); font-size: 10px; }
+.tree-row .c-av {
+  width: 22px; height: 22px; border-radius: 50%; overflow: hidden; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background-color: var(--panel-2); margin-right: 8px; font-size: var(--fs-caption);
+}
+.tree-row .c-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.t-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.t-sub { flex: none; margin-left: 6px; font-size: var(--fs-caption); color: var(--text-mute); }
+.tree-row .s-badge { margin-left: 6px; }
+.tree-empty { padding: 6px 10px; font-size: var(--fs-caption); color: var(--text-mute); }
+.tree-empty.small { padding-left: 42px; }
+.tree-add {
+  display: flex; align-items: center; width: 100%; margin-top: 8px; padding: 8px 10px;
+  border: 0.5px dashed var(--border); border-radius: var(--r-md); background: none;
+  color: var(--accent); font: inherit; font-size: var(--fs-body); cursor: pointer;
+}
+.tree-add > *:not(:last-child) { margin-right: 8px; }
 .char-chip {
   display: inline-flex; align-items: center; max-width: 46%;
   padding: var(--sp-1) 10px; margin-right: 6px; margin-bottom: 6px;
@@ -3131,9 +3178,20 @@ body.no-image .ph-moment-img img { display: none; }
 /* 可见范围选择器里的线列表：多了要能滚。
    现在是「发布线 + 额外可见线」两段，每段各给 22vh，卡片整体再兜一个上限，
    免得线多的账号把确定/取消挤到屏幕外。 */
-.pf-lines { max-height: 22vh; overflow-y: auto; margin: 2px 0 8px; }
+/* 两个列表都由卡片整体滚动（10-30）：各自限高会把角色/版本切在中间，
+   用户以为「这个人没有线」，其实是没滚到。 */
+.pf-lines { margin: 2px 0 8px; }
 .pf-lines .check-field { margin-bottom: 2px; }
 .pf-edit-card { max-height: 82vh; overflow-y: auto; }
+/* 可见范围选择器里的三层分组（10-30 复用侧栏那套：角色 → 版本 → 线） */
+.pf-forest-h {
+  margin: 10px 0 2px; font-size: var(--fs-body); font-weight: 600; color: var(--text);
+}
+.pf-forest-v {
+  margin: 2px 0 2px 10px; font-size: var(--fs-caption); color: var(--text-mute);
+}
+.pf-lines .check-field { padding-left: 10px; }
+.pf-lines .check-field .s-badge { margin-left: auto; }
 .pf-lines-h {
   font-size: var(--fs-caption); font-weight: 600; color: var(--text-dim);
   margin: 2px 0 4px;

@@ -892,6 +892,18 @@
     }
     if (tab === "phone") { renderPhonePane(); return; }
 
+    /* 「角色」栏：三层折叠树（角色 → 版本（原 / 副本-世界观）→ 线），10-30 用户要求。
+       开了角色扮演就整块交给 roleplay.renderCharTree —— 树里已经有「每条线」的节点，
+       下面再摆一份「只显示当前角色」的会话列表就是重复，而且别的角色的线看不到。
+       没开角色扮演时仍然走原来的会话列表（助手线 / 群聊）。 */
+    if (state.settings.roleplayEnabled && window.DL && DL.renderCharTree) {
+      const lb = $("#sessionList");
+      if (lb) { lb.hidden = true; lb.innerHTML = ""; }
+      DL.renderCharTree();
+      return;
+    }
+    { const lb2 = $("#sessionList"); if (lb2) lb2.hidden = false; }
+
     /* 「角色」栏：当前角色自己的线 + 所有群聊。
        群聊的 characterId 是空串，如果只按「当前角色」过滤，开了角色扮演之后
        群里那条线两边都不收（助手栏又把 isGroup 滤掉了）→ 群聊从侧栏消失，切走就回不去。
@@ -1279,11 +1291,16 @@
     const box = $("#groupMembers");
     if (box) {
       box.innerHTML = "";
-      const chars = Store.getCharacters();
+      /* 纯手机角色不能进现实群（10-30 用户口径）：它们只活在手机里，
+         被拉进现实群等于把「手机是另一个世界」这条设计从后门破掉。
+         手机群（groupMode==="phone"）不在此列 —— 那本来就是手机里的群。 */
+      const chars = Store.getCharacters().filter((c) => groupMode === "phone" || !c.phoneOnly);
       if (!chars.length) {
         const p = document.createElement("p");
         p.className = "hint";
-        p.textContent = "还没有角色。先去「角色扮演」建一个角色，再来开群。";
+        p.textContent = groupMode === "phone"
+          ? "还没有角色。先去「手机角色」建一个，再来开群。"
+          : "还没有角色。先去「角色扮演」建一个角色，再来开群。";
         box.appendChild(p);
       } else {
         chars.forEach((c) => {

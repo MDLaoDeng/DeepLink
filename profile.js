@@ -713,57 +713,103 @@
     if (chName && title && title !== chName) return chName + " · " + title;
     return chName || title || "对话";
   }
+  /* 「线」按三层摊开：角色 → 版本（原名（原） / 原名-世界观）→ 线。
+     和侧栏那棵树同一套分组（10-30 用户要求复用），这样一眼就能看出
+     「这是沈砚的哪条线」「这条是苏晚的」，而不是一长串同名对话。 */
+  function lineForest() {
+    var chars = (S().getCharacters() || []).filter(function (c) { return c && c.id; });
+    var sessions = (S().getSessions() || []).filter(function (x) { return x && x.id; });
+    var TING = (D() && D().tinglanId) || "c_tinglan";
+    var originals = chars.filter(function (c) { return !c.altOf && !c.phoneOnly && c.id !== TING; });
+    var forest = [];
+    var used = {};
+
+    originals.forEach(function (ch) {
+      var vers = [ch].concat(chars.filter(function (c) { return c.altOf === ch.id; }));
+      var versions = [];
+      vers.forEach(function (v) {
+        var lines = sessions.filter(function (x) {
+          return !x.isGroup && (x.characterId || "") === v.id;
+        }).sort(function (a, b) { return (b.mainLine ? 1 : 0) - (a.mainLine ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0); });
+        if (!lines.length) return;
+        lines.forEach(function (x) { used[x.id] = 1; });
+        var label;
+        if (v === ch) label = (ch.name || "角色") + "（原）";
+        else {
+          var w = String(v.altWorld || "").trim();
+          var tail = w || String(v.name || "").replace(ch.name || "", "").replace(/^[·\-\s]+/, "");
+          label = (ch.name || "角色") + "-" + (tail || "副本");
+        }
+        versions.push({ label: label, lines: lines });
+      });
+      if (versions.length) forest.push({ title: ch.name || "角色", versions: versions });
+    });
+
+    /* 没挂角色的线（助手线、以及老数据里 characterId 丢了的）单列一节 */
+    var orphan = sessions.filter(function (x) { return !x.isGroup && !used[x.id]; });
+    if (orphan.length) {
+      forest.push({ title: "没有挂角色的线", versions: [{ label: "", lines: orphan }] });
+    }
+
+    var groups = sessions.filter(function (x) { return x.isGroup; });
+    if (groups.length) {
+      forest.push({ title: "群聊", versions: [{ label: "", lines: groups }] });
+    }
+    return forest;
+  }
+
+  /* 把森林画进 box，返回 id → {row, cb} 的映射 */
+  function renderLineForest(box, attr, isChecked) {
+    var map = {};
+    var forest = lineForest();
+    if (!forest.length) {
+      box.appendChild(el("div", "pf-edit-h", "还没有任何对话"));
+      return map;
+    }
+    forest.forEach(function (g) {
+      box.appendChild(el("div", "pf-forest-h", g.title));
+      g.versions.forEach(function (v) {
+        if (v.label) box.appendChild(el("div", "pf-forest-v", v.label));
+        v.lines.forEach(function (x) {
+          var row = el("label", "check-field");
+          var cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = !!isChecked(x);
+          cb.setAttribute(attr, x.id);
+          var sp = document.createElement("span");
+          sp.textContent = x.title || "新对话";
+          var bd = document.createElement("span");
+          bd.className = "s-badge" + (x.mainLine ? " main" : "");
+          bd.textContent = x.mainLine ? "主线" : "支线";
+          row.appendChild(cb); row.appendChild(sp); row.appendChild(bd);
+          box.appendChild(row);
+          map[x.id] = { row: row, cb: cb };
+        });
+      });
+    });
+    return map;
+  }
+
   /* 改「从哪条线发、还能给哪几条线看」。 */
   function editMomentLines(m) {
     var mask = el("div", "pf-edit");
     var card = el("div", "pf-edit-card");
     card.appendChild(el("div", "pf-edit-t", "这条动态的线"));
     card.appendChild(el("div", "pf-edit-h",
-      "上面一行选它是从哪条线发出来的（发布线永远看得到）；下面的勾选是「另外还让哪几条线看到」，可以勾别的角色的线。"));
+      "上面一组选它是从哪条线发出来的（发布线永远看得到）；下面一组勾「另外还让哪几条线看到」，可以勾别的角色的线。"));
 
-    var list = (S().getSessions() || []).filter(function (x) { return x && x.id; });
-    var origin = m.sid || lineId() || (list[0] ? list[0].id : "");
+    var origin = m.sid || lineId();
 
     card.appendChild(el("div", "pf-lines-h", "发布线"));
     var wrapMain = el("div", "pf-lines");
-    if (!list.length) wrapMain.appendChild(el("div", "pf-edit-h", "还没有任何对话"));
-    list.forEach(function (x) {
-      var row = el("label", "check-field");
-      var cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = (x.id === origin);
-      cb.setAttribute("data-origin", x.id);
-      var sp = document.createElement("span");
-      sp.textContent = lineLabel(x);
-      row.appendChild(cb); row.appendChild(sp);
-      wrapMain.appendChild(row);
-      cb.addEventListener("change", function () {
-        if (!cb.checked) { cb.checked = true; return; }   /* 单选：不允许把发布线取消掉 */
-        var all = wrapMain.querySelectorAll("input[data-origin]");
-        for (var i = 0; i < all.length; i++) if (all[i] !== cb) all[i].checked = false;
-        origin = x.id;
-        syncExtra();
-      });
-    });
+    var originBoxes = renderLineForest(wrapMain, "data-origin", function (x) { return x.id === origin; });
     card.appendChild(wrapMain);
 
     card.appendChild(el("div", "pf-lines-h", "另外也能看到的线"));
     var wrapExtra = el("div", "pf-lines");
-    var extraBoxes = {};
     var picked = {};
     (Array.isArray(m.lines) ? m.lines : []).forEach(function (id) { picked[id] = 1; });
-    list.forEach(function (x) {
-      var row = el("label", "check-field");
-      var cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = !!picked[x.id];
-      cb.setAttribute("data-extra", x.id);
-      var sp = document.createElement("span");
-      sp.textContent = lineLabel(x);
-      row.appendChild(cb); row.appendChild(sp);
-      wrapExtra.appendChild(row);
-      extraBoxes[x.id] = { row: row, cb: cb };
-    });
+    var extraBoxes = renderLineForest(wrapExtra, "data-extra", function (x) { return !!picked[x.id]; });
     card.appendChild(wrapExtra);
 
     /* 发布线自己不出现在「另外也能看到」里：它本来就看得见，勾上只是重复 */
@@ -776,6 +822,21 @@
         if (isOrigin) o.cb.checked = false;
       }
     }
+    function syncOrigin() {
+      for (var id in originBoxes) {
+        if (!originBoxes.hasOwnProperty(id)) continue;
+        originBoxes[id].cb.checked = (id === origin);
+      }
+    }
+    /* 单选：点一个就把别的取消掉；再点自己也不允许取消（发布线必须存在） */
+    Object.keys(originBoxes).forEach(function (id) {
+      originBoxes[id].cb.addEventListener("change", function () {
+        if (!originBoxes[id].cb.checked) { originBoxes[id].cb.checked = true; return; }
+        origin = id;
+        syncOrigin();
+        syncExtra();
+      });
+    });
     syncExtra();
 
     var ops = el("div", "pf-edit-bar");

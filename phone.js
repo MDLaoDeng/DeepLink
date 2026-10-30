@@ -830,6 +830,31 @@
     var el = $("#phoneAddSheet");
     if (el) el.hidden = !v;
   }
+  /* 纯手机角色的世界观只有两个选项（10-30 用户口径）：
+     现代 / 未来。「古代、修仙、西幻」这些没有手机，硬塞进手机里就自相矛盾。
+     用户填了一句话设定时，交给模型判一次；没填或没配 Key 就用他自己选的那个。 */
+  var PHONE_WORLDS = ["现代", "未来"];
+
+  function judgePhoneWorld(name, blurb) {
+    var sys = "你是世界观分类器。判断给定的角色设定属于哪一类，只回一个词，不要解释：\n" +
+      "现代 —— 当代现实世界（手机、网络、城市、上班上学）；\n" +
+      "未来 —— 近未来 / 赛博 / 科幻，但社会形态仍然是现代文明的延伸；\n" +
+      "其他 —— 古代、武侠、修仙、奇幻、异世界、架空历史、童话等。";
+    var usr = "角色名：" + name + "\n设定：" + (blurb || "（没填，只有名字，按名字判断）");
+    return Api.run({
+      settings: Store.getSettings(),
+      messages: [{ role: "system", content: sys }, { role: "user", content: usr }],
+      thinking: false,
+      effort: "low"
+    }).then(function (r) {
+      try { if (r && r.usage && typeof recordUsage === "function") recordUsage(null, r.usage, "", "phone"); } catch (e) { /* ignore */ }
+      var t = String((r && r.content) || "");
+      for (var i = 0; i < PHONE_WORLDS.length; i++) if (t.indexOf(PHONE_WORLDS[i]) >= 0) return PHONE_WORLDS[i];
+      if (t.indexOf("其他") >= 0) return "其他";
+      return "";    /* 判不出来就别拦人 */
+    });
+  }
+
   function newPhoneContact() {
     var body = document.createElement("div");
     var lb = document.createElement("label");
@@ -841,33 +866,101 @@
     inp.placeholder = "如：楼下花店老板";
     lb.appendChild(sp); lb.appendChild(inp);
     body.appendChild(lb);
+
+    var lb2 = document.createElement("label");
+    lb2.className = "field";
+    var sp2 = document.createElement("span");
+    sp2.textContent = "一句话设定（可不填，填了会用它判断世界观）";
+    var ta = document.createElement("textarea");
+    ta.rows = 2;
+    ta.placeholder = "如：在便利店上夜班，话不多，习惯凌晨给人发消息";
+    lb2.appendChild(sp2); lb2.appendChild(ta);
+    body.appendChild(lb2);
+
+    /* 世界观二选一：自绘按钮，不用原生 radio（暗色下会露出一块白） */
+    var lb3 = document.createElement("div");
+    lb3.className = "field";
+    var sp3 = document.createElement("span");
+    sp3.textContent = "世界观（纯手机角色只能是现代或未来）";
+    lb3.appendChild(sp3);
+    var chips = document.createElement("div");
+    chips.className = "ph-world-chips";
+    var picked = "现代";
+    PHONE_WORLDS.forEach(function (w) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "ph-world-chip" + (w === picked ? " on" : "");
+      b.textContent = w;
+      b.addEventListener("click", function () {
+        picked = w;
+        var all = chips.querySelectorAll(".ph-world-chip");
+        for (var i = 0; i < all.length; i++) all[i].className = "ph-world-chip" + (all[i] === b ? " on" : "");
+      });
+      chips.appendChild(b);
+    });
+    lb3.appendChild(chips);
+    body.appendChild(lb3);
+
     var hint = document.createElement("p");
     hint.className = "hint";
-    hint.textContent = "纯手机角色：只活在手机里，不出现在主对话的角色列表；记忆 / 压缩照常，之后可以升级成完整角色。";
+    hint.textContent = "纯手机角色：只活在手机里，不出现在主对话的角色列表；记忆 / 压缩照常，之后可以升级成完整角色。古代 / 修仙 / 西幻这类没有手机的设定请去「现实扮演角色」建。";
     body.appendChild(hint);
+
     openSheet("新建联系人", body, function () {
       var name = String(inp.value || "").trim();
       if (!name) { toast("先填个名字", true); return; }
+      var blurb = String(ta.value || "").trim();
       closeSheet();
-      createPhoneContact(name);
+      createPhoneContact(name, blurb, picked);
     });
   }
-  function createPhoneContact(name) {
-    var now = Date.now();
-    var ch = {
-      id: "c_" + now.toString(36) + Math.random().toString(36).slice(2, 6),
-      name: name, avatar: "", fields: { aiName: name },
-      ctxFilter: { rule: "", every: 10 }, usage: null, pinned: false, phoneOnly: true,
-      createdAt: now, updatedAt: now
-    };
-    var list = Store.getCharacters();
-    list.push(ch);
-    if (Store.saveCharacters(list) === false) { toast("写入失败（存储只读或被锁定）", true); return; }
-    var s = Store.createSession(ch.id, true);   /* true = 别顶掉当前主对话 */
-    if (s && s.id) Store.updateSession(s.id, { phoneOnly: true, title: name });
-    goList();
-    toast("已建联系人「" + name + "」");
-    if (s && s.id) openChat(s.id);
+
+  function createPhoneContact(name, blurb, world) {
+    var st = Store.getSettings() || {};
+    var useAi = !!(blurb && st.apiKey);
+    var judge = useAi ? judgePhoneWorld(name, blurb) : Promise.resolve("");
+    judge.then(function (verdict) {
+      if (verdict === "其他") {
+        toast("这个设定不属于现代 / 未来（手机角色装不进去），去「现实扮演角色」建吧", true);
+        return;
+      }
+      var now = Date.now();
+      var w = (verdict && verdict !== "其他") ? verdict : (PHONE_WORLDS.indexOf(world) >= 0 ? world : "现代");
+      var ch = {
+        id: "c_" + now.toString(36) + Math.random().toString(36).slice(2, 6),
+        name: name, avatar: "", fields: { aiName: name },
+        blurb: blurb || "",
+        phoneWorld: w,
+        ctxFilter: { rule: "", every: 10 }, usage: null, pinned: false, phoneOnly: true,
+        createdAt: now, updatedAt: now
+      };
+      var list = Store.getCharacters();
+      list.push(ch);
+      if (Store.saveCharacters(list) === false) { toast("写入失败（存储只读或被锁定）", true); return; }
+      var s = Store.createSession(ch.id, true);   /* true = 别顶掉当前主对话 */
+      if (s && s.id) Store.updateSession(s.id, { phoneOnly: true, title: name, phoneWorld: w });
+      goList();
+      toast("已建联系人「" + name + "」（" + w + "）");
+      if (s && s.id) openChat(s.id);
+    }, function (e) {
+      /* 判定请求失败不该把人挡在门外：回落到用户自己选的那个 */
+      var now = Date.now();
+      var w = PHONE_WORLDS.indexOf(world) >= 0 ? world : "现代";
+      var ch = {
+        id: "c_" + now.toString(36) + Math.random().toString(36).slice(2, 6),
+        name: name, avatar: "", fields: { aiName: name }, blurb: blurb || "", phoneWorld: w,
+        ctxFilter: { rule: "", every: 10 }, usage: null, pinned: false, phoneOnly: true,
+        createdAt: now, updatedAt: now
+      };
+      var list = Store.getCharacters();
+      list.push(ch);
+      if (Store.saveCharacters(list) === false) { toast("写入失败（存储只读或被锁定）", true); return; }
+      var s2 = Store.createSession(ch.id, true);
+      if (s2 && s2.id) Store.updateSession(s2.id, { phoneOnly: true, title: name, phoneWorld: w });
+      goList();
+      toast("世界观判断失败（" + (e && e.message ? e.message : "网络") + "），先按「" + w + "」建了", true);
+      if (s2 && s2.id) openChat(s2.id);
+    });
   }
 
   /* ── 底栏（7.2 用户口径：像微信，只留聊天 / 动态 / 我的三个）─────
@@ -2500,6 +2593,14 @@
       /* 「TA 怎么称呼我」以前只是个存了没人读的字段（写进会话、从不进提示词）。
          这里补上：留空就什么都不加，不改变现有行为。 */
       if (s && s.nickMe) sys += "\n【称呼】你在手机里叫他「" + String(s.nickMe).trim() + "」。";
+      /* 纯手机角色的世界观只有「现代 / 未来」（10-30 用户口径）：写死进提示词，
+         免得角色在手机里忽然提到飞剑、王朝 —— 手机这个载体本身就把它排除掉了。 */
+      if (ch && ch.phoneOnly) {
+        var pw = String(ch.phoneWorld || (s && s.phoneWorld) || "现代");
+        sys += "\n【世界观】" + pw + "。" + (pw === "未来"
+          ? "可以出现全息、义体、飞车这类近未来技术，但社会形态仍然是现代文明的延伸。"
+          : "只能出现当代现实里有的东西（手机、外卖、地铁、加班），不要出现法术、飞剑、王朝、魔法。");
+      }
       if (!ch) sys = "你是 Sekulum 的助手。现在用户改用手机聊天软件找你，回复要像发消息一样。";
       var head = "【场景】你和对方正在用手机聊天软件发消息。回复要像真人发微信：口语、简短、" +
         "别写小说旁白、别用（动作）括号、不要用 Markdown 标题，不要自称 AI。\n" + PH_STYLE_RULE;
