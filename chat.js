@@ -308,12 +308,30 @@
 
   /* 标记对应的动作：视频/音乐走设置里那套异步接口，文档先改写再排版写盘。
      全程 try/catch —— 生不出来只能提示，绝不能把已落库的回复拖进错误分支。 */
+  /* 正在跑的视频 / 音乐任务：sid → AbortController（10-30 加）。
+     生成视频要等 1~3 分钟，用户中途删掉会话、或者想停，以前没有任何办法打断。 */
+  const mediaJobs = {};
+
+  function cancelMediaJobs(sid) {
+    const ac = sid ? mediaJobs[sid] : null;
+    if (!ac) return false;
+    try { ac.abort(); } catch (e) { /* ignore */ }
+    delete mediaJobs[sid];
+    return true;
+  }
+
   async function runMediaJobs(sid, jobs, o) {
     const s0 = sessionById(sid);
     if (!s0) return;
     const settings = applySessionParams(state.settings, s0);
     const ch = characterFor(s0);
     const aiName = ch ? (ch.name || "对方") : ((CONFIG.BUILTIN_ASSISTANT || {}).name || "听澜");
+
+    /* 一个会话同时只留一个控制器：重复触发时先把上一批掐掉，免得两批一起轮询。
+       ⚠️ 只包视频/音乐，文档导出是纯本地同步写盘，没有可取消的东西。 */
+    cancelMediaJobs(sid);
+    const ac = new AbortController();
+    mediaJobs[sid] = ac;
 
     for (let i = 0; i < jobs.length; i++) {
       const job = jobs[i];
@@ -337,11 +355,12 @@
         UI.toast("还没配置" + label + "生成（设置 → " + label + "生成）", true);
         continue;
       }
+      if (ac.signal.aborted) break;
       UI.toast("正在生成" + label + "，可能要等一会儿…");
       try {
         const url = job.kind === "video"
-          ? await Media.makeVideo(prompt, settings)
-          : await Media.makeMusic(prompt, settings);
+          ? await Media.makeVideo(prompt, settings, ac.signal)
+          : await Media.makeMusic(prompt, settings, ac.signal);
         if (!url) throw new Error("没有拿到结果地址");
         const field = job.kind === "video" ? "video" : "audio";
         mutateSession(sid, (msgs) => {
@@ -351,9 +370,12 @@
         });
         renderAll();
       } catch (e) {
+        /* 用户主动取消不是失败，别报红 */
+        if (ac.signal.aborted || (e && e.message === "已取消")) { UI.toast("已取消" + label + "生成"); break; }
         UI.toast(label + "生成失败：" + (e && e.message ? e.message : e), true);
       }
     }
+    if (mediaJobs[sid] === ac) delete mediaJobs[sid];
   }
 
 
@@ -1120,6 +1142,8 @@
   }
 
   async function buildModelMessages(s, upto) {
+    /* 尾部那条 assistant 的思考（用于 prefill 时回传，见函数末尾） */
+    let tailReasoning = "";
     const msgs = [];
     if (s && sweepImageExpiry(s)) Store.saveSessions(Store.getSessions());
     const ch = characterFor(s);
@@ -1192,7 +1216,16 @@
        让模型把它当输出格式约束（它不是角色设定的一部分，放在末尾更醒目）。 */
     /* 三层优先级：本会话 > 本角色 > 全局（见 adoptFormatFor） */
     const fmt = adoptFormatFor(s);
-    if (fmt) systemText += (systemText && systemText.trim() ? "\n\n" : "") + "【采用格式】\n" + fmt;
+    if (fmt) {
+      systemText += (systemText && systemText.trim() ? "\n\n" : "") + "【采用格式】\n" + fmt;
+      /* 上下文筛选会把历史里的一部分字段剪掉（比如只留「话语」）。模型看多了会照抄那种
+         残缺格式，于是自己的回复也只写一项 —— 10-30 用户报的就是这个现象。
+         这里说死：精简只发生在历史里，你自己的输出仍然按【采用格式】写全。 */
+      if (washedTurns && washedTurns.length) {
+        systemText += "\n\n【注意】历史里有些消息被「上下文筛选」精简过（只保留了一部分字段），" +
+          "那是为了省 token，不影响你怎么回。你自己的每一条回复都必须按上面【采用格式】把每一项完整写出来，不要跟着只写一项。";
+      }
+    }
 
     /* 这条线单独起的昵称（手机页「这条线」里设的）：告诉模型该怎么称呼用户。
        留空就什么都不加，用角色卡里写的称呼方式。 */
@@ -1259,7 +1292,9 @@
           msgs.push({ role: "user", content: text || "[空消息]" });
         }
       } else if (m.role === "assistant") {
-        const c = (activeVariant(m) || {}).content || "";
+        const _v = activeVariant(m) || {};
+        const c = _v.content || "";
+        tailReasoning = String(_v.reasoning || "");
         /* 出过的图会按轮数过期（image 被删、只留 imageDesc），那段描述必须喂回去（10-30）。
            以前只取正文：图过期后这条回复在上下文里变成一句空气，模型完全不知道
            「我给你画过一张…」，而用户发的图那条分支是会带 desc 的 —— 两边不一致。 */
@@ -1270,6 +1305,20 @@
           const sp = m.speakerName ? m.speakerName + "：" : "";
           msgs.push({ role: "assistant", content: sp + body });
         }
+      }
+    }
+    /* 上下文以 assistant 结尾 = 让模型「接着说」的 prefill 形态。
+       思考模式下 API 要求把这条的 reasoning_content 原样带回去，否则直接 400：
+       「The reasoning_content in the thinking mode must be passed back to the API」。
+       最常见的触发路径：点过「继续说」之后，那条续写的回复前面紧挨着另一条 assistant ——
+       对它点「重说」，上下文就停在前一条 assistant 上。
+       没存 reasoning 的老消息带不了，就补一句用户侧的引导，别让请求停在 assistant 上。 */
+    if (msgs.length && msgs[msgs.length - 1].role === "assistant") {
+      const tail = msgs[msgs.length - 1];
+      if (state.settings && state.settings.thinkingEnabled && tailReasoning) {
+        tail.reasoning_content = tailReasoning;
+      } else {
+        msgs.push({ role: "user", content: CONTINUE_NUDGE });
       }
     }
     return msgs;
@@ -3854,6 +3903,7 @@
     renderMessages: renderMessages, sweepImageExpiry: sweepImageExpiry,
     syncPlaceholder: syncPlaceholder, renderAttachments: renderAttachments,
     describePendingImages: describePendingImages,
+    cancelMediaJobs: cancelMediaJobs,
     exitSelect: exitSelect, saveEdit: saveEdit, copySelected: copySelected, openEdit: openEdit,
     adoptFormatFor: adoptFormatFor, exportDocNow: exportDocNow,
     openDeleteDialog: openDeleteDialog, confirmDelete: confirmDelete,

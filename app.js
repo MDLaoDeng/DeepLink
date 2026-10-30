@@ -324,8 +324,14 @@
         "会被一并解散（里面的对话也一起没了，不能恢复）。\n\n确定要删吗？", 10000);
       if (!ok) return false;
       exitSelect();
+      /* 删之前先把还在跑的媒体任务掐掉（10-30）：不掐的话它会在后台继续轮询，
+         最多白等三分钟，最后还想往一条已经没了的会话里写结果。 */
+      try { if (window.DL && DL.cancelMediaJobs) DL.cancelMediaJobs(id); } catch (e) { /* ignore */ }
       Store.deleteSession(id);
-      used.forEach((g) => { try { Store.deleteSession(g.id); } catch (e) { /* 单条失败不影响其它 */ } });
+      used.forEach((g) => {
+        try { if (window.DL && DL.cancelMediaJobs) DL.cancelMediaJobs(g.id); } catch (e) { /* ignore */ }
+        try { Store.deleteSession(g.id); } catch (e) { /* 单条失败不影响其它 */ }
+      });
       reconcileAfterDelete();
       renderAll();
       UI.toast("已删除这条线，并解散了 " + used.length + " 个群聊");
@@ -334,6 +340,7 @@
     const ok = await UI.confirmDialog("删除对话", "删除后无法恢复，确定吗？");
     if (!ok) return false;
     exitSelect();
+    try { if (window.DL && DL.cancelMediaJobs) DL.cancelMediaJobs(id); } catch (e) { /* ignore */ }
     Store.deleteSession(id);
     reconcileAfterDelete();
     return true;

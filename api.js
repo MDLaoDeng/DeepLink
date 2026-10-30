@@ -7,6 +7,9 @@
   let toolsSupported = true;
   /* 有些 OpenAI 兼容端点不认 thinking / reasoning_effort，会直接 400 —— 去掉重试一次并记住 */
   let thinkingSupported = true;
+  /* 「把 reasoning_content 回传」也不是所有端点都收（10-30 加）。
+     DeepSeek 思考模式要求回传，但别的兼容端点可能直接 400 —— 那条路要能退回去。 */
+  let reasoningBackSupported = true;
 
   const SEARCH_TOOL = {
     type: "function",
@@ -153,6 +156,17 @@
       if (res.status === 400 && thinkingSupported && opts.thinking && /thinking|reasoning_effort/i.test(detail)) {
         thinkingSupported = false;
         return streamOnce(settings, messages, opts, cb, signal);
+      }
+      /* 端点不收 reasoning_content：把已回传的那些拆掉重试一次，并记住 */
+      if (res.status === 400 && reasoningBackSupported && /reasoning_content/i.test(detail)) {
+        reasoningBackSupported = false;
+        const stripped = messages.map(function (mm) {
+          if (!mm || typeof mm !== "object" || !("reasoning_content" in mm)) return mm;
+          const copy = Object.assign({}, mm);
+          delete copy.reasoning_content;
+          return copy;
+        });
+        return streamOnce(settings, stripped, opts, cb, signal);
       }
       const err = new Error("请求失败 HTTP " + res.status + (detail ? "：" + sanitizeDetail(detail) : ""));
       err.status = res.status;

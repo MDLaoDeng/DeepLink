@@ -1498,7 +1498,14 @@
       const list = this.getSessions();
       const i = list.findIndex((s) => s.id === id);
       if (i < 0) return null;
-      list[i] = Object.assign({}, list[i], patch, { updatedAt: Date.now() });
+      /* 原地改，不换对象（10-30 修）。
+         以前是 `list[i] = Object.assign({}, list[i], patch, …)` —— 换了一个新对象。
+         而「更新场景 / 更新认知 / 关系日更」这些活要先等网络（5~10 秒），
+         它们手里攥着的是**旧对象**的引用：网络回来往旧对象上写，数组里已经换成新对象，
+         这次写入就落到没人看的孤儿上 —— 表现是「更新成功但没生效」，水位线也没推进，
+         下一轮再花一次钱重跑。
+         原地改之后，任何持有引用的地方（包括正在跑的长任务）看到的都是同一份数据。 */
+      Object.assign(list[i], patch, { updatedAt: Date.now() });
       this.saveSessions(list);
       return list[i];
     },

@@ -1502,35 +1502,6 @@
     });
   }
 
-  /* 长按气泡弹出的操作（10-18 用户要求）：
-     对方的消息 → 重说 / 修改 / 删除；我自己的 → 撤回。 */
-  function openMsgMenu(msg) {
-    var isUser = msg.role === "user";
-    var box = document.createElement("div");
-    box.className = "ph-set";
-    function item(label, fn, danger) {
-      var b = document.createElement("button");
-      b.type = "button";
-      b.className = "btn" + (danger ? "" : " ghost");
-      b.textContent = label;
-      b.style.display = "block";
-      b.style.width = "100%";
-      b.style.marginTop = "8px";
-      b.addEventListener("click", function () { closeSheet(); fn(); });
-      return b;
-    }
-    /* 多选放第一项（10-20：两种消息都能多选，用户消息长按弹的就是这个菜单） */
-    box.appendChild(item("多选（转发 / 合并转发）", function () { enterPick(msg); }));
-    if (isUser) {
-      box.appendChild(item("撤回这条", function () { recallPhoneMsg(msg); }, true));
-    } else {
-      box.appendChild(item("重说（重新生成）", function () { regenPhoneMsg(msg); }));
-      box.appendChild(item("修改这条", function () { editPhoneMsg(msg); }));
-      box.appendChild(item("删除", function () { confirmDeletePhoneMsg(msg); }, true));
-    }
-    openSheet("这条消息", box, closeSheet);
-  }
-
   /* 撤回：不真删，改成一条「已撤回」的占位 ——
      角色要能看见这个动作（msgText 会把原文一并交代），上下文里也留痕。
      10-20 增强（用户口径）：
@@ -1888,7 +1859,7 @@
         signal: null,
         search: null
       }, { onContent: function () {} });
-      var txt = cleanReply((result && result.content) || "");
+      var txt = String((result && result.content) || "").trim();
       var off = splitOffline(txt);
       var body = String(off.offline || txt || "").trim();
       if (!body) return;
@@ -2567,11 +2538,6 @@
     return msgs;
   }
 
-  function cleanReply(t) {
-    var s = String(t || "").trim();
-    return s;
-  }
-
   /* ── 双段式的第二段：挑表情（10-22 用户口径）────────────────────
      第一段只写正文（不显示、也不提表情），这一轮把「刚写的正文 + 他的性格」再喂一次，
      让它从可用清单里挑**一个**最贴的，或者干脆不发。
@@ -2683,12 +2649,12 @@
         onContent: function (t) { acc += t; updateTyping(); }
       });
       hideTyping();
-      var finalText = cleanReply((result && result.content) || acc);
+      var finalText = String((result && result.content) || acc || "").trim();
       /* 注意：这里**不显示流式过程**（上面 onContent 只累加不刷字），
          下面一次性把消息推出去，再让聊天框平滑顶上去。 */
       if (result && result.reasoning && !finalText) {
         var sp = Api.splitReasoning ? Api.splitReasoning("", result.reasoning) : null;
-        if (sp && sp.content) finalText = cleanReply(sp.content);
+        if (sp && sp.content) finalText = String(sp.content || "").trim();
       }
       if (!finalText) finalText = "（对方这次没说话）";
       /* 双线：先把「她此刻线下的样子」那段剥出来，正文照常按手机消息发 */
@@ -3472,7 +3438,7 @@
       var result = await Api.run({ settings: phoneSettings(s), messages: msgs, thinking: false, effort: "low", search: null }, {
         onContent: function () { /* 电话不逐字显示 */ }
       });
-      reply = cleanReply((result && result.content) || "");
+      reply = String((result && result.content) || "").trim();
       if (result && result.usage && typeof recordUsage === "function") recordUsage(sid, result.usage, s.characterId, "phone");
     } catch (e) { /* 电话不回也不致命 */ }
     if (callState !== st) return;
@@ -3710,104 +3676,6 @@
     list.forEach(function (m) {
       box.appendChild(DL.profile.feedRow(m));
     });
-    return;
-
-    /* 旧渲染不再需要：下面这些留着只会让「混合流」和「单人版」两套逻辑打架 */
-  }
-  function renderMomentsLegacy() {
-    var box = $("#phoneMoments");
-    if (!box) return;
-    box.innerHTML = "";
-    var list = Store.getMoments().slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
-    if (!list.length) {
-      var tip = document.createElement("div");
-      tip.className = "phone-tip";
-      tip.textContent = "还没有发过动态。点右上角「+」发一条，然后选给哪几条线看。";
-      box.appendChild(tip);
-      return;
-    }
-    list.forEach(function (m) { box.appendChild(momentEl(m)); });
-  }
-  /* 动态里的图有两种存法：我发的是附件对象（m.image），角色发的是同一套附件对象数组（m.imgs）。
-     统一解成能直接塞进 img.src 的地址；外置成文件后必须过 Store.imageURL 才解得回来。 */
-  function picUrl(x) {
-    if (!x) return "";
-    if (typeof x === "string") return x;
-    return (Store.imageURL ? Store.imageURL(x) : (x.dataUrl || x.url || ""));
-  }
-
-  function momentEl(m) {
-    var isMine = !m.who;
-    var owner = isMine ? null : charById(m.who);
-    var wrap = document.createElement("div");
-    wrap.className = "ph-moment";
-    var head = document.createElement("div");
-    head.className = "ph-moment-head";
-    head.appendChild(avatarEl(isMine
-      ? (state.settings.phoneAvatarUser || state.settings.avatarUser || "")
-      : ((owner && owner.avatar) || ""), isMine ? "user" : "assistant"));
-    var meta = document.createElement("div");
-    meta.className = "ph-moment-meta";
-    var nm = document.createElement("div");
-    nm.className = "ph-moment-name";
-    /* 7.1 起动态有两种来源：我发的（无 who）和角色自己发的（有 who）。
-       以前这里写死「我」和我的头像 —— 角色动态在手机页里长得像自己发的。 */
-    nm.textContent = isMine ? "我" : ((owner && owner.name) || "角色");
-    var tm = document.createElement("div");
-    tm.className = "ph-moment-time";
-    tm.textContent = fmtWhen(m.ts);
-    meta.appendChild(nm); meta.appendChild(tm);
-    head.appendChild(meta);
-    if (isMine) {          /* 别人的动态不给删（微信里也一样） */
-      var del = document.createElement("button");
-      del.className = "ph-moment-del";
-      del.type = "button";
-      del.textContent = "删除";
-      del.addEventListener("click", function () {
-        Store.saveMoments(Store.getMoments().filter(function (x) { return x.id !== m.id; }));
-        renderMoments();
-      });
-      head.appendChild(del);
-    }
-    wrap.appendChild(head);
-    if (m.text) {
-      var t = document.createElement("div");
-      t.className = "ph-moment-text";
-      t.textContent = String(m.text);
-      wrap.appendChild(t);
-    }
-    var pics = (m.imgs && m.imgs.length) ? m.imgs : (m.image ? [m.image] : []);
-    if (pics.length) {
-      var u0 = picUrl(pics[0]);
-      if (u0) {
-        var iw = document.createElement("div");
-        iw.className = "ph-moment-img";
-        var im = document.createElement("img");
-        im.src = u0; im.alt = "";
-        iw.appendChild(im);
-        if (pics.length > 1) {
-          var more = document.createElement("span");
-          more.className = "ph-moment-more";
-          more.textContent = "共 " + pics.length + " 张";
-          iw.appendChild(more);
-        }
-        wrap.appendChild(iw);
-      }
-    }
-    var vis = document.createElement("div");
-    vis.className = "ph-moment-vis";
-    if (!isMine) {
-      vis.textContent = "公开";      /* 角色的动态没有「哪几条线可见」，本来就是全部人可见 */
-    } else {
-      var names = [];
-      (m.lines || []).forEach(function (sid) {
-        var s = sessionById(sid);
-        if (s) names.push(momentLineName(s));
-      });
-      vis.textContent = names.length ? "可见：" + names.join("、") : "（没有可见的线）";
-    }
-    wrap.appendChild(vis);
-    return wrap;
   }
   function fmtWhen(ts) {
     if (!ts) return "";

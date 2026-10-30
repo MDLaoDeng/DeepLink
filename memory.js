@@ -1093,14 +1093,41 @@
     } catch (e) { /* 关系初值失败不影响压缩 */ }
     const cutoff = startOfToday();
     const groups = {};
+    /* 「世界生成」采纳时会把整段剧情 push 成一条消息（ts=此刻），同时按天归档进
+       worldLog。两者内容重复：如果既算那条消息、又算归档，同一天会被写两遍。
+       这里先记下归档的时刻，那条整段消息就跳过，交给按天归档去归位。 */
+    const logAt = (Array.isArray(rec.worldLog) ? rec.worldLog : [])
+      .map((w) => (w && w.at) || 0).filter(Boolean);
+    const coveredByLog = (ts) => {
+      for (let i = 0; i < logAt.length; i++) if (Math.abs(logAt[i] - ts) < 8000) return true;
+      return false;
+    };
     allMsgs(rec).forEach((msg) => {
       const ts = msg.ts || 0;
       /* 有没有被压过、是不是「今天」—— 这两条都按真实时间算（水位线就是 ts 轴）。 */
       if (!ts || ts <= m.coveredUntil || ts >= cutoff) return;
+      /* 这段整剧情已经按天归档了 → 别整段算到今天（否则跨天剧情又全挤成一坨） */
+      if (msg.world && logAt.length && coveredByLog(ts)) return;
       /* 归到哪一天，按故事时间算：开了时间系统后，记忆里的日期要和故事时间轴一致。
          没开时间系统的线 stsOf 直接返回 ts，等于没变。 */
       const d = dateStr(stsOf(rec, msg));
       (groups[d] = groups[d] || []).push(msg);
+    });
+    /* 按天归档的剧情并进对应那一天（10-30 接上）。
+       以前 worldLog 只写不读：注释写着「日更压缩时按当天并入素材」，实际压缩只从
+       messages + phone.msgs 取素材，这份归档从头到尾没人看 —— 跨三天生成的剧情
+       在记忆里仍然全算成「今天」，归档本身只是白占存储。
+       口径：**归到哪一天看故事日期（date），算不算压过看真实时间（at）**，两个轴各管各的。 */
+    (Array.isArray(rec.worldLog) ? rec.worldLog : []).forEach((w) => {
+      if (!w || !w.date || !w.text) return;
+      const at = w.at || 0;
+      if (!at || at <= m.coveredUntil || at >= cutoff) return;
+      const d = String(w.date).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+      (groups[d] = groups[d] || []).push({
+        ts: at, role: "assistant",
+        content: "【当天剧情】" + String(w.text).slice(0, 1200)
+      });
     });
     const dates = Object.keys(groups).sort();
     let usage = null;

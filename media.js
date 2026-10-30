@@ -303,12 +303,34 @@
     return false;
   }
 
-  async function runJob(kind, payload, s) {
+  /* 等一会儿，但能被取消打断（10-30 加）。以前轮询间隔就是个裸 setTimeout，
+     用户在生成中途退出 / 删掉会话，这条链还得老实等满 3 分钟。 */
+  function waitMs(ms, signal) {
+    return new Promise(function (resolve, reject) {
+      if (signal && signal.aborted) { reject(new Error("已取消")); return; }
+      var t = setTimeout(function () {
+        try { if (signal) signal.removeEventListener("abort", onAbort); } catch (e) { /* ignore */ }
+        resolve();
+      }, ms);
+      function onAbort() {
+        clearTimeout(t);
+        try { if (signal) signal.removeEventListener("abort", onAbort); } catch (e) { /* ignore */ }
+        reject(new Error("已取消"));
+      }
+      try { if (signal) signal.addEventListener("abort", onAbort); } catch (e) { /* 老内核不支持就算了 */ }
+    });
+  }
+  function checkAbort(signal) {
+    if (signal && signal.aborted) throw new Error("已取消");
+  }
+
+  async function runJob(kind, payload, s, signal) {
     var label = kind === "video" ? "视频" : "音乐";
     var c = jobCfg(kind, s);
     if (!c.base || !c.key) throw new Error("没配置" + label + "接口地址或密钥");
     if (!c.createPath) throw new Error("没配置" + label + "的创建任务路径");
 
+    checkAbort(signal);
     var res = await fetchTimeout(c.base + c.createPath, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + c.key },
@@ -329,7 +351,8 @@
 
     var url = c.statusPath.replace("{id}", encodeURIComponent(String(taskId)));
     for (var i = 0; i < c.pollMax; i++) {
-      await new Promise(function (r) { setTimeout(r, c.pollMs); });
+      await waitMs(c.pollMs, signal);
+      checkAbort(signal);
       var r2 = await fetchTimeout(c.base + url, { method: "GET", headers: { "Authorization": "Bearer " + c.key } }, 60000);
       if (!r2.ok) {
         /* 202 = 还在排队，正常；404 以前也被当成「还没好」继续等，
@@ -355,7 +378,7 @@
     throw new Error("等了 " + c.pollMax + " 次还没好（可调大轮询次数，或等服务端出结果）");
   }
 
-  async function makeVideo(prompt, s) {
+  async function makeVideo(prompt, s, signal) {
     var st = s || {};
     var payload = {
       model: jobCfg("video", st).model,
@@ -373,10 +396,10 @@
         payload = JSON.parse(tpl.replace(/\{\{prompt\}\}/g, String(payload.prompt).replace(/["\\]/g, "\\$&")));
       } catch (e) { /* 模板写错就用默认拼装，不要因此整条链路失败 */ }
     }
-    return runJob("video", payload, st);
+    return runJob("video", payload, st, signal);
   }
 
-  async function makeMusic(prompt, s) {
+  async function makeMusic(prompt, s, signal) {
     var st = s || {};
     var payload = {
       model: jobCfg("music", st).model,
@@ -391,7 +414,7 @@
         payload = JSON.parse(tpl.replace(/\{\{prompt\}\}/g, String(payload.prompt).replace(/["\\]/g, "\\$&")));
       } catch (e) { /* 同上 */ }
     }
-    return runJob("music", payload, st);
+    return runJob("music", payload, st, signal);
   }
 
   /* ── 文档导出：把一条会话整理成 Markdown + HTML，用原生桥写进文件 ──
