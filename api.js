@@ -5,11 +5,17 @@
   let streamUsageSupported = true;
   /* 端点认不认 tools：一旦某个 400 明确说是工具的问题，就不再带工具了（只在本进程内记忆） */
   let toolsSupported = true;
-  /* 有些 OpenAI 兼容端点不认 thinking / reasoning_effort，会直接 400 —— 去掉重试一次并记住 */
-  let thinkingSupported = true;
-  /* 「把 reasoning_content 回传」也不是所有端点都收（10-30 加）。
-     DeepSeek 思考模式要求回传，但别的兼容端点可能直接 400 —— 那条路要能退回去。 */
-  let reasoningBackSupported = true;
+  /* 端点能力标记按**端点**记，不是一个全局布尔（10-30 审查修）。
+     以前是这样：某个端点回了一次 400，就永久把开关关掉 —— 用户换回 DeepSeek 之后
+     ① 思考开不了；② 更糟：思考模式下不再回传 reasoning_content，
+     重说又会撞回那个 400（「must be passed back to the API」）。
+     按 baseUrl + model 记，换端点就等于重新试一次。 */
+  function epKey(settings) {
+    return String((settings && settings.baseUrl) || "") + "|" + String((settings && settings.model) || "");
+  }
+  const thinkingOff = {};      /* 端点 → 不收 thinking / reasoning_effort */
+  const reasoningBackOff = {}; /* 端点 → 不收 reasoning_content */
+
 
   const SEARCH_TOOL = {
     type: "function",
@@ -52,7 +58,7 @@
     if (typeof settings.temperature === "number") body.temperature = settings.temperature;
     if (typeof settings.topP === "number") body.top_p = settings.topP;
 
-    if (thinkingSupported) {
+    if (!thinkingOff[epKey(settings)]) {
       if (opts.thinking) {
         body.thinking = { type: "enabled" };
         body.reasoning_effort = opts.effort || "high";
@@ -144,7 +150,7 @@
         return streamOnce(settings, messages, opts, cb, signal);
       }
       /* 有些 OpenAI 兼容端点不认 thinking / reasoning_effort，也会直接 400 ——
-         去掉它重试一次，并记住（thinkingSupported），免得后续每次请求都先失败一遍。 */
+         去掉它重试一次，并按端点记住（thinkingOff），免得后续每次请求都先失败一遍。 */
       /* 端点不认 tools / tool_choice（老模型、部分国内中转）也会 400。
          去掉工具重试一次并记下来 —— 否则「让角色读自己的线」这个默认开关
          会直接让所有对话发不出去。 */
@@ -153,13 +159,14 @@
         toolsSupported = false;
         return streamOnce(settings, messages, Object.assign({}, opts, { tools: [] }), cb, signal);
       }
-      if (res.status === 400 && thinkingSupported && opts.thinking && /thinking|reasoning_effort/i.test(detail)) {
-        thinkingSupported = false;
+      if (res.status === 400 && !thinkingOff[epKey(settings)] && opts.thinking &&
+          /thinking|reasoning_effort/i.test(detail)) {
+        thinkingOff[epKey(settings)] = true;
         return streamOnce(settings, messages, opts, cb, signal);
       }
       /* 端点不收 reasoning_content：把已回传的那些拆掉重试一次，并记住 */
-      if (res.status === 400 && reasoningBackSupported && /reasoning_content/i.test(detail)) {
-        reasoningBackSupported = false;
+      if (res.status === 400 && !reasoningBackOff[epKey(settings)] && /reasoning_content/i.test(detail)) {
+        reasoningBackOff[epKey(settings)] = true;
         const stripped = messages.map(function (mm) {
           if (!mm || typeof mm !== "object" || !("reasoning_content" in mm)) return mm;
           const copy = Object.assign({}, mm);
