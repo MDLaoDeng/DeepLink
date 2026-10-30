@@ -134,6 +134,7 @@
 
   /* 读失败（localStorage 抛异常）时置真：此时绝不允许覆盖写入，否则会把用户历史洗掉 */
   let readError = false;
+  let legacyWriteDone = false;   /* 设置迁移本机只排一次延迟落盘 */
   /* 解析结果内存缓存：避免每次 getSessions 都重新 JSON.parse 全量（对话多时会卡）。
      （角色卡的内存明文缓存是 charsPlain，见下面「角色卡加密」段） */
   let sessionsCache = null;
@@ -945,10 +946,16 @@
       merged.modelSetIndex = norm.index;
       if (fromDisk && !skipLegacy) {
         merged.modelSetsV = 1;
-        /* 立刻落盘一次，别让「迁移结果只在内存里」—— 否则下次启动又会重算一遍。
-           只在这一次、且读盘正常时才写。 */
-        if (!readError) {
-          try { writeRaw(K_SETTINGS, JSON.stringify(merged)); } catch (e) { /* 写不进去也不影响本次使用 */ }
+        /* 标记只在内存里先打上，落盘挪到首帧之后（10-30 审查改）。
+           冷启动本来就在解密角色卡、迁移图片，这里再同步全量写一次设置，
+           正好压在最忙的时候。迁移只填「空着的那几项」，重跑也无害 ——
+           所以万一这次没写成功，下次启动重算一遍，不会坏数据。 */
+        if (!readError && !legacyWriteDone) {
+          legacyWriteDone = true;
+          setTimeout(function () {
+            try { writeRaw(K_SETTINGS, JSON.stringify(Store.getSettings())); }
+            catch (e) { /* 写不进去下次再说 */ }
+          }, 1500);
         }
       }
       return merged;

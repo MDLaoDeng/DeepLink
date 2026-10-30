@@ -915,51 +915,57 @@
     });
   }
 
+  /* 正在判定世界观的锁（10-30 审查加）：判定要 1~3 秒，这期间用户再点一次
+     「新建联系人 → 确定」会建出两个同名联系人、两条线。 */
+  var contactBusy = false;
+
+  /* 真正落库的地方：成功路径和「判定失败回落」共用这一份，
+     免得以后加字段（比如 tags）时改一处漏一处。 */
+  function doCreatePhoneContact(name, blurb, world) {
+    var now = Date.now();
+    var w = (PHONE_WORLDS.indexOf(world) >= 0) ? world : "现代";
+    var ch = {
+      id: "c_" + now.toString(36) + Math.random().toString(36).slice(2, 6),
+      name: name, avatar: "", fields: { aiName: name },
+      blurb: blurb || "",
+      phoneWorld: w,
+      ctxFilter: { rule: "", every: 10 }, usage: null, pinned: false, phoneOnly: true,
+      createdAt: now, updatedAt: now
+    };
+    var list = Store.getCharacters();
+    list.push(ch);
+    if (Store.saveCharacters(list) === false) { toast("写入失败（存储只读或被锁定）", true); return false; }
+    var s = Store.createSession(ch.id, true);   /* true = 别顶掉当前主对话 */
+    if (s && s.id) Store.updateSession(s.id, { phoneOnly: true, title: name, phoneWorld: w });
+    goList();
+    toast("已建联系人「" + name + "」（" + w + "）");
+    if (s && s.id) openChat(s.id);
+    return true;
+  }
+
   function createPhoneContact(name, blurb, world) {
+    if (contactBusy) { toast("上一个还在判断世界观，等它一下", true); return; }
     var st = Store.getSettings() || {};
     var useAi = !!(blurb && st.apiKey);
-    var judge = useAi ? judgePhoneWorld(name, blurb) : Promise.resolve("");
-    judge.then(function (verdict) {
+    if (!useAi) { doCreatePhoneContact(name, blurb, world); return; }
+    contactBusy = true;
+    toast("正在判断世界观…");
+    var pj;
+    try { pj = judgePhoneWorld(name, blurb); }
+    catch (e) { contactBusy = false; doCreatePhoneContact(name, blurb, world); return; }
+    pj.then(function (verdict) {
+      contactBusy = false;
       if (verdict === "其他") {
         toast("这个设定不属于现代 / 未来（手机角色装不进去），去「现实扮演角色」建吧", true);
         return;
       }
-      var now = Date.now();
-      var w = (verdict && verdict !== "其他") ? verdict : (PHONE_WORLDS.indexOf(world) >= 0 ? world : "现代");
-      var ch = {
-        id: "c_" + now.toString(36) + Math.random().toString(36).slice(2, 6),
-        name: name, avatar: "", fields: { aiName: name },
-        blurb: blurb || "",
-        phoneWorld: w,
-        ctxFilter: { rule: "", every: 10 }, usage: null, pinned: false, phoneOnly: true,
-        createdAt: now, updatedAt: now
-      };
-      var list = Store.getCharacters();
-      list.push(ch);
-      if (Store.saveCharacters(list) === false) { toast("写入失败（存储只读或被锁定）", true); return; }
-      var s = Store.createSession(ch.id, true);   /* true = 别顶掉当前主对话 */
-      if (s && s.id) Store.updateSession(s.id, { phoneOnly: true, title: name, phoneWorld: w });
-      goList();
-      toast("已建联系人「" + name + "」（" + w + "）");
-      if (s && s.id) openChat(s.id);
+      doCreatePhoneContact(name, blurb, verdict || world);
     }, function (e) {
       /* 判定请求失败不该把人挡在门外：回落到用户自己选的那个 */
-      var now = Date.now();
-      var w = PHONE_WORLDS.indexOf(world) >= 0 ? world : "现代";
-      var ch = {
-        id: "c_" + now.toString(36) + Math.random().toString(36).slice(2, 6),
-        name: name, avatar: "", fields: { aiName: name }, blurb: blurb || "", phoneWorld: w,
-        ctxFilter: { rule: "", every: 10 }, usage: null, pinned: false, phoneOnly: true,
-        createdAt: now, updatedAt: now
-      };
-      var list = Store.getCharacters();
-      list.push(ch);
-      if (Store.saveCharacters(list) === false) { toast("写入失败（存储只读或被锁定）", true); return; }
-      var s2 = Store.createSession(ch.id, true);
-      if (s2 && s2.id) Store.updateSession(s2.id, { phoneOnly: true, title: name, phoneWorld: w });
-      goList();
-      toast("世界观判断失败（" + (e && e.message ? e.message : "网络") + "），先按「" + w + "」建了", true);
-      if (s2 && s2.id) openChat(s2.id);
+      contactBusy = false;
+      toast("世界观判断失败（" + (e && e.message ? e.message : "网络") + "），先按「" +
+        ((PHONE_WORLDS.indexOf(world) >= 0) ? world : "现代") + "」建了", true);
+      doCreatePhoneContact(name, blurb, world);
     });
   }
 
