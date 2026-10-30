@@ -3228,6 +3228,9 @@ body.no-image .ph-moment-img img { display: none; }
 .pf-fh-count { flex: none; margin-left: 8px; font-size: var(--fs-caption); font-weight: 400; color: var(--text-mute); }
 .pf-fh-arrow { flex: none; margin-left: 8px; font-size: 11px; color: var(--text-mute); }
 .pf-forest-kids { padding-left: 4px; animation: tree-in 160ms cubic-bezier(.22, 1, .36, 1); }
+.pf-forest-kids.closing, .pf-forest-vk.closing {
+  animation: tree-out 130ms ease-in forwards; pointer-events: none;
+}
 .pf-forest-vk { padding-left: 12px; animation: tree-in 160ms cubic-bezier(.22, 1, .36, 1); }
 .pf-lines .check-field { padding-left: 24px; }
 .pf-lines .check-field .s-badge { margin-left: auto; }

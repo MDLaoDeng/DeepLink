@@ -802,8 +802,22 @@
       var ar = el("span", "pf-fh-arrow", anyChecked ? "▾" : "▸");
       h.appendChild(ar);
       h.addEventListener("click", function () {
-        kids.hidden = !kids.hidden;
-        ar.textContent = kids.hidden ? "▸" : "▾";
+        if (kids.hidden) {
+          kids.hidden = false;
+          ar.textContent = "▾";
+          return;
+        }
+        /* 收起也走动画（10-30）：树那边是 130ms 退场再重建，这里同一个时长、同一套关键帧。
+           连点时先看有没有正在收，别叠两次定时器。 */
+        if (kids.__closing) return;
+        kids.__closing = true;
+        kids.classList.add("closing");
+        ar.textContent = "▸";
+        setTimeout(function () {
+          kids.classList.remove("closing");
+          kids.hidden = true;
+          kids.__closing = false;
+        }, 130);
       });
       box.appendChild(h);
       box.appendChild(kids);
@@ -827,8 +841,20 @@
         var va = el("span", "pf-fh-arrow", vChecked ? "▾" : "▸");
         vh.appendChild(va);
         vh.addEventListener("click", function () {
-          vk.hidden = !vk.hidden;
-          va.textContent = vk.hidden ? "▸" : "▾";
+          if (vk.hidden) {
+            vk.hidden = false;
+            va.textContent = "▾";
+            return;
+          }
+          if (vk.__closing) return;
+          vk.__closing = true;
+          vk.classList.add("closing");
+          va.textContent = "▸";
+          setTimeout(function () {
+            vk.classList.remove("closing");
+            vk.hidden = true;
+            vk.__closing = false;
+          }, 130);
         });
         kids.appendChild(vh);
         kids.appendChild(vk);
