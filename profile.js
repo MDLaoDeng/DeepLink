@@ -1304,6 +1304,11 @@
        · 已经互相是好友（有过 accepted 记录）的不重复申请。 */
   var OUTGOING = ["开朗", "热络", "健谈", "主动", "热情", "话多", "外向", "自来熟", "活泼"];
   function maybeGroupFriending(sid) {
+    /* 开关（10-30）：设置 → 高级功能里可关。默认开，关掉就完全不生成申请。 */
+    try {
+      var st0 = (D().state || {}).settings || {};
+      if (st0.friendAuto === false) return 0;
+    } catch (e) { /* 读不到设置就按开的处理 */ }
     var g = null;
     (S().getSessions() || []).forEach(function (x) { if (x.id === sid) g = x; });
     if (!g || !g.isGroup) return 0;

@@ -1,6 +1,6 @@
 /* 自动生成，不要手改 —— 改 index.html 后跑 `node check.js --gen`。
  *
- * 这份清单是「启动时必须存在的元素」的快照（共 718 项）。
+ * 这份清单是「启动时必须存在的元素」的快照（共 719 项）。
  * app.js 的 REQUIRED_IDS 优先读它，读不到才退回旧的硬编码列表。
  * 它只记录 index.html 里的静态 id；由 JS 动态创建的元素（#profileLayer、#cf_world 这类）
  * 本来就不该出现在这里。 */
@@ -68,34 +68,34 @@
   "setAssistantCompress", "setAutoMessage", "setAutoMessageMin", "setAutoMessagePhone", "setAvatarAiClear", "setAvatarAiPick", "setAvatarAiPreview", "setAvatarUserClear",
   "setAvatarUserPick", "setAvatarUserPreview", "setBgAi", "setBgBlur", "setBgBlurVal", "setBgBright", "setBgBrightVal", "setBgClear",
   "setBgKeep", "setBgPick", "setBgPreview", "setCharMoment", "setCompressModel", "setCustomKey", "setCustomUrl", "setDailyUpdate",
-  "setDriftGoal", "setDriftPlanBtn", "setDriftReset", "setDriftRow", "setDriftState", "setDriftToggle", "setEventBook", "setGroupWarn",
-  "setImgEnabled", "setImgExpireTurns", "setImgSize", "setImgToImg", "setImgToText", "setInstances", "setLive2dEnabled", "setLive2dModel",
-  "setLockChange", "setLockCode", "setLockEnabled", "setLockNote", "setLockState", "setMainCompat", "setMemoryList", "setMomentImg",
-  "setMusicBaseUrl", "setMusicCreatePath", "setMusicDuration", "setMusicEnabled", "setMusicFormat", "setMusicKey", "setMusicModel", "setMusicPollMax",
-  "setMusicPollMs", "setMusicResultField", "setMusicStatusPath", "setMusicTemplate", "setMusicWithLyrics", "setMyAppearance", "setMyBackground", "setMyLikes",
-  "setMyName", "setMyPersona", "setNoImage", "setNotifyTasks", "setPeerCogOn", "setPhoneAvUserAi", "setPhoneAvUserClear", "setPhoneAvUserPick",
-  "setPhoneAvUserPreview", "setPhoneBgBlur", "setPhoneBgBlurVal", "setPhoneBgBright", "setPhoneBgBrightVal", "setPhoneBgClear", "setPhoneBgPick", "setPhoneBgPreview",
-  "setPhoneShareImg", "setPhoneWarn", "setReasonLock", "setRoleplayEnabled", "setSearchProvider", "setSessionAge", "setSessionAlias", "setSessionAutoBackup",
-  "setSessionAutoFreeze", "setSessionAutoMsg", "setSessionAvatarAiClear", "setSessionAvatarAiPick", "setSessionAvatarAiPreview", "setSessionAvatarUserClear", "setSessionAvatarUserPick", "setSessionAvatarUserPreview",
-  "setSessionBgAi", "setSessionBgClear", "setSessionBgFollow", "setSessionBgPick", "setSessionBgPreview", "setSessionCognition", "setSessionDiary", "setSessionFollow",
-  "setSessionFormat", "setSessionLinkBtn", "setSessionLinkPick", "setSessionLinkRow", "setSessionLinkState", "setSessionMyGender", "setSessionPrompt", "setSessionReason",
-  "setSessionRelation", "setSessionScene", "setSessionSceneEvery", "setSessionShared", "setSessionSharedReset", "setSessionStatusCards", "setSessionStatusQuant", "setSessionTempVal",
-  "setSessionTemperature", "setSessionTime", "setSessionTimeSync", "setSessionTitle", "setSessionTopP", "setSessionTopPVal", "setSessionTtsVoice", "setSessionUnlinkBtn",
-  "setSplashAnim", "setSplashAvatar", "setSplashImage", "setSplashSub", "setSplashText", "setSpreadNow", "setSpreadRow", "setSpreadState",
-  "setStatusCards", "setStatusQuant", "setSystemPrompt", "setTavilyKey", "setTempVal", "setTemperature", "setThinkAbout", "setTokenWarn",
-  "setToolUse", "setTopP", "setTopPVal", "setTtsAuto", "setTtsEnabled", "setTtsVoice", "setUsagePriceHit", "setUsagePriceIn",
-  "setUsagePriceMode", "setUsagePriceOut", "setVideoBaseUrl", "setVideoCreatePath", "setVideoDuration", "setVideoEnabled", "setVideoFps", "setVideoKey",
-  "setVideoMode", "setVideoModel", "setVideoPollMax", "setVideoPollMs", "setVideoRatio", "setVideoResultField", "setVideoSize", "setVideoStatusPath",
-  "setVideoTemplate", "setVisionEnabled", "setWorldGen", "settingsBack", "settingsBody", "settingsFoot", "settingsHome", "settingsModal",
-  "settingsTitle", "siCancel", "siCount", "siGrid", "siOk", "sidePaneAsst", "sidePanePhone", "sidePaneRole",
-  "sideTabAsstFace", "sideTabs", "sidebar", "splash", "splashCredit", "splashPreview", "splashPreviewBtn", "splashStage",
-  "splashW1", "splashW2", "stickerAddBtn", "stickerGrid", "stickerImport", "stickerInput", "stopBtn", "storageBars",
-  "storageSum", "studioAsk", "studioAskInput", "studioAskQ", "studioBody", "studioCancel", "studioCost", "studioGo",
-  "studioHint", "studioModal", "studioTitle", "tavilyField", "themeGrid", "themeModal", "thinkToggle", "toasts",
-  "updateCheckBtn", "updateState", "upgradeCancel", "upgradeMeet", "upgradeModal", "upgradeOk", "usageCats", "usageChars",
-  "usageGlobal", "usageModal", "usageSessions", "worldAdopt", "worldCopyBtn", "worldCount", "worldDelBtn", "worldEditBox",
-  "worldList", "worldModal", "worldName", "worldNewBtn", "worldPanel", "worldPanelBtn", "worldPick", "worldRegen",
-  "worldSearch", "worldSkip", "worldText", "worldView", "worldViewBack", "worldViewBody"
+  "setDriftGoal", "setDriftPlanBtn", "setDriftReset", "setDriftRow", "setDriftState", "setDriftToggle", "setEventBook", "setFriendAuto",
+  "setGroupWarn", "setImgEnabled", "setImgExpireTurns", "setImgSize", "setImgToImg", "setImgToText", "setInstances", "setLive2dEnabled",
+  "setLive2dModel", "setLockChange", "setLockCode", "setLockEnabled", "setLockNote", "setLockState", "setMainCompat", "setMemoryList",
+  "setMomentImg", "setMusicBaseUrl", "setMusicCreatePath", "setMusicDuration", "setMusicEnabled", "setMusicFormat", "setMusicKey", "setMusicModel",
+  "setMusicPollMax", "setMusicPollMs", "setMusicResultField", "setMusicStatusPath", "setMusicTemplate", "setMusicWithLyrics", "setMyAppearance", "setMyBackground",
+  "setMyLikes", "setMyName", "setMyPersona", "setNoImage", "setNotifyTasks", "setPeerCogOn", "setPhoneAvUserAi", "setPhoneAvUserClear",
+  "setPhoneAvUserPick", "setPhoneAvUserPreview", "setPhoneBgBlur", "setPhoneBgBlurVal", "setPhoneBgBright", "setPhoneBgBrightVal", "setPhoneBgClear", "setPhoneBgPick",
+  "setPhoneBgPreview", "setPhoneShareImg", "setPhoneWarn", "setReasonLock", "setRoleplayEnabled", "setSearchProvider", "setSessionAge", "setSessionAlias",
+  "setSessionAutoBackup", "setSessionAutoFreeze", "setSessionAutoMsg", "setSessionAvatarAiClear", "setSessionAvatarAiPick", "setSessionAvatarAiPreview", "setSessionAvatarUserClear", "setSessionAvatarUserPick",
+  "setSessionAvatarUserPreview", "setSessionBgAi", "setSessionBgClear", "setSessionBgFollow", "setSessionBgPick", "setSessionBgPreview", "setSessionCognition", "setSessionDiary",
+  "setSessionFollow", "setSessionFormat", "setSessionLinkBtn", "setSessionLinkPick", "setSessionLinkRow", "setSessionLinkState", "setSessionMyGender", "setSessionPrompt",
+  "setSessionReason", "setSessionRelation", "setSessionScene", "setSessionSceneEvery", "setSessionShared", "setSessionSharedReset", "setSessionStatusCards", "setSessionStatusQuant",
+  "setSessionTempVal", "setSessionTemperature", "setSessionTime", "setSessionTimeSync", "setSessionTitle", "setSessionTopP", "setSessionTopPVal", "setSessionTtsVoice",
+  "setSessionUnlinkBtn", "setSplashAnim", "setSplashAvatar", "setSplashImage", "setSplashSub", "setSplashText", "setSpreadNow", "setSpreadRow",
+  "setSpreadState", "setStatusCards", "setStatusQuant", "setSystemPrompt", "setTavilyKey", "setTempVal", "setTemperature", "setThinkAbout",
+  "setTokenWarn", "setToolUse", "setTopP", "setTopPVal", "setTtsAuto", "setTtsEnabled", "setTtsVoice", "setUsagePriceHit",
+  "setUsagePriceIn", "setUsagePriceMode", "setUsagePriceOut", "setVideoBaseUrl", "setVideoCreatePath", "setVideoDuration", "setVideoEnabled", "setVideoFps",
+  "setVideoKey", "setVideoMode", "setVideoModel", "setVideoPollMax", "setVideoPollMs", "setVideoRatio", "setVideoResultField", "setVideoSize",
+  "setVideoStatusPath", "setVideoTemplate", "setVisionEnabled", "setWorldGen", "settingsBack", "settingsBody", "settingsFoot", "settingsHome",
+  "settingsModal", "settingsTitle", "siCancel", "siCount", "siGrid", "siOk", "sidePaneAsst", "sidePanePhone",
+  "sidePaneRole", "sideTabAsstFace", "sideTabs", "sidebar", "splash", "splashCredit", "splashPreview", "splashPreviewBtn",
+  "splashStage", "splashW1", "splashW2", "stickerAddBtn", "stickerGrid", "stickerImport", "stickerInput", "stopBtn",
+  "storageBars", "storageSum", "studioAsk", "studioAskInput", "studioAskQ", "studioBody", "studioCancel", "studioCost",
+  "studioGo", "studioHint", "studioModal", "studioTitle", "tavilyField", "themeGrid", "themeModal", "thinkToggle",
+  "toasts", "updateCheckBtn", "updateState", "upgradeCancel", "upgradeMeet", "upgradeModal", "upgradeOk", "usageCats",
+  "usageChars", "usageGlobal", "usageModal", "usageSessions", "worldAdopt", "worldCopyBtn", "worldCount", "worldDelBtn",
+  "worldEditBox", "worldList", "worldModal", "worldName", "worldNewBtn", "worldPanel", "worldPanelBtn", "worldPick",
+  "worldRegen", "worldSearch", "worldSkip", "worldText", "worldView", "worldViewBack", "worldViewBody"
   ];
   if (typeof window !== "undefined") window.DL_REQUIRED_IDS = L;
   if (typeof module !== "undefined") module.exports = { DL_REQUIRED_IDS: L };

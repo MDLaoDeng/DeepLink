@@ -1212,6 +1212,12 @@ body[data-mode="dark"] .ph-nf-badge { background-color: #C2415A; }
 .field { display: flex; flex-direction: column; margin-bottom: 14px; }
 .field > *:not(:last-child) { margin-bottom: 6px; }
 .field > span { font-size: var(--fs-body); color: var(--text-dim); }
+/* 「跟随上层」这种继承态用一个小标记表达（10-30）：比在每栏后面写一句「留空则…」干净 */
+.field > span .inh {
+  margin-left: 6px; padding: 0 5px; border-radius: var(--r-sm);
+  font-style: normal; font-size: var(--fs-caption);
+  color: var(--text-mute); background-color: var(--panel-2);
+}
 .field small { font-size: var(--fs-caption); color: var(--text-mute); }
 /* 年月日三格手填（出生日期）。两条竖线分隔，不弹滚轮面板 ——
    用户口径：滚轮太慢，直接填三个数字更快。 */

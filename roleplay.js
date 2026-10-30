@@ -473,7 +473,31 @@
     /* 纯手机角色不进这一栏：它们只活在手机里，入口在侧栏「手机角色」那一栏。
        以前这里不过滤 → 点它会在主对话里打开那条 phoneOnly 的线，
        等于把「只活在手机里」这条设计从后门破掉了。 */
-    allChars.filter((c) => !c.phoneOnly && c.id !== TING).slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).forEach((c) => bar.appendChild(chip(c.id, c.name || "角色", c.avatar || "", aid === c.id)));
+    /* 异世界副本（altOf 指向原角色）默认折叠（10-30）：每换一个世界观就复制一份角色，
+       玩一阵子列表里全是「沈砚·修仙」「沈砚·西幻」，原角色被挤到看不见。
+       默认只显示原角色，底部给一个入口把副本展开/收起。 */
+    const showAlt = !!state.showAltChars;
+    const pool = allChars.filter((c) => !c.phoneOnly && c.id !== TING);
+    const alts = pool.filter((c) => !!c.altOf);
+    pool.filter((c) => showAlt || !c.altOf)
+      .slice()
+      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
+      .forEach((c) => bar.appendChild(chip(c.id, c.name || "角色", c.avatar || "", aid === c.id)));
+    if (alts.length) {
+      const fold = document.createElement("button");
+      fold.type = "button";
+      fold.className = "char-chip";
+      fold.style.opacity = ".72";
+      const fv = document.createElement("span");
+      fv.className = "c-av";
+      fv.innerHTML = UI.iconSvg("account");
+      const fn = document.createElement("span");
+      fn.className = "c-nm";
+      fn.textContent = showAlt ? "收起副本（" + alts.length + "）" : "异世界副本 " + alts.length;
+      fold.appendChild(fv); fold.appendChild(fn);
+      fold.addEventListener("click", () => { state.showAltChars = !showAlt; renderCharBar(); });
+      bar.appendChild(fold);
+    }
     const add = document.createElement("button");
     add.type = "button";
     add.className = "char-chip add";

@@ -634,6 +634,7 @@
         <label class="check-field"><input type="checkbox" id="setToolUse"><span>让角色按需读取这条线自己的资料（工具调用：记忆摘要 / 思绪 / 图库 / 旧对话检索。默认开；模型不支持时会自动退回普通回答，每次多读一次就要多一轮请求）</span></label>
         <label class="check-field"><input type="checkbox" id="setWorldGen"><span>世界生成：久未上线后生成三段剧情解释角色这段时间做了什么（可关）</span></label>
         <label class="check-field"><input type="checkbox" id="setEventBook"><span>事件簿：汇总各条世界线在故事时间里发生过什么（可关；关掉后不再记事件、也不显示入口，省 token）</span></label>
+        <label class="check-field"><input type="checkbox" id="setFriendAuto"><span>群里的人互相加好友：建群时按性格生成好友申请（默认开。同一对人只保留一条，每个群每天最多 3 条）</span></label>
         <label class="check-field"><input type="checkbox" id="setStatusQuant"><span>附带卡片：气泡下方显示一组自定义数值（可关）</span></label>
         <label class="field"><span>附带卡片的项目（每行一个名字，最多 20 项）</span><textarea id="setStatusCards" rows="3" placeholder="例：&#10;冷静值&#10;开心值&#10;信任值"></textarea>
           <p class="hint">只填<b>项目名字</b>，别写数值、阈值或说明 —— 数值是 AI 每条回复自己给的（0~100 的整数）。
@@ -839,10 +840,10 @@
       <button class="icon-btn" data-close="sessionModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
     </div>
     <div class="modal-body">
-      <p class="hint">只影响这条对话，不写回角色卡。</p>
+      <p class="hint">只影响这条对话，不写回角色卡。<b>没填的项都跟着上层走</b>（本对话 → 本角色 → 全局），填了就以这里为准。</p>
       <label class="field">
         <span>对话名称</span>
-        <input id="setSessionTitle" type="text" placeholder="留空则自动命名">
+        <input id="setSessionTitle" type="text" placeholder="跟着上层：自动命名">
       </label>
       <label class="field">
         <span>当前对话称呼</span>
@@ -850,12 +851,12 @@
       </label>
       <label class="field">
         <span>本对话的系统提示词</span>
-        <textarea id="setSessionPrompt" rows="6" placeholder="留空＝用全局提示词"></textarea>
+        <textarea id="setSessionPrompt" rows="6" placeholder="跟着上层：全局提示词"></textarea>
       </label>
       <div id="sessionRoleWrap" class="settings-section">
         <h3>角色扮演 · 本对话 <span id="sessionLineBadge" class="pill">主线</span></h3>
         <label class="field"><span>本线年龄</span><input id="setSessionAge" type="text" inputmode="numeric" placeholder="跟角色卡；也会随故事时间增长"></label>
-        <label class="field"><span>本线「我的性别」（留空跟随角色卡 / 全局人设）</span><input id="setSessionMyGender" type="text" placeholder="男 / 女 / 其他（其他可自填）"></label>
+        <label class="field"><span>本线「我的性别」<i class="inh">跟随上层</i></span><input id="setSessionMyGender" type="text" placeholder="男 / 女 / 其他（其他可自填）"></label>
         <label class="field"><span>当前关系（本对话专属，随记忆自动更新）</span><textarea id="setSessionRelation" rows="2" placeholder="此刻两人的关系状态…"></textarea></label>
         <label class="field"><span>共同经历（只写这段对话开始之前的事）</span><textarea id="setSessionShared" rows="4" placeholder="开局之前两人共同经历过什么…（聊天之后发生的事不用写这里，那些属于记忆）"></textarea>
           <button id="setSessionSharedReset" class="btn ghost sm" type="button">按角色卡重置这一项（清掉旧版混进来的对话内容）</button>
@@ -976,7 +977,7 @@
 
         <div class="mem-title">附带卡片</div>
         <label class="check-field"><input type="checkbox" id="setSessionStatusQuant"><span>在本对话显示附带卡片（气泡下方折叠着）</span></label>
-        <label class="field"><span>本线的卡片项目（每行一个名字；留空跟随角色 / 全局）</span><textarea id="setSessionStatusCards" rows="3" placeholder="留空：按「角色 → 全局」的顺序取第一个填了的"></textarea></label>
+        <label class="field"><span>本线的卡片项目（每行一个名字）<i class="inh">跟随上层</i></span><textarea id="setSessionStatusCards" rows="3" placeholder="跟着上层：本对话 → 角色 → 全局"></textarea></label>
 
         <div class="mem-title">情绪日记</div>
         <label class="field"><span>写给自己看的一两句（写下后角色会朝这个方向靠；不写就不生效）</span><textarea id="setSessionDiary" rows="3" placeholder="例：最近有点累，希望他别太闹。"></textarea></label>
@@ -989,7 +990,7 @@
       </div>
       <div class="settings-section" data-group="basic">
         <h3>头像</h3>
-        <p class="hint">留空则跟随「设置」里的全局头像。</p>
+        <p class="hint">没选就是跟随「设置」里的全局头像。</p>
         <div class="field">
           <span>我的头像</span>
           <div class="avatar-field">

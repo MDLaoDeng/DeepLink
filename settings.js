@@ -1466,6 +1466,7 @@
     setChecked("#setToolUse", s.toolUse !== false);
     setChecked("#setWorldGen", s.worldGen !== false);
     setChecked("#setEventBook", s.eventBook !== false);
+    setChecked("#setFriendAuto", s.friendAuto !== false);
     setChecked("#setStatusQuant", s.statusQuant !== false);
     setVal("#setStatusCards", cardNamesText(s.statusCards));
     setChecked("#setAutoMessage", !!s.autoMessage);
@@ -2008,6 +2009,7 @@
       toolUse: checkedOf("#setToolUse"),
       worldGen: checkedOf("#setWorldGen"),
       eventBook: checkedOf("#setEventBook"),
+      friendAuto: checkedOf("#setFriendAuto"),
       statusQuant: checkedOf("#setStatusQuant"),
       /* 附带卡片的项目名（全局这一层）。空数组 = 没配 = 不显示卡片 */
       statusCards: parseCardLines($v("#setStatusCards")),
