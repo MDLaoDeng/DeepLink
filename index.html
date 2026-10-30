@@ -443,7 +443,7 @@
               <button class="btn ghost" id="setPhoneAvUserClear" type="button">清除</button>
             </div>
           </div>
-          <p class="hint">留空就沿用上面那张「我的头像」。手机页里「我」的气泡用这一张。</p>
+          <p class="hint">不填＝沿用上面「我的头像」；手机页里「我」的气泡用这一张。</p>
         </div>
       </div>
 
@@ -505,7 +505,7 @@
           <button class="btn ghost mini" data-add="asr" type="button"><span data-icon="plus"></span>添加配置</button>
         </div>
         <label class="field"><span>语言提示（可选）</span><input id="setAsrLang" type="text" placeholder="zh"></label>
-        <p class="hint">接口地址 / API Key 留空则沿用主模型那套配置；模型名留空则直接嫁接到主模型（仅当主模型自己就具备转写能力时才这么用）。本区最多 6 套配置。</p>
+        <p class="hint">接口地址 / API Key 不填＝沿用主模型那套配置；模型名也不填＝直接嫁接到主模型（仅当它自己有转写能力时才这么用）。本区最多 6 套配置。</p>
       </div>
 
       <div class="settings-section" data-group="advanced">
@@ -517,7 +517,7 @@
         </div>
         <label class="field"><span>音色</span><input id="setTtsVoice" type="text" placeholder="FunAudioLLM/CosyVoice2-0.5B:alex"></label>
         <label class="check-field"><input type="checkbox" id="setTtsAuto"><span>回答完自动朗读</span></label>
-        <p class="hint">接口地址 / API Key 留空则沿用主模型那套配置；模型名留空则直接嫁接到主模型（仅当主模型自己就具备合成能力时才这么用）。本区最多 6 套配置。</p>
+        <p class="hint">接口地址 / API Key 不填＝沿用主模型那套配置；模型名也不填＝直接嫁接到主模型（仅当它自己有合成能力时才这么用）。本区最多 6 套配置。</p>
       </div>
 
       <div class="settings-section" data-group="advanced">
@@ -532,7 +532,7 @@
         <label class="check-field"><input type="checkbox" id="setPhoneShareImg"><span>允许手机里的角色自己发图（只管「准不准」，什么时候发仍由角色的性格和当时心情决定；需要先配好画图模型，也要开着「自动发信息」并把发送位置设成手机）</span></label>
         <label class="check-field"><input type="checkbox" id="setCharMoment"><span>角色会自己发动态（跟着日更走，每天最多 2 条；没值得发的事就空着，不会为了凑数硬发）</span></label>
         <label class="check-field"><input type="checkbox" id="setMomentImg"><span>动态里可以带图（和上面「手机里自己发图」是同一套画风与形象一致性机制，但要单独开这一项；同样需要先配好画图模型。不开就只发文字）</span></label>
-        <p class="hint">接口地址 / API Key 留空则沿用主模型那套配置；模型名留空则直接嫁接到主模型（仅当主模型自己就具备画图能力时才这么用）。本区最多 6 套配置。<br>
+        <p class="hint">接口地址 / API Key 不填＝沿用主模型那套配置；模型名也不填＝直接嫁接到主模型（仅当它自己有画图能力时才这么用）。本区最多 6 套配置。<br>
           「手机里允许角色主动分享图片」打开后，角色在手机里主动找你时可能顺带发一张图；画风由它按场景自选（自拍走写实、梗图走二次元…），
           和角色本人相关的图会存进这个角色的个人图库，下次生成前先比对，形象不会前后对不上。</p>
       </div>
@@ -540,8 +540,8 @@
       <div class="settings-section">
         <h3 class="sec-head">视频生成<button class="btn ghost mini" type="button" data-reset="video">重置本区</button></h3>
         <label class="check-field"><input type="checkbox" id="setVideoEnabled"><span>启用视频生成</span></label>
-        <label class="field"><span>接口地址</span><input id="setVideoBaseUrl" type="text" placeholder="https://api.example.com/v1（留空沿用主模型）"></label>
-        <label class="field"><span>API Key</span><input id="setVideoKey" type="password" placeholder="留空沿用主模型"></label>
+        <label class="field"><span>接口地址</span><input id="setVideoBaseUrl" type="text" placeholder="https://api.example.com/v1（不填＝沿用主模型）"></label>
+        <label class="field"><span>API Key</span><input id="setVideoKey" type="password" placeholder="不填＝沿用主模型"></label>
         <label class="field"><span>模型名</span><input id="setVideoModel" type="text" placeholder="veo-3 / kling-v2 / wan2.1 / sora-2 …"></label>
         <label class="field"><span>模式</span><select id="setVideoMode">
           <option value="t2v">文生视频（只给文字）</option>
@@ -566,14 +566,14 @@
         <label class="field"><span>最多轮询次数</span><input id="setVideoPollMax" type="number" min="1" step="1" placeholder="120"></label>
         <label class="field"><span>自定义请求模板（可选）</span><textarea id="setVideoTemplate" rows="3" placeholder='非标接口才需要。可用占位符：{{model}} {{prompt}} {{ratio}} {{duration}} {{size}} {{fps}} {{image}}'></textarea></label>
         <p class="hint">各家视频接口差别很大，所以这里既给了通用字段、也留了模板。通用字段按「创建任务 → 轮询查询 → 从返回里取地址」这套流程走，覆盖大多数 OpenAI 兼容风格的平台；<b>接口不是这个形状就把模板填上</b>，请求体会用模板替换占位符后原样发出。<br>
-          留空接口地址 / Key 则沿用主模型那套。全部留空 = 不启用，任何地方都不会出现视频入口。</p>
+          接口地址 / Key 不填＝沿用主模型那套。全部不填＝不启用，任何地方都不会出现视频入口。</p>
       </div>
 
       <div class="settings-section">
         <h3 class="sec-head">音乐生成<button class="btn ghost mini" type="button" data-reset="music">重置本区</button></h3>
         <label class="check-field"><input type="checkbox" id="setMusicEnabled"><span>启用音乐生成</span></label>
-        <label class="field"><span>接口地址</span><input id="setMusicBaseUrl" type="text" placeholder="https://api.example.com/v1（留空沿用主模型）"></label>
-        <label class="field"><span>API Key</span><input id="setMusicKey" type="password" placeholder="留空沿用主模型"></label>
+        <label class="field"><span>接口地址</span><input id="setMusicBaseUrl" type="text" placeholder="https://api.example.com/v1（不填＝沿用主模型）"></label>
+        <label class="field"><span>API Key</span><input id="setMusicKey" type="password" placeholder="不填＝沿用主模型"></label>
         <label class="field"><span>模型名</span><input id="setMusicModel" type="text" placeholder="suno-v4 / ace-step / musicgen …"></label>
         <label class="field"><span>时长（秒）</span><input id="setMusicDuration" type="number" min="5" max="300" step="5" placeholder="30"></label>
         <label class="field"><span>输出格式</span><select id="setMusicFormat">
@@ -589,12 +589,12 @@
         <label class="field"><span>轮询间隔（毫秒）</span><input id="setMusicPollMs" type="number" min="500" step="500" placeholder="3000"></label>
         <label class="field"><span>最多轮询次数</span><input id="setMusicPollMax" type="number" min="1" step="1" placeholder="120"></label>
         <label class="field"><span>自定义请求模板（可选）</span><textarea id="setMusicTemplate" rows="3" placeholder='可用占位符：{{model}} {{prompt}} {{duration}} {{format}} {{lyrics}}'></textarea></label>
-        <p class="hint">和视频那一区同一套思路：通用字段够覆盖「提交任务 → 轮询 → 取地址」，形状不一样就填模板。<b>全部留空 = 不启用。</b></p>
+        <p class="hint">和视频那一区同一套思路：通用字段够覆盖「提交任务 → 轮询 → 取地址」，形状不一样就填模板。<b>全部不填＝不启用。</b></p>
       </div>
 
       <div class="settings-section" data-group="advanced">
         <h3 class="sec-head">视觉模型 · 看图<button class="btn ghost mini" type="button" data-reset="vision">重置本区</button></h3>
-        <p class="hint">给图片写描述（图片转文字）用的模型。<b>只有主模型区那个「模型兼容」开关没勾时才用得上这里</b>——那时图片不直接发给主模型，而是先在这里转成文字描述。<br><b>主模型本身就能看图？</b>去上面主模型区把「模型兼容」勾上，本区整段留空即可。</p>
+        <p class="hint">给图片写描述（图片转文字）用的模型。<b>只有主模型区那个「模型兼容」开关没勾时才用得上这里</b>——那时图片不直接发给主模型，而是先在这里转成文字描述。<br><b>主模型本身就能看图？</b>去上面主模型区把「模型兼容」勾上，本区整段不填就行。</p>
         <label class="check-field"><input type="checkbox" id="setVisionEnabled"><span>启用独立视觉模型</span></label>
         <div id="msetVision" class="mset-list" data-mkind="vision"></div>
         <div class="row-actions" style="justify-content:flex-start">
@@ -615,8 +615,8 @@
         <h3 class="sec-head">角色扮演 · 记忆压缩<button class="btn ghost mini" type="button" data-reset="memory">重置本区</button></h3>
         <label class="check-field"><input type="checkbox" id="setRoleplayEnabled"><span>启用角色扮演模式（侧栏出现角色切换）</span></label>
         <label class="check-field"><input type="checkbox" id="setGroupWarn" checked><span>群里改 / 删消息前先弹强提醒（5 秒后才能确认）</span></label>
-        <p class="hint">全局「我的设定」：角色里留空时用这里的值。</p>
-        <label class="field"><span>我的昵称（也叫这个名字；酒馆卡里的 <code>{{user}}</code> 也替换成它）</span><input id="setMyName" type="text" placeholder="留空则显示为「你」"></label>
+        <p class="hint">全局「我的设定」：角色里不填时用这里的值。</p>
+        <label class="field"><span>我的昵称（也叫这个名字；酒馆卡里的 <code>{{user}}</code> 也替换成它）</span><input id="setMyName" type="text" placeholder="不填＝显示为「你」"></label>
         <label class="field"><span>我的性格</span><textarea id="setMyPersona" rows="2"></textarea></label>
         <label class="field"><span>我的外貌</span><textarea id="setMyAppearance" rows="2"></textarea></label>
         <label class="field"><span>我的背景</span><textarea id="setMyBackground" rows="2"></textarea></label>
@@ -638,7 +638,7 @@
         <label class="check-field"><input type="checkbox" id="setStatusQuant"><span>附带卡片：气泡下方显示一组自定义数值（可关）</span></label>
         <label class="field"><span>附带卡片的项目（每行一个名字，最多 20 项）</span><textarea id="setStatusCards" rows="3" placeholder="例：&#10;冷静值&#10;开心值&#10;信任值"></textarea>
           <p class="hint">只填<b>项目名字</b>，别写数值、阈值或说明 —— 数值是 AI 每条回复自己给的（0~100 的整数）。
-            留空 = 不显示卡片。某个角色或某次对话可以单独覆盖这一组（留空就跟随这里）。</p>
+            不填＝不显示卡片。某个角色或某次对话可以单独覆盖这一组（不填＝跟随这里）。</p>
         </label>
         <label class="check-field"><input type="checkbox" id="setAutoMessage"><span>自动发信息：应用在后台时角色按性格主动联系你（默认关；且该对话要开着「时间系统」才会发）</span></label>
         <label class="field"><span>自动发信息间隔（分钟，默认 30）</span><input id="setAutoMessageMin" type="number" min="5" step="5" inputmode="numeric"></label>
@@ -652,8 +652,8 @@
 
       <div class="settings-section" data-group="basic">
         <h3 class="sec-head">采用格式（全局默认）<button class="btn ghost mini" type="button" data-reset="format">重置本区</button></h3>
-        <label class="field"><span>角色回复采用的格式（留空则不限制）</span><textarea id="setAdoptFormat" rows="4" placeholder="例：每条回复先一句动作描写（用括号），再是对白；不要旁白式自我介绍。"></textarea></label>
-        <p class="hint">会话可在「对话设置 → 采用格式」里单独覆盖；留空则跟随这里。</p>
+        <label class="field"><span>角色回复采用的格式（不填＝不限制）</span><textarea id="setAdoptFormat" rows="4" placeholder="例：每条回复先一句动作描写（用括号），再是对白；不要旁白式自我介绍。"></textarea></label>
+        <p class="hint">会话可在「对话设置 → 采用格式」里单独覆盖；不填＝跟随这里。</p>
       </div>
 
       <div class="settings-section" data-group="basic">
@@ -683,7 +683,7 @@
         </div>
         <label class="range-field"><span>模糊 <b id="setPhoneBgBlurVal">0</b></span><input type="range" id="setPhoneBgBlur" min="0" max="100" step="1" value="0"></label>
         <label class="range-field"><span>亮度 <b id="setPhoneBgBrightVal">100</b></span><input type="range" id="setPhoneBgBright" min="0" max="200" step="2" value="100"></label>
-        <p class="hint">只影响手机聊天页，与上面的聊天背景互不干扰；留空则手机页用默认底色。</p>
+        <p class="hint">只影响手机聊天页，与上面的聊天背景互不干扰；不填＝手机页用默认底色。</p>
       </div>
 
       <div class="settings-section" data-group="advanced">
@@ -732,9 +732,9 @@
           <option value="4">呼吸 · 缓慢起落的环</option>
           <option value="5">头像 · 先出图再出字</option>
         </select></label>
-        <label class="field"><span>主文字（留空＝你好，世界；选 1~5 时留空＝Sekulum）</span><input id="setSplashText" type="text" placeholder="你好，世界"></label>
-        <label class="field"><span>底部小字（留空＝默认署名）</span><input id="setSplashSub" type="text" placeholder="菠萝味柠檬汁/DS共同制作"></label>
-        <label class="field"><span>启动图片（可留空；填 avatars/xxx.png 或图片地址）</span><input id="setSplashImage" type="text" placeholder="avatars/shenyan.png"></label>
+        <label class="field"><span>主文字（不填＝用套系自带的那句；选 1~5 时默认「Sekulum」）</span><input id="setSplashText" type="text" placeholder="你好，世界"></label>
+        <label class="field"><span>底部小字（不填＝默认署名）</span><input id="setSplashSub" type="text" placeholder="菠萝味柠檬汁/DS共同制作"></label>
+        <label class="field"><span>启动图片（可不填＝用默认；也可填 avatars/xxx.png 或图片地址）</span><input id="setSplashImage" type="text" placeholder="avatars/shenyan.png"></label>
         <label class="field"><span>或选一个角色头像</span><select id="setSplashAvatar"></select></label>
         <button class="btn ghost splash-prev-btn" id="splashPreviewBtn" type="button">预览这段动画（播 3 秒）</button>
         <div id="splashPreview" class="splash-preview" hidden></div>
@@ -841,30 +841,36 @@
     </div>
     <div class="modal-body">
       <p class="hint">只影响这条对话，不写回角色卡。<b>没填的项都跟着上层走</b>（本对话 → 本角色 → 全局），填了就以这里为准。</p>
-      <label class="field">
-        <span>对话名称</span>
-        <input id="setSessionTitle" type="text" placeholder="跟着上层：自动命名">
-      </label>
-      <label class="field">
-        <span>当前对话称呼</span>
-        <input id="setSessionAlias" type="text" placeholder="跟随当前角色">
-      </label>
+      <div class="field-row">
+        <label class="field">
+          <span>对话名称</span>
+          <input id="setSessionTitle" type="text" placeholder="跟着上层：自动命名">
+        </label>
+        <label class="field">
+          <span>当前对话称呼</span>
+          <input id="setSessionAlias" type="text" placeholder="跟随当前角色">
+        </label>
+      </div>
       <label class="field">
         <span>本对话的系统提示词</span>
         <textarea id="setSessionPrompt" rows="6" placeholder="跟着上层：全局提示词"></textarea>
       </label>
       <div id="sessionRoleWrap" class="settings-section">
         <h3>角色扮演 · 本对话 <span id="sessionLineBadge" class="pill">主线</span></h3>
-        <label class="field"><span>本线年龄</span><input id="setSessionAge" type="text" inputmode="numeric" placeholder="跟角色卡；也会随故事时间增长"></label>
-        <label class="field"><span>本线「我的性别」<i class="inh">跟随上层</i></span><input id="setSessionMyGender" type="text" placeholder="男 / 女 / 其他（其他可自填）"></label>
+        <div class="field-row">
+          <label class="field"><span>本线年龄</span><input id="setSessionAge" type="text" inputmode="numeric" placeholder="跟角色卡"></label>
+          <label class="field"><span>本线「我的性别」<i class="inh">跟随上层</i></span><input id="setSessionMyGender" type="text" placeholder="男 / 女 / 其他"></label>
+        </div>
         <label class="field"><span>当前关系（本对话专属，随记忆自动更新）</span><textarea id="setSessionRelation" rows="2" placeholder="此刻两人的关系状态…"></textarea></label>
         <label class="field"><span>共同经历（只写这段对话开始之前的事）</span><textarea id="setSessionShared" rows="4" placeholder="开局之前两人共同经历过什么…（聊天之后发生的事不用写这里，那些属于记忆）"></textarea>
           <button id="setSessionSharedReset" class="btn ghost sm" type="button">按角色卡重置这一项（清掉旧版混进来的对话内容）</button>
         </label>
         <label class="field"><span>当前场景（本对话专属，随对话自动更新）</span><textarea id="setSessionScene" rows="3" placeholder="此刻在哪、发生什么、什么氛围…"></textarea></label>
-        <label class="field"><span>场景自动更新间隔（轮，默认 10）</span><input id="setSessionSceneEvery" type="number" min="1" step="1" inputmode="numeric"></label>
+        <div class="field-row">
+          <label class="field"><span>场景更新间隔（轮，默认 10）</span><input id="setSessionSceneEvery" type="number" min="1" step="1" inputmode="numeric"></label>
+          <label class="field"><span>本线音色</span><input id="setSessionTtsVoice" type="text" placeholder="跟全局"></label>
+        </div>
         <label class="field"><span>采用格式</span><textarea id="setSessionFormat" rows="3" placeholder="跟角色；角色也空就跟全局"></textarea></label>
-        <label class="field"><span>本线音色</span><input id="setSessionTtsVoice" type="text" placeholder="跟全局；例：FunAudioLLM/CosyVoice2-0.5B:alex"></label>
         <label class="field"><span>对我的认知（本对话专属，可手改）</span><textarea id="setSessionCognition" rows="5"></textarea></label>
         <div class="mem-title">记忆（本对话，只读）</div>
         <div id="sessionMemoryBox" class="memory-box"></div>
@@ -991,23 +997,25 @@
       <div class="settings-section" data-group="basic">
         <h3>头像</h3>
         <p class="hint">没选就是跟随「设置」里的全局头像。</p>
-        <div class="field">
-          <span>我的头像</span>
-          <div class="avatar-field">
-            <div class="avatar-preview" id="setSessionAvatarUserPreview"></div>
-            <div class="avatar-btns">
-              <button class="btn" id="setSessionAvatarUserPick" type="button">选择图片</button>
-              <button class="btn ghost" id="setSessionAvatarUserClear" type="button">清除（用全局）</button>
+        <div class="field-row">
+          <div class="field">
+            <span>我的头像</span>
+            <div class="avatar-field">
+              <div class="avatar-preview" id="setSessionAvatarUserPreview"></div>
+              <div class="avatar-btns">
+                <button class="btn" id="setSessionAvatarUserPick" type="button">选择图片</button>
+                <button class="btn ghost" id="setSessionAvatarUserClear" type="button">清除（用全局）</button>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="field">
-          <span>AI 头像</span>
-          <div class="avatar-field">
-            <div class="avatar-preview" id="setSessionAvatarAiPreview"></div>
-            <div class="avatar-btns">
-              <button class="btn" id="setSessionAvatarAiPick" type="button">选择图片</button>
-              <button class="btn ghost" id="setSessionAvatarAiClear" type="button">清除（用全局）</button>
+          <div class="field">
+            <span>AI 头像</span>
+            <div class="avatar-field">
+              <div class="avatar-preview" id="setSessionAvatarAiPreview"></div>
+              <div class="avatar-btns">
+                <button class="btn" id="setSessionAvatarAiPick" type="button">选择图片</button>
+                <button class="btn ghost" id="setSessionAvatarAiClear" type="button">清除（用全局）</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1148,7 +1156,7 @@
             <select id="cfWorldPick"></select>
             <button class="btn ghost" id="cfWorldApply" type="button">套用</button>
           </div>
-          <p class="hint">会覆盖下面「世界观」栏里的内容。那栏是这个角色自己的一份，改了不影响库里那一套；留空则用「设置 → 我的人设 → 世界观」里选中的。</p>
+          <p class="hint">会覆盖下面「世界观」栏里的内容。那栏是这个角色自己的一份，改了不影响库里那一套；不填＝用「设置 → 我的人设 → 世界观」里选中的。</p>
         </div>
         <div class="field" id="cfLinksRow">
           <span>关联角色（这个角色和谁认识）</span>
@@ -1182,7 +1190,7 @@
               <button class="btn ghost" id="cfAvClear" type="button">清除</button>
             </div>
           </div>
-          <p class="hint">这就是角色卡自己的脸。留空 = 用默认头像；手机页想单独一张，用下面那栏。</p>
+          <p class="hint">这就是角色卡自己的脸。不填＝用默认头像；手机页想单独一张，用下面那栏。</p>
           <input type="file" id="cfAvInput" accept="image/png,image/jpeg,image/jpg,image/webp,image/*" hidden>
         </div>
         <div class="field">
@@ -1195,18 +1203,18 @@
               <button class="btn ghost" id="cfPhAvClear" type="button">清除</button>
             </div>
           </div>
-          <p class="hint">留空就沿用角色头像。手机页的列表和气泡都用这一张。</p>
+          <p class="hint">不填＝沿用角色头像；手机页的列表和气泡都用这一张。</p>
           <input type="file" id="cfPhAvInput" accept="image/*" hidden>
         </div>
         <p class="hint">「当前场景 / 对我的认知 / 记忆压缩 / 自动备份」都在每条对话的「对话设置」里（同一个角色可有主线 + 支线，各自分开）。</p>
         <div class="field">
           <span>附带卡片的项目（本角色，选填）</span>
-          <textarea id="cfStatusCards" rows="3" placeholder="每行一个名字，例：冷静值 / 开心值 / 信任值。留空就用「设置」里全局那一组"></textarea>
+          <textarea id="cfStatusCards" rows="3" placeholder="每行一个名字，例：冷静值 / 开心值 / 信任值。不填＝用「设置」里全局那一组"></textarea>
           <p class="hint">只填<b>名字</b>，数值由 AI 每条回复给 0~100。这个角色的所有线都按这一组显示；某条线想不一样，去「对话设置」里单独填。</p>
         </div>
         <div class="field">
           <span>采用格式（本角色，选填）</span>
-          <textarea id="cfCharFormat" rows="3" placeholder="留空就用「设置」里的全局格式；填了之后这个角色的所有线都按它输出，对话设置里还能再单独覆盖"></textarea>
+          <textarea id="cfCharFormat" rows="3" placeholder="不填＝用「设置」里的全局格式；填了这个角色的所有线都按它输出，对话设置里还能再单独覆盖"></textarea>
           <p class="hint">优先级：对话设置 &gt; 这里 &gt; 设置里的全局。从酒馆卡导入时，卡里的格式会自动填到这里。</p>
         </div>
         <div class="settings-section">
@@ -1450,7 +1458,7 @@
                 <li>新建角色：点侧栏「+新角色」，或顶栏人形图标 →「新建角色」。</li>
                 <li>懒得逐项填？用「<b>AI 自动拆分</b>」（旁边 ? 有说明）：把想到的<b>一股脑写进</b>输入框，点「AI 拆分」——它按字段拆开；没提到的会依据现有文本推断补全，填好后还能改，最后点「保存设定」。</li>
                 <li>「当前设定」共 23 项：我的名称、<b>我的性别</b>、你对我的称呼、我的性格/外貌/背景/喜好/身体状况、你的名称、当前年龄、出生日期、性别、你的性格/外貌/背景/喜好/身体状况、你的生理期、你的说话风格、世界观、共同经历（初始）、当前关系（初始）、AI 指令。填得越细，越像。</li>
-                <li>“我的名称/性格/外貌/背景/喜好”留空会自动沿用「设置」里的全局「我的设定」。</li>
+                <li>“我的名称/性格/外貌/背景/喜好”不填＝自动沿用「设置」里的全局「我的设定」。</li>
                 <li>每个角色一套对话：第一条是<b>主线</b>，之后新建的算<b>支线</b>；在「对话设置」里可以把任意一条设为<b>主线</b>。</li>
                 <li><b>当前关系 / 共同经历 / 当前场景 / 对我的认知 / 记忆压缩</b>都是<b>按对话分开记</b>：主线与每条支线各一套，互不影响；都在那条对话的「对话设置」里。</li>
                 <li>其中<b>当前关系随记忆一起自动更新</b>，<b>当前场景每聊若干轮自动刷新</b>；<b>共同经历不再随聊天变</b>（它只记对话开始之前的事，聊天之后的内容进记忆）（默认 10 轮，可在「对话设置」里改）——三样都随时能手改，改完以你写的为准。它们跟角色卡里的「共同经历（初始）/ 当前关系（初始）」不是一回事：角色卡里那份是<b>开局设定</b>，这三项记的是<b>这条对话现在走到哪了</b>。</li>
@@ -1533,7 +1541,7 @@
               <p><b>第二步：先记四条铁规矩</b>（不知道这个，填了也是白填）</p>
               <ul>
                 <li><b>地址必须带 <code>/v1</code></b>：写 <code>https://api.siliconflow.cn/v1</code>。<b>少写 /v1 会直接报 404</b>，这是踩得最多的坑。</li>
-                <li><b>「留空」会沿用主模型，但主模型没这本事</b>：每套配置的「接口地址 / API Key / 模型」留空时<b>会去沿用「主模型」那一套的值</b>。可 DeepSeek 只是个文字模型，压根没有转写 / 合成 / 画图 / 看图的接口——留空等于借了个不会干这活的模型。所以这四组<b>必须各填各的</b>。（唯一的例外是「视觉」：主模型自己就能看图时，让视觉区留空、改去勾主模型区的「模型兼容」，反而更好。）</li>
+                <li><b>「不填」会沿用主模型，但主模型没这本事</b>：每套配置的「接口地址 / API Key / 模型」不填时<b>会去沿用「主模型」那一套的值</b>。可 DeepSeek 只是个文字模型，压根没有转写 / 合成 / 画图 / 看图的接口——空着等于借了个不会干这活的模型。所以这四组<b>必须各填各的</b>。（唯一的例外是「视觉」：主模型自己就能看图时，让视觉区空着、改去勾主模型区的「模型兼容」，反而更好。）</li>
                 <li><b>填完要勾开关，还要往下滚点「保存设置」</b>。不勾开关等于没配，不保存等于白填。</li>
                 <li><b>每区都能建多套配置</b>：听觉 / 朗读 / 画图 / 视觉各自都有「<b>添加配置</b>」按钮，最多 <b>6 套</b>，彼此独立，互不影响（主模型那 6 套也跟它们互不影响）。每一套是「<b>名字 + 接口地址 + API Key + 模型</b>」四项，卡片右上角标着「使用中」的那套才是当前生效的，点别的卡片上的「<b>用这套</b>」切过去。</li>
               </ul>
@@ -1542,7 +1550,7 @@
                 <li><b>听觉（语音输入）</b> → 设置里找「<b>听觉模型 · 语音转文字</b>」。接口地址 <code>https://api.siliconflow.cn/v1</code>；API Key 填你的 <code>sk-…</code>；模型填 <code>FunAudioLLM/SenseVoiceSmall</code>（<b>免费</b>）。<br><b>别填 <code>whisper-1</code></b>——那是 OpenAI 的模型名，硅基流动上没有；输入框里的灰色提示字样只是<b>示例</b>，不是推荐值。语言提示可填 <code>zh</code>。最后勾上「启用语音输入」。<br>用法：点一下麦克风<b>开始录音、再点一下结束</b>，它会转成文字填进输入框（还得自己按发送）。</li>
                 <li><b>朗读（文字转语音）</b> → 「<b>语音合成 · 朗读</b>」。地址同上；模型填 <code>FunAudioLLM/CosyVoice2-0.5B</code>（约 0.05 元/千字）；<b>音色要写成 <code>FunAudioLLM/CosyVoice2-0.5B:alex</code> 这种「模型名:音色名」的格式</b>（这里已默认填好这一个，换别的音色时照同一格式改）。注意 <code>alloy</code> 是 OpenAI 的写法，在硅基流动上会报错。具体有哪些音色，看平台模型详情页。勾「启用朗读按钮」；想让它念完一条自动念下一条，再勾「回答完自动朗读」。<br>用法：每条 AI 消息下面有个喇叭图标，点一下念出来。</li>
                 <li><b>画图（文生图）</b> → 「<b>文生图</b>」。地址同上；模型填 <code>Kwai-Kolors/Kolors</code>（<b>免费</b>）或 <code>Tongyi-MAI/Z-Image-Turbo</code>（约 0.1 元/张）；尺寸填 <code>1024x1024</code>。勾「启用画图开关」。<br>用法：<b>设置里勾完，还要在输入框下方把「画图」开关也打开</b>（两处都开才生效），然后直接让它画。</li>
-                <li><b>视觉（看图 / 图片转文字）</b> → 「<b>视觉模型 · 看图</b>」。<b>它只干一件事：把图片转成一段文字描述</b>（不会用它来聊天）。DeepSeek 的主模型看不了图，所以你一发图、或 AI 一画图，都得靠这一区把图写成文字，主模型才「看」得到。地址同上；模型填 <code>Qwen/Qwen2.5-VL-72B-Instruct</code>（硅基流动）或 <code>qwen-vl-max</code>（阿里百炼），勾「启用独立视觉模型」。<br><b>但如果你的主模型本身就是多模态</b>（自己就能看图）：去主模型区把「<b>模型兼容</b>」勾上，本区<b>整段留空、开关也不用开</b>——看图会直接走主模型，这里配了也不生效。</li>
+                <li><b>视觉（看图 / 图片转文字）</b> → 「<b>视觉模型 · 看图</b>」。<b>它只干一件事：把图片转成一段文字描述</b>（不会用它来聊天）。DeepSeek 的主模型看不了图，所以你一发图、或 AI 一画图，都得靠这一区把图写成文字，主模型才「看」得到。地址同上；模型填 <code>Qwen/Qwen2.5-VL-72B-Instruct</code>（硅基流动）或 <code>qwen-vl-max</code>（阿里百炼），勾「启用独立视觉模型」。<br><b>但如果你的主模型本身就是多模态</b>（自己就能看图）：去主模型区把「<b>模型兼容</b>」勾上，本区<b>整段空着、开关也不用开</b>——看图会直接走主模型，这里配了也不生效。</li>
               </ul>
               <p><b>关于主模型区那个「模型兼容」开关</b>（很多人会配错，单独说一句）：<br><b>不勾（默认）</b>：主模型只当纯文字模型。图片一律先过「视觉模型」写成文字再喂给它——哪怕你换的主模型其实能看图也一样，图片不会直接发过去。<br><b>勾上</b>：主模型能看图，图片直接交给它，视觉区那套配置被无视。<br>一句话：<b>不勾最安全</b>，配错了最多是多花一次转文字的钱；勾错了则可能因为主模型看不了图而整条消息报错。<b>不确定就别勾。</b></p>
               <p><b>第四步：提前知道这些坑</b></p>
@@ -1551,7 +1559,7 @@
                 <li><b>报 401 / 403</b>：Key 复制不完整、没实名、或者余额为 0。</li>
                 <li><b>报 400 且提到 model</b>：模型名写错（大小写、斜杠、连字符都要一模一样）。</li>
                 <li><b>报 400 且提到 voice</b>：朗读音色格式不对，要「模型名:音色名」。</li>
-                <li><b>提示「未配置语音转写 / 语音合成 / 文生图接口地址或密钥」</b>：这一区<b>和主模型</b>的地址、Key <b>全都空着</b>——留空会去沿用主模型，主模型也空，那就真没得用了。</li>
+                <li><b>提示「未配置语音转写 / 语音合成 / 文生图接口地址或密钥」</b>：这一区<b>和主模型</b>的地址、Key <b>全都空着</b>——空着会去沿用主模型，主模型也空，那就真没得用了。</li>
                 <li><b>点麦克风没反应</b>：第一次会要麦克风权限，点了「拒绝」就再也调不出来，得去系统设置里放开；网页版或老封装还可能压根不支持录音。</li>
                 <li><b>点喇叭没声音</b>：有的环境不允许自动播放；也可能是音色或模型填错。</li>
                 <li><b>尺寸报错</b>：只填平台支持的尺寸（一般是 <code>1024x1024</code>、<code>768x1024</code> 这类），别自己编。个别平台只认 <code>image_size</code> 这个参数名，遇到这种就换一家。</li>
@@ -1654,7 +1662,7 @@
               <h4>二十二、6.2.4 这一版改了什么</h4>
               <p><b>出生日期能填到公元元年了</b>：日期滚轮只到 1900 年，所以「你的出生日期」下面多了一个<b>年份输入框</b>——填 1~9999 覆盖滚轮选出来的年；<b>填 0</b> 就是「0 年 0 月 0 日」＝<b>无限年龄</b>：年龄栏会被禁用，但时间系统照常能开。</p>
               <p><b>年龄是硬规则，但会长</b>：设定时间那一刻，合法时段就是「出生日期 + 填写的年龄」定出的那一年（例：2012-02-10 出生、年龄 12 → 只能落在 2024-02-10 ~ 2025-02-10）；<b>缺出生日期或缺年龄，不准开时间系统</b>。开了之后<b>年龄随故事时间增长</b>（满周岁 +1），合法时段跟着往后走 —— 这两件事本来就是一套，不冲突。唯一例外是无限年龄（出生年份填 0），那时不做限制。</p>
-              <p><b>本线年龄</b>：对话设置里多了一栏「本线年龄」，留空就用角色卡的；<b>只影响这条线，不写回角色卡</b>。填了就以它为准。</p>
+              <p><b>本线年龄</b>：对话设置里多了一栏「本线年龄」，不填＝用角色卡的；<b>只影响这条线，不写回角色卡</b>。填了就以它为准。</p>
               <p><b>混搭模式</b>：时间设置下面那个勾选框。勾上之后<b>离开应用就冻结时间</b>，回来<b>发第一条消息时解冻</b>——离线那段时间不推进，也不用每次手动调。只对这一条线生效。</p>
               <p><b>没开时间系统时的「（第二天）」</b>：记忆里不再据此编造具体日期，而是改写成「次日」「隔了几天」这种叙述，日期用当天。气泡里你写的原话不变。</p>
               <p><b>回溯改成开支线了</b>：在任意一条消息上点「回溯到此刻」，不再丢内容，而是<b>新建一条支线</b>（名字是原名 + 数字），只带这条及之前的<b>主聊天消息和手机消息</b>；记忆、认知、关系、共同经历、场景会按「这条之前 20 条」<b>重新生成</b>（后面 20 条只用来判断哪些事不能写进去），花费记在「回溯重建」。原线原样保留；想让支线变主线，去对话设置点「设为主线」。</p>
@@ -1709,7 +1717,7 @@
               <h4>二十八、世界观库</h4>
               <p><b>在哪</b>：设置 → 我的人设 → 世界观。内置 <b>10 套</b>（现代 / 古代中国 / 古代西方 / 修仙 / 西幻 / 现代修仙 / 架空古代…），每套都压在 100 字以内 —— 够模型建立框架，又不吃掉太多上下文预算。</p>
               <p><b>内置的只读</b>：想改先点「<b>复制当前</b>」生成一份自己的再改，避免误删找不回来。自己建的<b>最多 50 套</b>，可以搜索、可以删。</p>
-              <p><b>角色卡那栏留空 = 用选中的这套</b>：角色「当前设定」里的「世界观」如果空着，就用这里选中的那套；自己填了就以自己填的为准。时间域关联（两条线共用冻结）要靠 AI 甄别世界观是否一致，所以那两条线的世界观得能对上。</p>
+              <p><b>角色卡那栏不填＝用选中的这套</b>：角色「当前设定」里的「世界观」如果空着，就用这里选中的那套；自己填了就以自己填的为准。时间域关联（两条线共用冻结）要靠 AI 甄别世界观是否一致，所以那两条线的世界观得能对上。</p>
             </div>
             <div class="guide-sec">
               <h4>二十九、10-27 这一版改了什么</h4>
@@ -2118,10 +2126,10 @@
       <button class="icon-btn" data-close="groupModal" type="button" aria-label="关闭"><span data-icon="close"></span></button>
     </div>
     <div class="modal-body">
-      <label class="field"><span>群名称（可留空，默认用成员名）</span><input id="groupName" type="text" placeholder="例：周末小队"></label>
+      <label class="field"><span>群名称（不填＝用成员名）</span><input id="groupName" type="text" placeholder="例：周末小队"></label>
       <div class="field"><span>选成员（至少两个）</span><div id="groupMembers" class="group-members"></div></div>
-      <label class="field"><span>本群的世界观（可留空）</span><input id="groupWorld" type="text" placeholder="例：九一班 2024 / 南方小城 1998"></label>
-      <label class="field"><span>导入某条线的记忆（可留空）</span><select id="groupImport"></select></label>
+      <label class="field"><span>本群的世界观（可不填）</span><input id="groupWorld" type="text" placeholder="例：九一班 2024 / 南方小城 1998"></label>
+      <label class="field"><span>导入某条线的记忆（可不填）</span><select id="groupImport"></select></label>
       <p class="hint">群里每次由 AI 按各自性格决定谁说话、说几句（可以有人不说话）。<br>
         导入<b>某条线的记忆</b>：那条线里属于该角色的认知 / 情境 / 经历会归到<b>这位成员自己</b>名下（别人看不到）；
         选<b>多人群</b>时，还会从那条线里挑出「大家都参与过」的事，<b>追加</b>到本群的共同经历。</p>
