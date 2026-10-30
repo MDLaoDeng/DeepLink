@@ -493,7 +493,8 @@
       fv.innerHTML = UI.iconSvg("account");
       const fn = document.createElement("span");
       fn.className = "c-nm";
-      fn.textContent = showAlt ? "收起副本（" + alts.length + "）" : "异世界副本 " + alts.length;
+      /* 展开态的文案不带数字：小屏上「收起副本（2）」会被省略号裁掉，更难认 */
+      fn.textContent = showAlt ? "收起副本" : "异世界副本 " + alts.length;
       fold.appendChild(fv); fold.appendChild(fn);
       fold.addEventListener("click", () => { state.showAltChars = !showAlt; renderCharBar(); });
       bar.appendChild(fold);
