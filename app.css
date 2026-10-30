@@ -3184,13 +3184,23 @@ body.no-image .ph-moment-img img { display: none; }
 .pf-lines .check-field { margin-bottom: 2px; }
 .pf-edit-card { max-height: 82vh; overflow-y: auto; }
 /* 可见范围选择器里的三层分组（10-30 复用侧栏那套：角色 → 版本 → 线） */
+/* 角色一行 / 版本一行都是可点的按钮，箭头在右边（10-30 用户要求） */
 .pf-forest-h {
-  margin: 10px 0 2px; font-size: var(--fs-body); font-weight: 600; color: var(--text);
+  display: flex; align-items: center; width: 100%; box-sizing: border-box;
+  margin: 6px 0 2px; padding: 4px 2px; border: 0; background: none; text-align: left;
+  font: inherit; font-size: var(--fs-body); font-weight: 600; color: var(--text); cursor: pointer;
 }
 .pf-forest-v {
-  margin: 2px 0 2px 10px; font-size: var(--fs-caption); color: var(--text-mute);
+  display: flex; align-items: center; width: 100%; box-sizing: border-box;
+  margin: 2px 0; padding: 3px 2px 3px 12px; border: 0; background: none; text-align: left;
+  font: inherit; font-size: var(--fs-caption); color: var(--text-mute); cursor: pointer;
 }
-.pf-lines .check-field { padding-left: 10px; }
+.pf-fh-name, .pf-fv-name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pf-fh-count { flex: none; margin-left: 8px; font-size: var(--fs-caption); font-weight: 400; color: var(--text-mute); }
+.pf-fh-arrow { flex: none; margin-left: 8px; font-size: 11px; color: var(--text-mute); }
+.pf-forest-kids { padding-left: 4px; }
+.pf-forest-vk { padding-left: 12px; }
+.pf-lines .check-field { padding-left: 22px; }
 .pf-lines .check-field .s-badge { margin-left: auto; }
 .pf-lines-h {
   font-size: var(--fs-caption); font-weight: 600; color: var(--text-dim);

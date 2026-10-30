@@ -758,7 +758,9 @@
     return forest;
   }
 
-  /* 把森林画进 box，返回 id → {row, cb} 的映射 */
+  /* 把森林画进 box，返回 id → {row, cb} 的映射。
+     两层都能折叠：角色一行、版本一行，箭头都在**右边**（10-30 用户要求）。
+     默认只展开「里面有勾选项/发布线」的那几支，免得一屏列几十条线。 */
   function renderLineForest(box, attr, isChecked) {
     var map = {};
     var forest = lineForest();
@@ -766,25 +768,71 @@
       box.appendChild(el("div", "pf-edit-h", "还没有任何对话"));
       return map;
     }
+
+    function addRow(parent, x) {
+      var row = el("label", "check-field");
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !!isChecked(x);
+      cb.setAttribute(attr, x.id);
+      var sp = document.createElement("span");
+      sp.textContent = x.title || "新对话";
+      var bd = document.createElement("span");
+      bd.className = "s-badge" + (x.mainLine ? " main" : "");
+      bd.textContent = x.mainLine ? "主线" : "支线";
+      row.appendChild(cb); row.appendChild(sp); row.appendChild(bd);
+      parent.appendChild(row);
+      map[x.id] = { row: row, cb: cb };
+    }
+
     forest.forEach(function (g) {
-      box.appendChild(el("div", "pf-forest-h", g.title));
+      var total = 0, anyChecked = false;
       g.versions.forEach(function (v) {
-        if (v.label) box.appendChild(el("div", "pf-forest-v", v.label));
-        v.lines.forEach(function (x) {
-          var row = el("label", "check-field");
-          var cb = document.createElement("input");
-          cb.type = "checkbox";
-          cb.checked = !!isChecked(x);
-          cb.setAttribute(attr, x.id);
-          var sp = document.createElement("span");
-          sp.textContent = x.title || "新对话";
-          var bd = document.createElement("span");
-          bd.className = "s-badge" + (x.mainLine ? " main" : "");
-          bd.textContent = x.mainLine ? "主线" : "支线";
-          row.appendChild(cb); row.appendChild(sp); row.appendChild(bd);
-          box.appendChild(row);
-          map[x.id] = { row: row, cb: cb };
+        v.lines.forEach(function (x) { total += 1; if (isChecked(x)) anyChecked = true; });
+      });
+
+      var kids = el("div", "pf-forest-kids");
+      kids.hidden = !anyChecked;
+
+      var h = document.createElement("button");
+      h.type = "button";
+      h.className = "pf-forest-h";
+      h.appendChild(el("span", "pf-fh-name", g.title));
+      h.appendChild(el("span", "pf-fh-count", total + " 条线"));
+      var ar = el("span", "pf-fh-arrow", anyChecked ? "▾" : "▸");
+      h.appendChild(ar);
+      h.addEventListener("click", function () {
+        kids.hidden = !kids.hidden;
+        ar.textContent = kids.hidden ? "▸" : "▾";
+      });
+      box.appendChild(h);
+      box.appendChild(kids);
+
+      g.versions.forEach(function (v) {
+        if (!v.label) {
+          /* 没有版本层的那几节（群聊 / 没挂角色的线）：直接把行挂上去 */
+          v.lines.forEach(function (x) { addRow(kids, x); });
+          return;
+        }
+        var vChecked = false;
+        v.lines.forEach(function (x) { if (isChecked(x)) vChecked = true; });
+
+        var vk = el("div", "pf-forest-vk");
+        vk.hidden = !vChecked;
+
+        var vh = document.createElement("button");
+        vh.type = "button";
+        vh.className = "pf-forest-v";
+        vh.appendChild(el("span", "pf-fv-name", v.label));
+        var va = el("span", "pf-fh-arrow", vChecked ? "▾" : "▸");
+        vh.appendChild(va);
+        vh.addEventListener("click", function () {
+          vk.hidden = !vk.hidden;
+          va.textContent = vk.hidden ? "▸" : "▾";
         });
+        kids.appendChild(vh);
+        kids.appendChild(vk);
+        v.lines.forEach(function (x) { addRow(vk, x); });
       });
     });
     return map;
