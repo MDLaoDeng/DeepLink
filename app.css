@@ -3116,6 +3116,9 @@ body.no-image .ph-moment-img img { display: none; }
   --z-picker: 520;
 }
 
+/* 切主题时的一帧：关掉所有过渡，避免 body 在 0.28s 里渐变、子元素瞬切（10-30） */
+.no-transition, .no-transition * { transition: none !important; }
+
 /* ── 高度（阴影）三档（10-19）────────────────────────────────
    贴地 / 浮起 / 弹层。只表达「离你多高」，不表达颜色，所以不跟主题走。
    环形高亮（选中态）另有写法，不在这套里。 */
@@ -3689,8 +3692,10 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
 .pf-row-a { flex: none; margin-left: 6px; color: var(--text-mute); font-size: var(--fs-title); line-height: 1; }
 
 /* 朋友圈 */
+/* 没图时压到 132px（10-30）：原来无图也留 180px 空白，进「朋友圈」先看见一大块灰 */
+.pf-cover.pf-cover-has { height: 180px; }
 .pf-cover {
-  position: relative; height: 180px;
+  position: relative; height: 132px;
   background-color: var(--panel-2); background-size: cover; background-position: center;
   display: flex; align-items: flex-end;
 }

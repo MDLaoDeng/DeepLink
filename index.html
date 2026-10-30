@@ -857,7 +857,9 @@
         <label class="field"><span>本线年龄</span><input id="setSessionAge" type="text" inputmode="numeric" placeholder="跟角色卡；也会随故事时间增长"></label>
         <label class="field"><span>本线「我的性别」（留空跟随角色卡 / 全局人设）</span><input id="setSessionMyGender" type="text" placeholder="男 / 女 / 其他（其他可自填）"></label>
         <label class="field"><span>当前关系（本对话专属，随记忆自动更新）</span><textarea id="setSessionRelation" rows="2" placeholder="此刻两人的关系状态…"></textarea></label>
-        <label class="field"><span>共同经历（只写这段对话开始之前的事）</span><textarea id="setSessionShared" rows="4" placeholder="开局之前两人共同经历过什么…（聊天之后发生的事不用写这里，那些属于记忆）"></textarea></label>
+        <label class="field"><span>共同经历（只写这段对话开始之前的事）</span><textarea id="setSessionShared" rows="4" placeholder="开局之前两人共同经历过什么…（聊天之后发生的事不用写这里，那些属于记忆）"></textarea>
+          <button id="setSessionSharedReset" class="btn ghost sm" type="button">按角色卡重置这一项（清掉旧版混进来的对话内容）</button>
+        </label>
         <label class="field"><span>当前场景（本对话专属，随对话自动更新）</span><textarea id="setSessionScene" rows="3" placeholder="此刻在哪、发生什么、什么氛围…"></textarea></label>
         <label class="field"><span>场景自动更新间隔（轮，默认 10）</span><input id="setSessionSceneEvery" type="number" min="1" step="1" inputmode="numeric"></label>
         <label class="field"><span>采用格式</span><textarea id="setSessionFormat" rows="3" placeholder="跟角色；角色也空就跟全局"></textarea></label>

@@ -34,7 +34,10 @@
   }
 
   /* fromDisk=false 表示磁盘上还没存过 modelSets → 用扁平字段造「配置一」 */
-  function normalizeModelSets(s, fromDisk) {
+  /* skipLegacy：已经迁移过就别再搬（10-30 加）。
+     搬到「配置一」而不是当前选中的那套 —— 用户如果故意选中一套没填 Key 的配置
+     （这是「沿用主模型」的合法用法），把旧扁平 Key 搬过去就会拿错 Key 发请求。 */
+  function normalizeModelSets(s, fromDisk, skipLegacy) {
     const srcSets = (fromDisk && s.modelSets && typeof s.modelSets === "object") ? s.modelSets : {};
     const srcIdx = (s.modelSetIndex && typeof s.modelSetIndex === "object") ? s.modelSetIndex : {};
     const sets = {};
@@ -62,6 +65,15 @@
           apiKey: String(s[f.key] || ""),
           models: String(s[f.model] || "")
         }];
+      } else if (!skipLegacy && list[0]) {
+        /* 老数据一次性迁移（10-30 修）：以前只要有 modelSets，就用「当前那套」的值
+           覆盖扁平字段 —— 如果那套的 Key 是空的、而扁平 apiKey 还有值，Key 会被静默清空，
+           用户看到的是「接口突然返回 401，设置里 Key 变成空白」。
+           这里只把「配置一里空着、扁平里有」的那几项搬进去，搬完打个标记不再搬。 */
+        const first = list[0];
+        if (!first.apiKey && s[f.key]) first.apiKey = String(s[f.key]);
+        if (!first.baseUrl && s[f.base]) first.baseUrl = String(s[f.base]);
+        if (!first.models && s[f.model]) first.models = String(s[f.model]);
       }
       let idx = Number(srcIdx[kind]);
       if (!isFinite(idx) || idx < 0) idx = 0;
@@ -926,9 +938,19 @@
       const saved = raw === undefined ? {} : safeParse(raw, {});
       const merged = Object.assign({}, CONFIG.DEFAULT_SETTINGS, saved);
       const fromDisk = !!(saved.modelSets && typeof saved.modelSets === "object");
-      const norm = normalizeModelSets(merged, fromDisk);
+      /* 老数据的一次性迁移标记：只在磁盘上有 modelSets、且还没迁移过时才做 */
+      const skipLegacy = (saved.modelSetsV === 1);
+      const norm = normalizeModelSets(merged, fromDisk, skipLegacy);
       merged.modelSets = norm.sets;
       merged.modelSetIndex = norm.index;
+      if (fromDisk && !skipLegacy) {
+        merged.modelSetsV = 1;
+        /* 立刻落盘一次，别让「迁移结果只在内存里」—— 否则下次启动又会重算一遍。
+           只在这一次、且读盘正常时才写。 */
+        if (!readError) {
+          try { writeRaw(K_SETTINGS, JSON.stringify(merged)); } catch (e) { /* 写不进去也不影响本次使用 */ }
+        }
+      }
       return merged;
     },
     saveSettings(patch) {

@@ -571,7 +571,16 @@
       render();
       toast(so.knowsMyName ? "已设为知道你的真名" : "已设为只知道你的网名");
     }));
-    wrap.appendChild(infoRow("签名", so.sign));
+    /* 签名可手改（10-30）：以前这一行是只读的，想改得绕进角色卡。 */
+    wrap.appendChild(row("签名", so.sign, function () {
+      ask("改签名", "显示在朋友圈名字下面那一行。留空则下次由 AI 按角色背景再补一条。", so.sign).then(function (v) {
+        if (v === null) return;
+        so.sign = v;
+        /* 手动清空 → 允许 AI 再补（见 ensureSign 里的 aiSignTried 闸门） */
+        if (!String(v).trim()) so.aiSignTried = false;
+        saveChar(ch); render();
+      });
+    }));
     wrap.appendChild(infoRow("来源", so.addedVia));
     wrap.appendChild(infoRow("添加时间", fmtFull(so.addedAt)));
     return wrap;
@@ -1302,24 +1311,45 @@
       return (m && typeof m === "object") ? (m.id || m.characterId || "") : m;
     }).filter(Boolean);
     if (ms.length < 2) return 0;
-    var accepted = {};
+
+    /* ① 每个群每天最多冒 3 条（10-30 加）。以前是「建一次群，把成员两两之间全试一遍」——
+       五人群一次就能塞出十几条申请，通知栏直接爆掉。 */
+    var today = (function () {
+      var d = new Date();
+      return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate();
+    })();
+    var used = (g.friendDay === today) ? Number(g.friendDayCount || 0) : 0;
+    var LEFT = Math.max(0, 3 - used);
+    if (!LEFT) return 0;
+
+    /* ② 双向去重（10-30）：同一对人只允许存在一条申请（哪个方向都算）。
+       以前 a→b 和 b→a 各来一条，用户在「新的朋友」里看到两个人互相申请，很怪。 */
+    var pair = {};
     reqs().forEach(function (r) {
-      if (r.status === "accepted") { accepted[r.from + ">" + r.to] = 1; accepted[r.to + ">" + r.from] = 1; }
+      if (!r || !r.from || !r.to) return;
+      pair[r.from + ">" + r.to] = 1;
+      pair[r.to + ">" + r.from] = 1;
     });
     var title = g.title || "群聊";
     var n = 0;
-    for (var i = 0; i < ms.length; i++) {
-      for (var j = 0; j < ms.length; j++) {
+    for (var i = 0; i < ms.length && n < LEFT; i++) {
+      for (var j = 0; j < ms.length && n < LEFT; j++) {
         if (i === j) continue;
         var a = ms[i], b = ms[j];
-        if (accepted[a + ">" + b]) continue;
+        if (pair[a + ">" + b]) continue;
         var cha = charById(a);
         if (!cha) continue;
         var persona = String((cha.fields && cha.fields.aiPersona) || "");
         var eager = OUTGOING.some(function (k) { return persona.indexOf(k) >= 0; });
         if (!eager && Math.random() > 0.5) continue;
-        if (requestFriend(a, b, title, "group")) n++;
+        if (requestFriend(a, b, title, "group")) { pair[a + ">" + b] = 1; pair[b + ">" + a] = 1; n++; }
       }
+    }
+    /* 记账（原地写在群会话上，直接落盘）：同一天再触发就不会超过 3 条 */
+    if (n > 0) {
+      try {
+        S().updateSession(sid, { friendDay: today, friendDayCount: used + n });
+      } catch (e) { /* 记不上账只影响上限，不影响收款 */ }
     }
     return n;
   }

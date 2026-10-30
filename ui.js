@@ -1450,6 +1450,18 @@
         const ks = Object.keys(t);
         return ks.length ? ";" + ks.map((k) => k + ":" + t[k]).join(";") : "";
       })() + "}";
+    /* 切主题的这一帧关掉过渡（10-30）：body 有 0.28s 的背景过渡，而子元素是瞬切，
+       两套速度并存在真机上会看到「底色慢慢变、卡片已经跳完了」，还和 forceRepaint 打架。 */
+    try {
+      const html = document.documentElement;
+      if (html && html.classList) {
+        html.classList.add("no-transition");
+        void html.offsetWidth;
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () { html.classList.remove("no-transition"); });
+        });
+      }
+    } catch (e) { /* 关不掉过渡不影响换主题 */ }
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", theme[m][0]);
     return theme.id;

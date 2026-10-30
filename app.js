@@ -357,11 +357,14 @@
     const el = $("#sideTabAsstFace");
     if (!el) return;
     /* 每次刷新列表都会调到这里：已经是目标形态就别重建 DOM，省掉一次图片解码判断 */
-    const want = on ? "icon" : "face";
+    /* 两种状态都用头像（10-30）：以前「选中」时换成一个星形图标，用户看不出这一栏是什么。
+       选中态本来就由 .side-tab.on 的高亮表达，不需要换图。 */
+    const want = "face";
     if (el.dataset.mode === want) return;
     el.dataset.mode = want;
-    const av = (CONFIG && CONFIG.BUILTIN_ASSISTANT && CONFIG.BUILTIN_ASSISTANT.avatar) || "";
-    if (on || !av) {
+    const av = (CONFIG && CONFIG.BUILTIN_ASSISTANT && CONFIG.BUILTIN_ASSISTANT.avatar) ||
+      ((state.settings && state.settings.avatarAi) || "");
+    if (!av) {
       el.className = "ic";
       el.innerHTML = UI.iconSvg("creation");
     } else {
@@ -3128,7 +3131,9 @@
     }
   ];
 
-  function onBackKey() {
+  /* fromEsc：键盘 Esc 走的同一条链。唯一区别是「什么都没开」时不要提示
+     「再按一次返回键退出」—— 桌面上按个 Esc 不该被当成想退出应用。 */
+  function onBackKey(fromEsc) {
     try {
       for (let i = 0; i < BACK_LAYERS.length; i++) {
         const L = BACK_LAYERS[i];
@@ -3143,7 +3148,8 @@
         }
         if (done) return;
       }
-      /* 什么都没有 → 2 秒内按第二次才真退出 */
+      /* 什么都没有 → 2 秒内按第二次才真退出（Esc 不参与这条） */
+      if (fromEsc) return;
       const now = Date.now();
       if (now - backAt < 2000) { requestExit(); return; }
       backAt = now;
@@ -3155,6 +3161,15 @@
       window.__dlOnBackKey = onBackKey;
       if (Store.hasBridge("自定义返回键")) Store.callBridge("自定义返回键", "window.__dlOnBackKey()");
     } catch (e) { console.warn("[Sekulum] 返回键接管失败", e); }
+    /* 键盘 Esc 复用同一张层级表（10-30 补）：以前只有剧情全屏能按 Esc 关，
+       其它弹窗、整页层、浮窗都得去点按钮。 */
+    try {
+      document.addEventListener("keydown", function (ev) {
+        if (!ev || ev.key !== "Escape") return;
+        if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
+        onBackKey(true);
+      });
+    } catch (e) { /* 没有键盘事件就算了 */ }
   }
 
   /* ── 退出前问一句「要不要冻结时间」（10-16 用户要求）────────────
@@ -4237,6 +4252,23 @@
     on("#sessionCognitionUpdate", "click", updateCognitionNow);
     on("#sessionRelationUpdate", "click", updateRelationSharedNow);
     on("#sessionReCompress", "click", runReCompress);
+    /* 共同经历一键回退（10-30）：旧版本会把「对话开始之后」的事也写进这一项，
+       已经混进去的内容没法自动分辨，只能给一个「按角色卡重置」的入口。 */
+    on("#setSessionSharedReset", "click", async () => {
+      const s = session();
+      if (!s) { UI.toast("先选一条对话", true); return; }
+      const ch = characterFor(s);
+      const fromCard = String((ch && ch.fields && ch.fields.shared) || "").trim();
+      const ok = await UI.confirmDialog("按角色卡重置共同经历",
+        fromCard
+          ? "会用角色卡里填的「共同经历」覆盖这条对话现在的内容。角色卡没改过就相当于回到初始状态。\n\n确定吗？"
+          : "角色卡里没有填共同经历，这一项会被清空。确定吗？");
+      if (!ok) return;
+      Store.updateSession(s.id, { shared: fromCard });
+      try { if (window.DL && DL.fillSessionForm) DL.fillSessionForm(session()); } catch (e) { /* ignore */ }
+      UI.closeModal("sessionModal");
+      UI.toast(fromCard ? "已按角色卡重置共同经历" : "已清空共同经历");
+    });
     on("#sessionThinkRead", "click", thinkReadNow);
     on("#sessionThinkDigest", "click", thinkDigestNow);
     on("#sessionThinkCorrectRun", "click", thinkCorrectNow);
