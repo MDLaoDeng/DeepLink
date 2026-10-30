@@ -1259,7 +1259,26 @@
       if (washedTurns && m.ts && m.ts >= washedFrom && m.ts <= washedUntil) {
         if (!turnsPushed) {
           turnsPushed = true;
-          washedTurns.forEach((t) => msgs.push({ role: t.role === "user" ? "user" : "assistant", content: t.content }));
+          /* 区间里最后一条 assistant 不洗（10-30 硬方案）。
+             模型会照抄历史里「自己」的格式：如果它能看到的最后一条自己也是
+             「只剩话语：」，下一句就跟着只写一项 —— 提示词劝一轮未必管用。
+             这里把那条的原文顶回去，保证它总能看到一个完整的格式范本。 */
+          let rawLast = "";
+          for (let k = list.length - 1; k >= 0; k--) {
+            const mk = list[k];
+            if (mk && mk.role === "assistant" && mk.ts && mk.ts >= washedFrom && mk.ts <= washedUntil) {
+              const mv = activeVariant(mk);
+              rawLast = String((mv && mv.content) || "").trim();
+              break;
+            }
+          }
+          const turns = washedTurns.slice();
+          if (rawLast) {
+            for (let t = turns.length - 1; t >= 0; t--) {
+              if (turns[t] && turns[t].role !== "user") { turns[t] = { role: turns[t].role, content: rawLast }; break; }
+            }
+          }
+          turns.forEach((t) => msgs.push({ role: t.role === "user" ? "user" : "assistant", content: t.content }));
         }
         continue;
       }

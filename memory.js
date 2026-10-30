@@ -1124,6 +1124,18 @@
       if (!at || at <= m.coveredUntil || at >= cutoff) return;
       const d = String(w.date).slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+      /* 日期和内容对不上的老归档直接跳过（10-30 兜底）：
+         归档是「按故事日期」记的，而水位线（at）是现实时间。老数据里如果有当年
+         归档时算错的条目（比如日期写成 2019、内容却是今天的），照它归组会把一条
+         莫名其妙的旧摘要塞进最近的记忆里，而且压过之后就再也改不回来了。
+         口径：和「at 那一刻的故事日期」差超过 30 天，就当它不可信。 */
+      let gapOk = true;
+      try {
+        const ref = dateStr(stsOf(rec, { ts: at }));
+        const gap = Math.abs(Date.parse(d + "T00:00:00") - Date.parse(ref + "T00:00:00")) / 86400000;
+        if (!isFinite(gap) || gap > 30) gapOk = false;
+      } catch (e) { gapOk = true; }
+      if (!gapOk) return;
       (groups[d] = groups[d] || []).push({
         ts: at, role: "assistant",
         content: "【当天剧情】" + String(w.text).slice(0, 1200)
